@@ -333,7 +333,7 @@ font:
       - "\U000F1402"  # mdi:pump
 
 display:
-  - platform: ili9xxx
+  - platform: mipi_spi
     model: ST7735
     cs_pin: GPIO23 # Dummy Pin!
     dc_pin: GPIO5
