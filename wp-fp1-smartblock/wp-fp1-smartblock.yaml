@@ -1,28 +1,22 @@
+substitutions:
+  fw_version: "1.0.0"
+  # ESP32-C6 
+  # ANPASSUNG DER DIAGNOSE-GRENZWERTE
+  diag_min_heap_ok: "80000"        # Mindestens 80 KB freien RAM erwarten wir im Normalbetrieb
+  diag_min_heap_critical: "40000"   # Unter 40 KB wird es kritisch
+    
 esphome:
   name: wp-fp1-smartblock
   friendly_name: wp-fp1-smartblock
   project:
     name: "tsgwiro1.wp-fp1-smartblock"
-    version: "1.0.0"
+    version: "${fw_version}"
 
 esp32:
   board: esp32-c6-devkitc-1
   variant: esp32c6
   framework:
     type: esp-idf
-
-esphome:
-  name: wp-fp1-smartblock
-  friendly_name: wp-fp1-smartblock
-  project:
-    name: "tw_microsystems.wp-fp1-smartblock"
-    version: "1.0.0"
-
-substitutions:
-  # ESP32-C6 
-  # ANPASSUNG DER DIAGNOSE-GRENZWERTE
-  diag_min_heap_ok: "80000"        # Mindestens 80 KB freien RAM erwarten wir im Normalbetrieb
-  diag_min_heap_critical: "40000"   # Unter 40 KB wird es kritisch
 
 # Einbinden des gemeinsamen Diagnose-Files
 packages:
@@ -33,8 +27,6 @@ esp32:
   variant: esp32c6
   framework:
     type: esp-idf
-
-# ... hier folgt der restliche Code (web_server, wifi, api, switch, display, etc.) ...
 
 # Webserver aktivieren
 web_server:
