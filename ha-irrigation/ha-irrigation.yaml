@@ -1,0 +1,946 @@
+substitutions:
+  fw_version: "1.0.0"
+
+esphome:
+  name: ha-irrigation
+  friendly_name: ha-irrigation
+  project:
+    name: "tsgwiro1.ha-irrigation"
+    version: "${fw_version}"
+  
+  on_boot:
+    priority: -100
+    then:
+      - output.turn_off: unused_led_d6
+      - output.turn_off: unused_led_d7
+      - delay: 10s
+      - lambda: |-
+          id(status_sensor).publish_state("Standby");
+
+esp8266:
+  board: d1_mini
+
+packages:
+  my_diagnostics: !include common/diagnostics.yaml
+
+# Local Webserver
+web_server:
+  port: 80
+  ota: false
+  version: 3
+
+# ---------------------------------------------------------
+# STATUS LED (D3 / GPIO0) - Vollautomatisch
+# ---------------------------------------------------------
+status_led:
+  pin:
+    number: GPIO0
+    inverted: true
+
+# ---------------------------------------------------------
+# EFFEKT LED (D4 / GPIO2) - "Arbeitslicht"
+# ---------------------------------------------------------
+light:
+  - platform: monochromatic
+    name: "Status Activity"
+    id: light_activity
+    output: out_activity
+    internal: true
+    default_transition_length: 1s
+    effects:
+      - pulse:
+          name: "Slow Pulse"
+          transition_length: 1s
+          update_interval: 1s
+          min_brightness: 10%
+          max_brightness: 100%
+
+# ---------------------------------------------------------
+# HARDWARE PINS (Outputs)
+# ---------------------------------------------------------
+output:
+  - platform: esp8266_pwm
+    pin: GPIO02
+    frequency: 1kHz
+    id: out_activity
+    inverted: true
+
+  - platform: gpio
+    pin: GPIO12
+    id: unused_led_d6
+    inverted: true
+
+  - platform: gpio
+    pin: GPIO13
+    id: unused_led_d7
+    inverted: true
+
+# ---------------------------------------------------------
+# STANDORT & ZEIT
+# ---------------------------------------------------------
+sun:
+  id: sun_local
+  latitude: !secret home_latitude
+  longitude: !secret home_longitude
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: !secret home_timezone
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret irrigation_api_key
+
+ota:
+  platform: esphome
+  password: !secret irrigation_ota_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  min_auth_mode: WPA2
+
+  ap:
+    ssid: !secret irrigation_fallback_ap_ssid
+    password: !secret irrigation_fallback_ap_password
+
+captive_portal:
+
+# ---------------------------------------------------------
+# 1. DATEN-IMPORT (Sensoren von HA)
+# ---------------------------------------------------------
+sensor:
+  - platform: homeassistant
+    id: ha_rain_12h
+    entity_id: sensor.regendauer_letzte_12h
+    internal: true
+    filters:
+      - lambda: |-
+          if (x < 0) return 0;
+          return x;
+    on_value:
+      then:
+        - globals.set:
+            id: cache_rain_12h
+            value: !lambda "return x;"
+
+  - platform: homeassistant
+    id: ha_rain_24h
+    entity_id: sensor.regendauer_letzte_24h
+    internal: true
+    filters:
+      - lambda: |-
+          if (x < 0) return 0;
+          return x;
+    on_value:
+      then:
+        - globals.set:
+            id: cache_rain_24h
+            value: !lambda "return x;"
+
+  - platform: homeassistant
+    id: ha_rain_48h
+    entity_id: sensor.regendauer_letzte_48h
+    internal: true
+    filters:
+      - lambda: |-
+          if (x < 0) return 0;
+          return x;
+    on_value:
+      then:
+        - globals.set:
+            id: cache_rain_48h
+            value: !lambda "return x;"
+
+  - platform: homeassistant
+    id: ha_temp
+    entity_id: sensor.aussen_temperatur
+    internal: true
+    on_value:
+      then:
+        - globals.set:
+            id: cache_temp
+            value: !lambda "return x;"
+
+# ---------------------------------------------------------
+# 2. GLOBALE VARIABLEN
+# ---------------------------------------------------------
+globals:
+  # Saison & Wetter Limits
+  - id: conf_month_start
+    type: int
+    restore_value: true
+    initial_value: '5'
+  - id: conf_month_end
+    type: int
+    restore_value: true
+    initial_value: '9'
+  - id: conf_min_temp
+    type: float
+    restore_value: true
+    initial_value: '10.0'
+
+  # Zeit & Dauer
+  - id: conf_safety_cutoff_min
+    type: int
+    restore_value: true
+    initial_value: '45'
+  - id: conf_manual_timeout_min
+    type: int
+    restore_value: true
+    initial_value: '15'
+  - id: conf_sun_offset_min
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: conf_base_duration_min
+    type: int
+    restore_value: true
+    initial_value: '15'
+    
+  # Tuning & Regenlogik
+  - id: conf_tuning_percent
+    type: int
+    restore_value: true
+    initial_value: '100'
+  - id: conf_rain_saturation_limit
+    type: float
+    restore_value: true
+    initial_value: '1.0'
+
+  # Caches & System
+  - id: cache_rain_12h
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: cache_rain_24h
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: cache_rain_48h
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: cache_temp
+    type: float
+    restore_value: true
+    initial_value: '20.0'
+  - id: last_rain_score
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+  - id: has_run_today
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: is_auto_cycle
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: is_master_action
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: day_tracker
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: calculated_cycle_duration_ms
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  # Ventil-Tracking
+  - id: v1_open_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: v2_open_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: v3_open_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: v4_open_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: v1_timeout_closed
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: v2_timeout_closed
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: v3_timeout_closed
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: v4_timeout_closed
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+# ---------------------------------------------------------
+# 3. TEXT SENSOR (Status)
+# ---------------------------------------------------------
+text_sensor:
+  - platform: template
+    name: "Status"
+    id: status_sensor
+    icon: "mdi:sprinkler"
+  - platform: template
+    name: "Firmware Version"
+    id: fw_version_sensor
+    icon: "mdi:cellphone-arrow-down"
+    entity_category: "diagnostic"
+    lambda: 'return {"${fw_version}"};'
+
+# ---------------------------------------------------------
+# 4. GUI KONFIGURATION
+# ---------------------------------------------------------
+
+# A. Betriebsmodus Wahlschalter
+select:
+  - platform: template
+    name: "Modus Alle"
+    id: mode_all
+    options: ["Automatik", "Deaktiviert"]
+    optimistic: true
+    restore_value: true
+    icon: "mdi:valve-open"
+    set_action:
+      then:
+        - select.set:
+            id: mode_v1
+            option: !lambda "return x;"
+        - select.set:
+            id: mode_v2
+            option: !lambda "return x;"
+        - select.set:
+            id: mode_v3
+            option: !lambda "return x;"
+        - select.set:
+            id: mode_v4
+            option: !lambda "return x;"
+
+  - platform: template
+    name: "Modus Ventil 1"
+    id: mode_v1
+    options: ["Automatik", "Deaktiviert"]
+    optimistic: true
+    restore_value: true
+    icon: "mdi:valve"
+
+  - platform: template
+    name: "Modus Ventil 2"
+    id: mode_v2
+    options: ["Automatik", "Deaktiviert"]
+    optimistic: true
+    restore_value: true
+    icon: "mdi:valve"
+
+  - platform: template
+    name: "Modus Ventil 3"
+    id: mode_v3
+    options: ["Automatik", "Deaktiviert"]
+    optimistic: true
+    restore_value: true
+    icon: "mdi:valve"
+
+  - platform: template
+    name: "Modus Ventil 4"
+    id: mode_v4
+    options: ["Automatik", "Deaktiviert"]
+    optimistic: true
+    restore_value: true
+    icon: "mdi:valve"
+
+# B. Zahlen-Einstellungen
+number:
+  - platform: template
+    name: "Saison Start (Monat)"
+    id: setting_month_start
+    min_value: 1
+    max_value: 12
+    step: 1
+    mode: slider
+    entity_category: "config"
+    lambda: "return id(conf_month_start);"
+    set_action:
+      then:
+        - globals.set: {id: conf_month_start, value: !lambda "return x;"}
+
+  - platform: template
+    name: "Saison Ende (Monat)"
+    id: setting_month_end
+    min_value: 1
+    max_value: 12
+    step: 1
+    mode: slider
+    entity_category: "config"
+    lambda: "return id(conf_month_end);"
+    set_action:
+      then:
+        - globals.set: {id: conf_month_end, value: !lambda "return x;"}
+
+  - platform: template
+    name: "Min Temperatur (°C)"
+    id: setting_min_temp
+    min_value: 0
+    max_value: 25
+    step: 0.5
+    mode: slider
+    entity_category: "config"
+    lambda: "return id(conf_min_temp);"
+    set_action:
+      then:
+        - globals.set: {id: conf_min_temp, value: !lambda "return x;"}
+
+  - platform: template
+    name: "Basis Laufzeit (Min)"
+    id: setting_base_duration
+    min_value: 1
+    max_value: 60
+    step: 1
+    mode: slider
+    entity_category: "config"
+    lambda: "return id(conf_base_duration_min);"
+    set_action:
+      then:
+        - globals.set: {id: conf_base_duration_min, value: !lambda "return x;"}
+
+  - platform: template
+    name: "Wasser Tuning (%)"
+    id: setting_tuning
+    min_value: 0
+    max_value: 200
+    step: 10
+    mode: slider
+    entity_category: "config"
+    lambda: "return id(conf_tuning_percent);"
+    set_action:
+      then:
+        - globals.set: {id: conf_tuning_percent, value: !lambda "return x;"}
+
+  - platform: template
+    name: "Regen Sättigung (Score)"
+    id: setting_rain_limit
+    min_value: 0.1
+    max_value: 5.0
+    step: 0.1
+    mode: slider
+    entity_category: "config"
+    lambda: "return id(conf_rain_saturation_limit);"
+    set_action:
+      then:
+        - globals.set: {id: conf_rain_saturation_limit, value: !lambda "return x;"}
+
+  - platform: template
+    name: "Start Versatz Sonne (Min)"
+    id: setting_sun_offset
+    min_value: -120
+    max_value: 120
+    step: 10
+    mode: slider
+    entity_category: "config"
+    lambda: "return id(conf_sun_offset_min);"
+    set_action:
+      then:
+        - globals.set: {id: conf_sun_offset_min, value: !lambda "return x;"}
+
+  - platform: template
+    name: "Not-Aus Timeout (Min)"
+    id: setting_safety
+    min_value: 5
+    max_value: 120
+    step: 1
+    mode: slider
+    entity_category: "config"
+    lambda: "return id(conf_safety_cutoff_min);"
+    set_action:
+      then:
+        - globals.set: {id: conf_safety_cutoff_min, value: !lambda "return x;"}
+
+  - platform: template
+    name: "Manuelles Timeout (Min)"
+    id: setting_manual_timeout
+    min_value: 1
+    max_value: 60
+    step: 1
+    mode: slider
+    entity_category: "config"
+    lambda: "return id(conf_manual_timeout_min);"
+    set_action:
+      then:
+        - globals.set: {id: conf_manual_timeout_min, value: !lambda "return x;"}
+
+# ---------------------------------------------------------
+# 5. LOGIK (Autopilot)
+# ---------------------------------------------------------
+interval:
+  # Reset um Mitternacht
+  - interval: 1h
+    then:
+      - lambda: |-
+          auto time = id(sntp_time).now();
+          if (time.day_of_year != id(day_tracker)) {
+            id(day_tracker) = time.day_of_year;
+            id(has_run_today) = false;
+          }
+
+  # Trigger Check (Jede Minute)
+  - interval: 60s
+    then:
+      - lambda: |-
+          auto time = id(sntp_time).now();
+          
+          if (time.month < id(conf_month_start) || time.month > id(conf_month_end)) return;
+          if (id(has_run_today)) return;
+
+          auto sun_info = id(sun_local).sunrise(0);
+          if (!sun_info.has_value()) return;
+          
+          int start_min = (sun_info.value().hour * 60 + sun_info.value().minute) + id(conf_sun_offset_min);
+          int now_min = time.hour * 60 + time.minute;
+
+          if (now_min == start_min) {
+             id(start_irrigation_cycle).execute();
+          }
+
+# ---------------------------------------------------------
+# 6. HAUPT-SKRIPT (Der Bewässerungszyklus)
+# ---------------------------------------------------------
+script:
+  - id: start_irrigation_cycle
+    then:
+      # A. Temperatur Check
+      - if:
+          condition:
+            lambda: "return id(cache_temp) < id(conf_min_temp);"
+          then:
+            - lambda: 'ESP_LOGW("bewaesserung", "ABBRUCH: Temperatur %.1f°C ist unter Limit %.1f°C", id(cache_temp), id(conf_min_temp));'
+            - lambda: |-
+                char buf[128];
+                snprintf(buf, sizeof(buf), "Abbruch: Temp %.1f°C unter Limit %.1f°C",
+                  id(cache_temp), id(conf_min_temp));
+                id(status_sensor).publish_state(buf);
+            - script.stop: start_irrigation_cycle
+
+      # B. Berechnung Dauer
+      - lambda: |-
+          float r12 = id(cache_rain_12h);
+          float r24 = id(cache_rain_24h);
+          float r48 = id(cache_rain_48h);
+          
+          float rain_zone_1 = r12;
+          float rain_zone_2 = max(0.0f, r24 - r12);
+          float rain_zone_3 = max(0.0f, r48 - r24);
+          
+          float score = (rain_zone_1 * 1.0) + (rain_zone_2 * 0.5) + (rain_zone_3 * 0.25);
+          float limit = id(conf_rain_saturation_limit);
+          float reduction_factor = 1.0;
+          
+          if (score >= limit) { reduction_factor = 0.0; }
+          else { reduction_factor = 1.0 - (score / limit); }
+          
+          float tuning = id(conf_tuning_percent) / 100.0;
+          float base_min = id(conf_base_duration_min);
+          
+          int final_duration_ms = (int)(base_min * reduction_factor * tuning * 60000);
+          
+          // SAFETY CAP: Dauer darf nie über Not-Aus liegen
+          int safety_ms = id(conf_safety_cutoff_min) * 60000;
+          if (final_duration_ms > safety_ms) final_duration_ms = safety_ms;
+          
+          id(calculated_cycle_duration_ms) = final_duration_ms;
+          id(last_rain_score) = score;
+
+          ESP_LOGI("bewaesserung", "========================================");
+          ESP_LOGI("bewaesserung", "   START BERECHNUNG BEWÄSSERUNG");
+          ESP_LOGI("bewaesserung", "========================================");
+          ESP_LOGI("bewaesserung", "Eingangsdaten Regen:");
+          ESP_LOGI("bewaesserung", "  - Letzte 12h: %.2f h (x 1.0)", rain_zone_1);
+          ESP_LOGI("bewaesserung", "  - Vor 12-24h: %.2f h (x 0.5)", rain_zone_2);
+          ESP_LOGI("bewaesserung", "  - Vor 24-48h: %.2f h (x 0.25)", rain_zone_3);
+          ESP_LOGI("bewaesserung", "----------------------------------------");
+          ESP_LOGI("bewaesserung", "Kalkulation:");
+          ESP_LOGI("bewaesserung", "  - Regen Score:    %.2f (Limit: %.1f)", score, limit);
+          ESP_LOGI("bewaesserung", "  - Nässe-Faktor:   %.2f (1.0 = Trocken)", reduction_factor);
+          ESP_LOGI("bewaesserung", "  - Tuning-Faktor:  %.2f (%.0f %%)", tuning, tuning * 100);
+          ESP_LOGI("bewaesserung", "  - Basis-Laufzeit: %.0f min", base_min);
+          ESP_LOGI("bewaesserung", "========================================");
+          ESP_LOGI("bewaesserung", "ERGEBNIS: %.1f Minuten (%d ms)", final_duration_ms / 60000.0, final_duration_ms);
+          ESP_LOGI("bewaesserung", "========================================");
+
+      # C. Zyklus Starten
+      - if:
+          condition:
+            lambda: "return id(calculated_cycle_duration_ms) > 0;"
+          then:
+            - light.turn_on:
+                id: light_activity
+                effect: "Slow Pulse"
+                brightness: 100%
+
+            - globals.set: {id: has_run_today, value: 'true'}
+            - globals.set: {id: is_auto_cycle, value: 'true'}
+
+            # Aktive Ventile ermitteln, loggen und Status schreiben
+            - lambda: |-
+                std::string active = "";
+                bool v1 = id(mode_v1).current_option() == "Automatik";
+                bool v2 = id(mode_v2).current_option() == "Automatik";
+                bool v3 = id(mode_v3).current_option() == "Automatik";
+                bool v4 = id(mode_v4).current_option() == "Automatik";
+                if (v1) active += "V1";
+                if (v2) { if (!active.empty()) active += ","; active += "V2"; }
+                if (v3) { if (!active.empty()) active += ","; active += "V3"; }
+                if (v4) { if (!active.empty()) active += ","; active += "V4"; }
+                if (active.empty()) active = "keine";
+                ESP_LOGI("bewaesserung", "Start Zyklus. Aktive Ventile: %s", active.c_str());
+                
+                float dur = id(calculated_cycle_duration_ms) / 60000.0;
+                char buf[128];
+                snprintf(buf, sizeof(buf), "Zyklus: %.1f Min, Score %.2f (%s)",
+                  dur, id(last_rain_score), active.c_str());
+                id(status_sensor).publish_state(buf);
+
+            # SCHRITT 1: ALLE AKTIVEN VENTILE EINSCHALTEN
+            - if:
+                condition:
+                  lambda: 'return id(mode_v1).current_option() == "Automatik";'
+                then:
+                  - switch.turn_on: ventil_1
+
+            - if:
+                condition:
+                  lambda: 'return id(mode_v2).current_option() == "Automatik";'
+                then:
+                  - switch.turn_on: ventil_2
+
+            - if:
+                condition:
+                  lambda: 'return id(mode_v3).current_option() == "Automatik";'
+                then:
+                  - switch.turn_on: ventil_3
+
+            - if:
+                condition:
+                  lambda: 'return id(mode_v4).current_option() == "Automatik";'
+                then:
+                  - switch.turn_on: ventil_4
+
+            # SCHRITT 2: WARTEN
+            - lambda: 'ESP_LOGI("bewaesserung", "Wasser läuft. Warte %.1f Minuten...", id(calculated_cycle_duration_ms) / 60000.0);'
+            - delay: !lambda "return id(calculated_cycle_duration_ms);"
+
+            # SCHRITT 3: ALLES AUSSCHALTEN
+            - lambda: 'ESP_LOGI("bewaesserung", "Zeit abgelaufen. Schliesse alle Ventile.");'
+            - switch.turn_off: ventil_1
+            - switch.turn_off: ventil_2
+            - switch.turn_off: ventil_3
+            - switch.turn_off: ventil_4
+            - globals.set: {id: is_auto_cycle, value: 'false'}
+
+            - light.turn_off: light_activity
+            - lambda: 'ESP_LOGI("bewaesserung", "Zyklus Beendet.");'
+
+          else:
+            - lambda: 'ESP_LOGW("bewaesserung", "ABBRUCH: Dauer ist 0 (Regen-Sättigung erreicht).");'
+            - lambda: |-
+                char buf[128];
+                snprintf(buf, sizeof(buf), "Abbruch: Regen-Sättigung (Score %.2f)",
+                  id(last_rain_score));
+                id(status_sensor).publish_state(buf);
+
+# ---------------------------------------------------------
+# 7. VENTILE
+# ---------------------------------------------------------
+switch:
+  # Master: Alle Ventile
+  - platform: template
+    name: "Alle Ventile"
+    id: ventil_all
+    icon: "mdi:water"
+    optimistic: false
+    lambda: |-
+      return id(ventil_1).state || id(ventil_2).state || id(ventil_3).state || id(ventil_4).state;
+    turn_on_action:
+      - switch.turn_on: ventil_1
+      - switch.turn_on: ventil_2
+      - switch.turn_on: ventil_3
+      - switch.turn_on: ventil_4
+    turn_off_action:
+      - script.stop: start_irrigation_cycle
+      - lambda: "id(is_master_action) = true;"
+      - lambda: |-
+          uint32_t now = millis();
+          uint32_t longest = 0;
+          std::string open_valves = "";
+          
+          if (id(ventil_1).state) {
+            uint32_t dur = now - id(v1_open_ms);
+            if (dur > longest) longest = dur;
+            open_valves += "V1";
+          }
+          if (id(ventil_2).state) {
+            uint32_t dur = now - id(v2_open_ms);
+            if (dur > longest) longest = dur;
+            if (!open_valves.empty()) open_valves += ",";
+            open_valves += "V2";
+          }
+          if (id(ventil_3).state) {
+            uint32_t dur = now - id(v3_open_ms);
+            if (dur > longest) longest = dur;
+            if (!open_valves.empty()) open_valves += ",";
+            open_valves += "V3";
+          }
+          if (id(ventil_4).state) {
+            uint32_t dur = now - id(v4_open_ms);
+            if (dur > longest) longest = dur;
+            if (!open_valves.empty()) open_valves += ",";
+            open_valves += "V4";
+          }
+          
+          if (!open_valves.empty()) {
+            float duration_min = longest / 60000.0;
+            char buf[128];
+            snprintf(buf, sizeof(buf), "Manuell: Alle geschlossen nach %.1f Min (%s)",
+              duration_min, open_valves.c_str());
+            id(status_sensor).publish_state(buf);
+            ESP_LOGI("ventile", "Master OFF: %s geschlossen. Längste Laufzeit: %.1f Min.", open_valves.c_str(), duration_min);
+          }
+      - switch.turn_off: ventil_1
+      - switch.turn_off: ventil_2
+      - switch.turn_off: ventil_3
+      - switch.turn_off: ventil_4
+      - lambda: "id(is_master_action) = false;"
+
+  # Ventil 1
+  - platform: gpio
+    pin: GPIO5
+    name: "Ventil Rasen 1"
+    id: ventil_1
+    inverted: true
+    on_turn_on:
+      - lambda: |-
+          id(v1_open_ms) = millis();
+          id(v1_timeout_closed) = false;
+          int timeout = id(is_auto_cycle) ? id(conf_safety_cutoff_min) : id(conf_manual_timeout_min);
+          int safety = id(conf_safety_cutoff_min);
+          if (timeout > safety) timeout = safety;
+          const char* mode = id(is_auto_cycle) ? "Auto/Safety" : "Manuell";
+          ESP_LOGI("ventile", "Ventil 1 GEÖFFNET. Timeout: %d Min (%s).", timeout, mode);
+      - delay: !lambda |-
+          int timeout = id(is_auto_cycle) ? id(conf_safety_cutoff_min) : id(conf_manual_timeout_min);
+          int safety = id(conf_safety_cutoff_min);
+          if (timeout > safety) timeout = safety;
+          return timeout * 60000;
+      - if:
+          condition:
+            switch.is_on: ventil_1
+          then:
+            - lambda: "id(v1_timeout_closed) = true;"
+            - switch.turn_off: ventil_1
+    on_turn_off:
+      - lambda: |-
+          if (id(v1_open_ms) == 0) return;
+          float duration_min = (millis() - id(v1_open_ms)) / 60000.0;
+          ESP_LOGI("ventile", "Ventil 1 GESCHLOSSEN. Laufzeit: %.1f Min.", duration_min);
+      - if:
+          condition:
+            lambda: "return id(v1_open_ms) > 0 && !id(is_auto_cycle) && !id(is_master_action);"
+          then:
+            - lambda: |-
+                float duration_min = (millis() - id(v1_open_ms)) / 60000.0;
+                const char* comment = id(v1_timeout_closed) ? "Timeout" : "geschlossen";
+                char buf[128];
+                snprintf(buf, sizeof(buf), "Manuell: V1 %s nach %.1f Min",
+                  comment, duration_min);
+                id(status_sensor).publish_state(buf);
+      - if:
+          condition:
+            lambda: "return id(v1_open_ms) > 0 && id(is_auto_cycle) && id(v1_timeout_closed);"
+          then:
+            - lambda: |-
+                ESP_LOGW("safety", "SAFETY NOT-AUS: Ventil 1!");
+                char buf[128];
+                snprintf(buf, sizeof(buf), "NOT-AUS: Ventil 1 nach %d Min zwangsgeschlossen!",
+                  id(conf_safety_cutoff_min));
+                id(status_sensor).publish_state(buf);
+
+  # Ventil 2
+  - platform: gpio
+    pin: GPIO4
+    name: "Ventil Rasen 2"
+    id: ventil_2
+    inverted: true
+    on_turn_on:
+      - lambda: |-
+          id(v2_open_ms) = millis();
+          id(v2_timeout_closed) = false;
+          int timeout = id(is_auto_cycle) ? id(conf_safety_cutoff_min) : id(conf_manual_timeout_min);
+          int safety = id(conf_safety_cutoff_min);
+          if (timeout > safety) timeout = safety;
+          const char* mode = id(is_auto_cycle) ? "Auto/Safety" : "Manuell";
+          ESP_LOGI("ventile", "Ventil 2 GEÖFFNET. Timeout: %d Min (%s).", timeout, mode);
+      - delay: !lambda |-
+          int timeout = id(is_auto_cycle) ? id(conf_safety_cutoff_min) : id(conf_manual_timeout_min);
+          int safety = id(conf_safety_cutoff_min);
+          if (timeout > safety) timeout = safety;
+          return timeout * 60000;
+      - if:
+          condition:
+            switch.is_on: ventil_2
+          then:
+            - lambda: "id(v2_timeout_closed) = true;"
+            - switch.turn_off: ventil_2
+    on_turn_off:
+      - lambda: |-
+          if (id(v2_open_ms) == 0) return;
+          float duration_min = (millis() - id(v2_open_ms)) / 60000.0;
+          ESP_LOGI("ventile", "Ventil 2 GESCHLOSSEN. Laufzeit: %.1f Min.", duration_min);
+      - if:
+          condition:
+            lambda: "return id(v2_open_ms) > 0 && !id(is_auto_cycle) && !id(is_master_action);"
+          then:
+            - lambda: |-
+                float duration_min = (millis() - id(v2_open_ms)) / 60000.0;
+                const char* comment = id(v2_timeout_closed) ? "Timeout" : "geschlossen";
+                char buf[128];
+                snprintf(buf, sizeof(buf), "Manuell: V2 %s nach %.1f Min",
+                  comment, duration_min);
+                id(status_sensor).publish_state(buf);
+      - if:
+          condition:
+            lambda: "return id(v2_open_ms) > 0 && id(is_auto_cycle) && id(v2_timeout_closed);"
+          then:
+            - lambda: |-
+                ESP_LOGW("safety", "SAFETY NOT-AUS: Ventil 2!");
+                char buf[128];
+                snprintf(buf, sizeof(buf), "NOT-AUS: Ventil 2 nach %d Min zwangsgeschlossen!",
+                  id(conf_safety_cutoff_min));
+                id(status_sensor).publish_state(buf);
+
+  # Ventil 3
+  - platform: gpio
+    pin: GPIO14
+    name: "Ventil Rasen 3"
+    id: ventil_3
+    inverted: true
+    on_turn_on:
+      - lambda: |-
+          id(v3_open_ms) = millis();
+          id(v3_timeout_closed) = false;
+          int timeout = id(is_auto_cycle) ? id(conf_safety_cutoff_min) : id(conf_manual_timeout_min);
+          int safety = id(conf_safety_cutoff_min);
+          if (timeout > safety) timeout = safety;
+          const char* mode = id(is_auto_cycle) ? "Auto/Safety" : "Manuell";
+          ESP_LOGI("ventile", "Ventil 3 GEÖFFNET. Timeout: %d Min (%s).", timeout, mode);
+      - delay: !lambda |-
+          int timeout = id(is_auto_cycle) ? id(conf_safety_cutoff_min) : id(conf_manual_timeout_min);
+          int safety = id(conf_safety_cutoff_min);
+          if (timeout > safety) timeout = safety;
+          return timeout * 60000;
+      - if:
+          condition:
+            switch.is_on: ventil_3
+          then:
+            - lambda: "id(v3_timeout_closed) = true;"
+            - switch.turn_off: ventil_3
+    on_turn_off:
+      - lambda: |-
+          if (id(v3_open_ms) == 0) return;
+          float duration_min = (millis() - id(v3_open_ms)) / 60000.0;
+          ESP_LOGI("ventile", "Ventil 3 GESCHLOSSEN. Laufzeit: %.1f Min.", duration_min);
+      - if:
+          condition:
+            lambda: "return id(v3_open_ms) > 0 && !id(is_auto_cycle) && !id(is_master_action);"
+          then:
+            - lambda: |-
+                float duration_min = (millis() - id(v3_open_ms)) / 60000.0;
+                const char* comment = id(v3_timeout_closed) ? "Timeout" : "geschlossen";
+                char buf[128];
+                snprintf(buf, sizeof(buf), "Manuell: V3 %s nach %.1f Min",
+                  comment, duration_min);
+                id(status_sensor).publish_state(buf);
+      - if:
+          condition:
+            lambda: "return id(v3_open_ms) > 0 && id(is_auto_cycle) && id(v3_timeout_closed);"
+          then:
+            - lambda: |-
+                ESP_LOGW("safety", "SAFETY NOT-AUS: Ventil 3!");
+                char buf[128];
+                snprintf(buf, sizeof(buf), "NOT-AUS: Ventil 3 nach %d Min zwangsgeschlossen!",
+                  id(conf_safety_cutoff_min));
+                id(status_sensor).publish_state(buf);
+
+  # Ventil 4
+  - platform: gpio
+    pin: GPIO16
+    name: "Ventil Rasen 4"
+    id: ventil_4
+    inverted: true
+    on_turn_on:
+      - lambda: |-
+          id(v4_open_ms) = millis();
+          id(v4_timeout_closed) = false;
+          int timeout = id(is_auto_cycle) ? id(conf_safety_cutoff_min) : id(conf_manual_timeout_min);
+          int safety = id(conf_safety_cutoff_min);
+          if (timeout > safety) timeout = safety;
+          const char* mode = id(is_auto_cycle) ? "Auto/Safety" : "Manuell";
+          ESP_LOGI("ventile", "Ventil 4 GEÖFFNET. Timeout: %d Min (%s).", timeout, mode);
+      - delay: !lambda |-
+          int timeout = id(is_auto_cycle) ? id(conf_safety_cutoff_min) : id(conf_manual_timeout_min);
+          int safety = id(conf_safety_cutoff_min);
+          if (timeout > safety) timeout = safety;
+          return timeout * 60000;
+      - if:
+          condition:
+            switch.is_on: ventil_4
+          then:
+            - lambda: "id(v4_timeout_closed) = true;"
+            - switch.turn_off: ventil_4
+    on_turn_off:
+      - lambda: |-
+          if (id(v4_open_ms) == 0) return;
+          float duration_min = (millis() - id(v4_open_ms)) / 60000.0;
+          ESP_LOGI("ventile", "Ventil 4 GESCHLOSSEN. Laufzeit: %.1f Min.", duration_min);
+      - if:
+          condition:
+            lambda: "return id(v4_open_ms) > 0 && !id(is_auto_cycle) && !id(is_master_action);"
+          then:
+            - lambda: |-
+                float duration_min = (millis() - id(v4_open_ms)) / 60000.0;
+                const char* comment = id(v4_timeout_closed) ? "Timeout" : "geschlossen";
+                char buf[128];
+                snprintf(buf, sizeof(buf), "Manuell: V4 %s nach %.1f Min",
+                  comment, duration_min);
+                id(status_sensor).publish_state(buf);
+      - if:
+          condition:
+            lambda: "return id(v4_open_ms) > 0 && id(is_auto_cycle) && id(v4_timeout_closed);"
+          then:
+            - lambda: |-
+                ESP_LOGW("safety", "SAFETY NOT-AUS: Ventil 4!");
+                char buf[128];
+                snprintf(buf, sizeof(buf), "NOT-AUS: Ventil 4 nach %d Min zwangsgeschlossen!",
+                  id(conf_safety_cutoff_min));
+                id(status_sensor).publish_state(buf);
+
+# ---------------------------------------------------------
+# 8. DIAGNOSE
+# ---------------------------------------------------------
+button:
+  - platform: restart
+    name: "Neustart"
+    entity_category: "diagnostic"

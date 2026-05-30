@@ -1,0 +1,110 @@
+  - type: sections
+    max_columns: 2
+    title: Garten
+    path: garten
+    icon: mdi:shovel
+    sections:
+      - type: grid
+        cards:
+          - type: custom:mushroom-title-card
+            title: 💦 Bewässerung
+            subtitle: Automatische Rasenbewässerung
+          - type: logbook
+            target:
+              entity_id:
+                - sensor.ha_irrigation_status
+            hours_to_show: 168
+            title: 📋 Status
+          - type: custom:mushroom-select-card
+            entity: select.ha_irrigation_modus_alle
+            name: Betriebsmodus
+            icon: mdi:valve-open
+            fill_container: true
+            layout: horizontal
+          - type: custom:mushroom-entity-card
+            entity: switch.ha_irrigation_alle_ventile
+            name: Alle Ventile
+            icon: mdi:water
+            tap_action:
+              action: toggle
+            fill_container: true
+            layout: horizontal
+          - type: custom:fold-entity-row
+            head:
+              type: section
+              label: 🚿 Einzelventile & Modus
+            entities:
+              - type: section
+                label: Manuell schalten
+              - entity: switch.ha_irrigation_ventil_rasen_1
+                name: Zone 1
+              - entity: switch.ha_irrigation_ventil_rasen_2
+                name: Zone 2
+              - entity: switch.ha_irrigation_ventil_rasen_3
+                name: Zone 3
+              - entity: switch.ha_irrigation_ventil_rasen_4
+                name: Zone 4
+              - type: section
+                label: Betriebsmodus einzeln
+              - entity: select.ha_irrigation_modus_ventil_1
+                name: Zone 1
+              - entity: select.ha_irrigation_modus_ventil_2
+                name: Zone 2
+              - entity: select.ha_irrigation_modus_ventil_3
+                name: Zone 3
+              - entity: select.ha_irrigation_modus_ventil_4
+                name: Zone 4
+          - type: custom:fold-entity-row
+            head:
+              type: section
+              label: ⚙️ Konfiguration
+            entities:
+              - type: section
+                label: Zeiten & Bewässerung
+              - entity: number.ha_irrigation_basis_laufzeit_min
+                name: Basis Laufzeit (Min)
+              - entity: number.ha_irrigation_manuelles_timeout_min
+                name: Manuelles Timeout (Min)
+              - entity: number.ha_irrigation_wasser_tuning
+                name: Tuning Faktor (%)
+              - entity: number.ha_irrigation_regen_sattigung_score
+                name: Regen Sättigung
+              - entity: number.ha_irrigation_min_temperatur_degc
+                name: Min. Temperatur (°C)
+              - type: section
+                label: Saison & Startzeit
+              - entity: number.ha_irrigation_saison_start_monat
+                name: Start Monat
+              - entity: number.ha_irrigation_saison_ende_monat
+                name: Ende Monat
+              - entity: number.ha_irrigation_start_versatz_sonne_min
+                name: Start Versatz Sonne (Min)
+              - type: section
+                label: Sicherheit
+              - entity: number.ha_irrigation_not_aus_timeout_min
+                name: Not-Aus Timeout (Min)
+              - type: section
+                label: System
+              - entity: button.ha_irrigation_neustart
+                name: Neustart
+      - type: grid
+        cards:
+          - type: custom:mushroom-title-card
+            title: 🔢 Durchfluss
+            subtitle: Wassermenge & Rate
+          - type: gauge
+            entity: sensor.ha_flowmeter_wasser_durchflussrate
+            needle: true
+            severity:
+              green: 0
+              yellow: 10
+              red: 15
+            min: 0
+            max: 20
+            name: Durchflussrate
+          - type: custom:mushroom-entity-card
+            entity: sensor.ha_flowmeter_wasser_gesamtmenge
+            name: Wasser Total
+            icon: mdi:water-check
+            fill_container: true
+    header: {}
