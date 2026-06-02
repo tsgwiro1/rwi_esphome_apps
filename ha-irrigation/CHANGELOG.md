@@ -5,6 +5,15 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/)
 und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [1.0.1] - 2026-06-02
+
+### Hinzugefügt
+- **Bedienkomfort (Offset-Slider):** Beim Verstellen des Sonnenaufgangs-Versatzes im Dashboard wird die Tages-Sperre (`has_run_today`) nun automatisch zurückgesetzt. Dies ermöglicht eine erneute Auslösung am selben Tag, falls die Startzeit in die Zukunft verschoben wird.
+
+### Behoben
+- **Logbuch-Fix (Unsichtbares Zeichen):** Das Skript hängt nun an geraden Tagen im Jahr ein unsichtbares Zeichen (Zero-Width Space, `\u200B`) an die Statusmeldungen an. Dadurch erzwingen wir jeden Tag eine echte Statusänderung für Home Assistant, sodass identische Meldungen (z. B. mehrtägiger Regen-Abbruch) zuverlässig im Logbuch protokolliert werden.
+- **Mehrfach-Auslösung (Tages-Sperre):** Das Setzen der Tages-Sperre wurde ganz an den Anfang des `start_irrigation_cycle`-Skripts verschoben. Dies verhindert, dass das Skript während der 60 Sekunden, in denen die Startbedingung wahr ist, fälschlicherweise mehrfach ausgelöst wird.
+
 ## [1.0.0] - 2026-05-28
 
 ### Hinzugefügt

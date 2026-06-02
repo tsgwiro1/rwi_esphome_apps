@@ -1,5 +1,5 @@
 substitutions:
-  fw_version: "1.0.0"
+  fw_version: "1.0.1"
 
 esphome:
   name: ha-irrigation
@@ -456,6 +456,8 @@ number:
     set_action:
       then:
         - globals.set: {id: conf_sun_offset_min, value: !lambda "return x;"}
+        - globals.set: {id: has_run_today, value: 'false'}
+        - lambda: 'ESP_LOGI("config", "Sonnenaufgangs-Versatz geändert. Tages-Sperre zurückgesetzt.");'
 
   - platform: template
     name: "Not-Aus Timeout (Min)"
@@ -522,6 +524,9 @@ interval:
 script:
   - id: start_irrigation_cycle
     then:
+      # --- NEU: Sperre direkt am Anfang setzen! --- 
+      - globals.set: {id: has_run_today, value: 'true'}
+      
       # A. Temperatur Check
       - if:
           condition:
@@ -529,9 +534,11 @@ script:
           then:
             - lambda: 'ESP_LOGW("bewaesserung", "ABBRUCH: Temperatur %.1f°C ist unter Limit %.1f°C", id(cache_temp), id(conf_min_temp));'
             - lambda: |-
+                auto time = id(sntp_time).now();
+                const char* invisible_char = (time.day_of_year % 2 == 0) ? "\u200B" : "";
                 char buf[128];
-                snprintf(buf, sizeof(buf), "Abbruch: Temp %.1f°C unter Limit %.1f°C",
-                  id(cache_temp), id(conf_min_temp));
+                snprintf(buf, sizeof(buf), "Abbruch: Temp %.1f°C unter Limit %.1f°C%s",
+                  id(cache_temp), id(conf_min_temp), invisible_char);
                 id(status_sensor).publish_state(buf);
             - script.stop: start_irrigation_cycle
 
@@ -591,11 +598,12 @@ script:
                 effect: "Slow Pulse"
                 brightness: 100%
 
-            - globals.set: {id: has_run_today, value: 'true'}
             - globals.set: {id: is_auto_cycle, value: 'true'}
 
             # Aktive Ventile ermitteln, loggen und Status schreiben
             - lambda: |-
+                auto time = id(sntp_time).now();
+                const char* invisible_char = (time.day_of_year % 2 == 0) ? "\u200B" : "";
                 std::string active = "";
                 bool v1 = id(mode_v1).current_option() == "Automatik";
                 bool v2 = id(mode_v2).current_option() == "Automatik";
@@ -610,8 +618,8 @@ script:
                 
                 float dur = id(calculated_cycle_duration_ms) / 60000.0;
                 char buf[128];
-                snprintf(buf, sizeof(buf), "Zyklus: %.1f Min, Score %.2f (%s)",
-                  dur, id(last_rain_score), active.c_str());
+                snprintf(buf, sizeof(buf), "Zyklus: %.1f Min, Score %.2f (%s)%s",
+                  dur, id(last_rain_score), active.c_str(), invisible_char);
                 id(status_sensor).publish_state(buf);
 
             # SCHRITT 1: ALLE AKTIVEN VENTILE EINSCHALTEN
@@ -657,9 +665,11 @@ script:
           else:
             - lambda: 'ESP_LOGW("bewaesserung", "ABBRUCH: Dauer ist 0 (Regen-Sättigung erreicht).");'
             - lambda: |-
+                auto time = id(sntp_time).now();
+                const char* invisible_char = (time.day_of_year % 2 == 0) ? "\u200B" : "";
                 char buf[128];
-                snprintf(buf, sizeof(buf), "Abbruch: Regen-Sättigung (Score %.2f)",
-                  id(last_rain_score));
+                snprintf(buf, sizeof(buf), "Abbruch: Regen-Sättigung (Score %.2f)%s",
+                  id(last_rain_score), invisible_char);
                 id(status_sensor).publish_state(buf);
 
 # ---------------------------------------------------------
