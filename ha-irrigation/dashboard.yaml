@@ -9,12 +9,13 @@
           - type: custom:mushroom-title-card
             title: 💦 Bewässerung
             subtitle: Automatische Rasenbewässerung
-          - type: logbook
-            target:
-              entity_id:
-                - sensor.ha_irrigation_status
-            hours_to_show: 168
+          - type: custom:logbook-card
+            entity: sensor.ha_irrigation_status
             title: 📋 Status
+            hours_to_show: 168
+            hidden_state:
+              - unavailable
+              - unknown
           - type: custom:mushroom-select-card
             entity: select.ha_irrigation_modus_alle
             name: Betriebsmodus

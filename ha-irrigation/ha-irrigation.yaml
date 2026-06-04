@@ -1,5 +1,5 @@
 substitutions:
-  fw_version: "1.0.1"
+  fw_version: "1.1.0"
 
 esphome:
   name: ha-irrigation
@@ -15,7 +15,19 @@ esphome:
       - output.turn_off: unused_led_d7
       - delay: 10s
       - lambda: |-
-          id(status_sensor).publish_state("Standby");
+          // Boot-Recovery: Rekonstruiert den exakten Status nach einem Reboot (ohne Spam)
+          int status = id(tages_status);
+          auto time = id(sntp_time).now();
+          const char* inv = (time.is_valid() && time.day_of_year % 2 == 0) ? "\u200B" : "";
+          char buf[128];
+          
+          if (status == 1) snprintf(buf, sizeof(buf), "Zyklus beendet (%d Min gelaufen)%s", id(laufzeit_heute_min), inv);
+          else if (status == 2) snprintf(buf, sizeof(buf), "Abbruch: Regen-Sättigung (Score %.2f)%s", id(last_rain_score), inv);
+          else if (status == 3) snprintf(buf, sizeof(buf), "Abbruch: Temp %.1f°C unter Limit %.1f°C%s", id(cache_temp), id(conf_min_temp), inv);
+          else if (status == 5) snprintf(buf, sizeof(buf), "Zyklus läuft (Wiederaufnahme)%s", inv);
+          else snprintf(buf, sizeof(buf), "Bereit%s", inv); // Deckt Status 0 (Warten) und 4 (Manuell) ab
+          
+          id(status_sensor).publish_state(buf);
 
 esp8266:
   board: d1_mini
@@ -232,15 +244,30 @@ globals:
     initial_value: '20.0'
   - id: last_rain_score
     type: float
-    restore_value: false
+    restore_value: true
     initial_value: '0.0'
-  - id: has_run_today
-    type: bool
-    restore_value: false
-    initial_value: 'false'
+    
+  # STATE MACHINE (Neu V1.1.0)
+  - id: tages_status
+    type: int
+    restore_value: true
+    initial_value: '0' # 0=Warten, 1=Fertig, 2=Regen, 3=Temp, 4=Manuell, 5=Running
+  - id: target_start_time
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+  - id: laufzeit_heute_min
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: berechnete_ziel_laufzeit_min
+    type: int
+    restore_value: true
+    initial_value: '0'
+    
   - id: is_auto_cycle
     type: bool
-    restore_value: false
+    restore_value: true
     initial_value: 'false'
   - id: is_master_action
     type: bool
@@ -248,11 +275,7 @@ globals:
     initial_value: 'false'
   - id: day_tracker
     type: int
-    restore_value: false
-    initial_value: '0'
-  - id: calculated_cycle_duration_ms
-    type: int
-    restore_value: false
+    restore_value: true
     initial_value: '0'
 
   # Ventil-Tracking
@@ -456,8 +479,9 @@ number:
     set_action:
       then:
         - globals.set: {id: conf_sun_offset_min, value: !lambda "return x;"}
-        - globals.set: {id: has_run_today, value: 'false'}
-        - lambda: 'ESP_LOGI("config", "Sonnenaufgangs-Versatz geändert. Tages-Sperre zurückgesetzt.");'
+        - globals.set: {id: tages_status, value: '0'}
+        - globals.set: {id: target_start_time, value: '0'}
+        - lambda: 'ESP_LOGI("config", "Offset geändert. Tages-Status & Cache zurückgesetzt.");'
 
   - platform: template
     name: "Not-Aus Timeout (Min)"
@@ -486,52 +510,98 @@ number:
         - globals.set: {id: conf_manual_timeout_min, value: !lambda "return x;"}
 
 # ---------------------------------------------------------
-# 5. LOGIK (Autopilot)
+# 5. LOGIK (Autopilot State Machine)
 # ---------------------------------------------------------
 interval:
-  # Reset um Mitternacht
-  - interval: 1h
-    then:
-      - lambda: |-
-          auto time = id(sntp_time).now();
-          if (time.day_of_year != id(day_tracker)) {
-            id(day_tracker) = time.day_of_year;
-            id(has_run_today) = false;
-          }
-
-  # Trigger Check (Jede Minute)
+  # Trigger Check & Zyklus Loop (Jede Minute)
   - interval: 60s
     then:
       - lambda: |-
           auto time = id(sntp_time).now();
-          
-          if (time.month < id(conf_month_start) || time.month > id(conf_month_end)) return;
-          if (id(has_run_today)) return;
+          if (!time.is_valid()) return;
 
-          auto sun_info = id(sun_local).sunrise(0);
-          if (!sun_info.has_value()) return;
-          
-          int start_min = (sun_info.value().hour * 60 + sun_info.value().minute) + id(conf_sun_offset_min);
-          int now_min = time.hour * 60 + time.minute;
+          // 1. Reset um Mitternacht (Silent)
+          if (time.day_of_year != id(day_tracker)) {
+            id(day_tracker) = time.day_of_year;
+            id(tages_status) = 0;
+            id(laufzeit_heute_min) = 0;
+            id(berechnete_ziel_laufzeit_min) = 0;
+            id(target_start_time) = 0;
+            ESP_LOGI("system", "Tageswechsel erkannt. State-Machine genullt.");
+          }
 
-          if (now_min == start_min) {
-             id(start_irrigation_cycle).execute();
+          // 2. Zielzeit berechnen (Einmalig, fängt Morgen-Flip ab)
+          if (id(target_start_time) == 0 && time.hour < 12) {
+             auto sun_info = id(sun_local).sunrise(0);
+             if (sun_info.has_value() && sun_info.value().day_of_year == time.day_of_year) {
+                uint32_t sunrise_ts = sun_info.value().timestamp;
+                id(target_start_time) = sunrise_ts + (id(conf_sun_offset_min) * 60);
+                ESP_LOGI("system", "Sonnenaufgang gecacht. Start: Timestamp %d", id(target_start_time));
+             }
+          }
+
+          // 3. Trigger für Skript-Auswertung
+          uint32_t now_ts = time.timestamp;
+          if (id(tages_status) == 0 && id(target_start_time) > 0 && now_ts >= id(target_start_time)) {
+             if (time.month >= id(conf_month_start) && time.month <= id(conf_month_end)) {
+                id(start_irrigation_cycle).execute();
+             } else {
+                id(tages_status) = 1; // Außerhalb Saison, einfach abhaken.
+             }
+          }
+
+          // 4. Bewässerungsschleife (Tracking & Resume)
+          if (id(tages_status) == 5) { // 5 = Zyklus läuft
+             if (id(laufzeit_heute_min) < id(berechnete_ziel_laufzeit_min)) {
+                id(laufzeit_heute_min) += 1;
+                ESP_LOGI("bewaesserung", "Zyklus läuft: Minute %d von %d", id(laufzeit_heute_min), id(berechnete_ziel_laufzeit_min));
+                
+                // Resume Fallback: Schaltet Ventile wieder ein, falls sie unerwartet (Soft-Reboot) aus sind
+                id(is_auto_cycle) = true;
+                if (!id(ventil_1).state && id(mode_v1).current_option() == "Automatik") id(ventil_1).turn_on();
+                if (!id(ventil_2).state && id(mode_v2).current_option() == "Automatik") id(ventil_2).turn_on();
+                if (!id(ventil_3).state && id(mode_v3).current_option() == "Automatik") id(ventil_3).turn_on();
+                if (!id(ventil_4).state && id(mode_v4).current_option() == "Automatik") id(ventil_4).turn_on();
+                
+                if (!id(light_activity).current_values.is_on()) {
+                   auto call = id(light_activity).turn_on();
+                   call.set_effect("Slow Pulse");
+                   call.set_brightness(1.0);
+                   call.perform();
+                }
+             } else {
+                // Ziel erreicht!
+                ESP_LOGI("bewaesserung", "Ziel-Laufzeit erreicht. Beende Zyklus.");
+                id(tages_status) = 1; // 1 = Fertig
+                id(is_auto_cycle) = false;
+                
+                id(ventil_1).turn_off();
+                id(ventil_2).turn_off();
+                id(ventil_3).turn_off();
+                id(ventil_4).turn_off();
+                id(light_activity).turn_off();
+                
+                const char* inv = (time.day_of_year % 2 == 0) ? "\u200B" : "";
+                char buf[128];
+                snprintf(buf, sizeof(buf), "Zyklus beendet (%d Min gelaufen)%s", id(laufzeit_heute_min), inv);
+                id(status_sensor).publish_state(buf);
+             }
           }
 
 # ---------------------------------------------------------
-# 6. HAUPT-SKRIPT (Der Bewässerungszyklus)
+# 6. HAUPT-SKRIPT (Auswertung & Startschuss)
 # ---------------------------------------------------------
 script:
   - id: start_irrigation_cycle
     then:
-      # --- NEU: Sperre direkt am Anfang setzen! --- 
-      - globals.set: {id: has_run_today, value: 'true'}
+      - globals.set: {id: tages_status, value: '5'} # 5 = Running setzen
       
       # A. Temperatur Check
       - if:
           condition:
             lambda: "return id(cache_temp) < id(conf_min_temp);"
           then:
+            - globals.set: {id: tages_status, value: '3'} # 3 = Abbruch Temp
             - lambda: 'ESP_LOGW("bewaesserung", "ABBRUCH: Temperatur %.1f°C ist unter Limit %.1f°C", id(cache_temp), id(conf_min_temp));'
             - lambda: |-
                 auto time = id(sntp_time).now();
@@ -562,13 +632,13 @@ script:
           float tuning = id(conf_tuning_percent) / 100.0;
           float base_min = id(conf_base_duration_min);
           
-          int final_duration_ms = (int)(base_min * reduction_factor * tuning * 60000);
+          int final_duration_min = (int)(base_min * reduction_factor * tuning);
           
           // SAFETY CAP: Dauer darf nie über Not-Aus liegen
-          int safety_ms = id(conf_safety_cutoff_min) * 60000;
-          if (final_duration_ms > safety_ms) final_duration_ms = safety_ms;
+          int safety_min = id(conf_safety_cutoff_min);
+          if (final_duration_min > safety_min) final_duration_min = safety_min;
           
-          id(calculated_cycle_duration_ms) = final_duration_ms;
+          id(berechnete_ziel_laufzeit_min) = final_duration_min;
           id(last_rain_score) = score;
 
           ESP_LOGI("bewaesserung", "========================================");
@@ -585,13 +655,13 @@ script:
           ESP_LOGI("bewaesserung", "  - Tuning-Faktor:  %.2f (%.0f %%)", tuning, tuning * 100);
           ESP_LOGI("bewaesserung", "  - Basis-Laufzeit: %.0f min", base_min);
           ESP_LOGI("bewaesserung", "========================================");
-          ESP_LOGI("bewaesserung", "ERGEBNIS: %.1f Minuten (%d ms)", final_duration_ms / 60000.0, final_duration_ms);
+          ESP_LOGI("bewaesserung", "ERGEBNIS: %d Minuten", final_duration_min);
           ESP_LOGI("bewaesserung", "========================================");
 
-      # C. Zyklus Starten
+      # C. Zyklus Starten (Ventile auf)
       - if:
           condition:
-            lambda: "return id(calculated_cycle_duration_ms) > 0;"
+            lambda: "return id(berechnete_ziel_laufzeit_min) > 0;"
           then:
             - light.turn_on:
                 id: light_activity
@@ -600,7 +670,7 @@ script:
 
             - globals.set: {id: is_auto_cycle, value: 'true'}
 
-            # Aktive Ventile ermitteln, loggen und Status schreiben
+            # Aktive Ventile loggen und Status schreiben
             - lambda: |-
                 auto time = id(sntp_time).now();
                 const char* invisible_char = (time.day_of_year % 2 == 0) ? "\u200B" : "";
@@ -616,9 +686,9 @@ script:
                 if (active.empty()) active = "keine";
                 ESP_LOGI("bewaesserung", "Start Zyklus. Aktive Ventile: %s", active.c_str());
                 
-                float dur = id(calculated_cycle_duration_ms) / 60000.0;
+                float dur = id(berechnete_ziel_laufzeit_min);
                 char buf[128];
-                snprintf(buf, sizeof(buf), "Zyklus: %.1f Min, Score %.2f (%s)%s",
+                snprintf(buf, sizeof(buf), "Zyklus läuft: %.0f Min, Score %.2f (%s)%s",
                   dur, id(last_rain_score), active.c_str(), invisible_char);
                 id(status_sensor).publish_state(buf);
 
@@ -646,23 +716,11 @@ script:
                   lambda: 'return id(mode_v4).current_option() == "Automatik";'
                 then:
                   - switch.turn_on: ventil_4
-
-            # SCHRITT 2: WARTEN
-            - lambda: 'ESP_LOGI("bewaesserung", "Wasser läuft. Warte %.1f Minuten...", id(calculated_cycle_duration_ms) / 60000.0);'
-            - delay: !lambda "return id(calculated_cycle_duration_ms);"
-
-            # SCHRITT 3: ALLES AUSSCHALTEN
-            - lambda: 'ESP_LOGI("bewaesserung", "Zeit abgelaufen. Schliesse alle Ventile.");'
-            - switch.turn_off: ventil_1
-            - switch.turn_off: ventil_2
-            - switch.turn_off: ventil_3
-            - switch.turn_off: ventil_4
-            - globals.set: {id: is_auto_cycle, value: 'false'}
-
-            - light.turn_off: light_activity
-            - lambda: 'ESP_LOGI("bewaesserung", "Zyklus Beendet.");'
+            
+            # (Schritt 2 Warten & Schritt 3 Ausschalten sind nun sicher in der Interval-Schleife!)
 
           else:
+            - globals.set: {id: tages_status, value: '2'} # 2 = Abbruch Regen
             - lambda: 'ESP_LOGW("bewaesserung", "ABBRUCH: Dauer ist 0 (Regen-Sättigung erreicht).");'
             - lambda: |-
                 auto time = id(sntp_time).now();
@@ -690,6 +748,7 @@ switch:
       - switch.turn_on: ventil_3
       - switch.turn_on: ventil_4
     turn_off_action:
+      - globals.set: {id: tages_status, value: '4'} # Manuell abgebrochen -> Verhindert Auto-Resume!
       - script.stop: start_irrigation_cycle
       - lambda: "id(is_master_action) = true;"
       - lambda: |-

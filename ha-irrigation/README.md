@@ -1,6 +1,6 @@
 # 🌱 HA-Irrigation – Intelligente Bewässerungssteuerung
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -28,7 +28,7 @@ Mit der Verwendung dieses Codes oder Nachbau der Hardware erklärst du dich dami
 
 * [Überblick](#überblick)
 * [Hardware](#hardware)
-* [Funktionsweise](#funktionsweise)
+* [Funktionsweise & State Machine](#funktionsweise--state-machine)
 * [Bewässerungsalgorithmus](#bewässerungsalgorithmus)
 * [Betriebsmodi](#betriebsmodi)
 * [Sicherheitsmechanismen](#sicherheitsmechanismen)
@@ -49,7 +49,7 @@ Das System steuert bis zu **4 Bewässerungsventile** basierend auf:
 * 🌡️ **Temperatur** als Mindestvoraussetzung
 * 📅 **Saisonale Begrenzung** (konfigurierbare Monate)
 
-Die Bewässerungsdauer wird täglich neu berechnet und passt sich dynamisch den Wetterbedingungen an.
+Die Bewässerungsdauer wird täglich neu berechnet und passt sich dynamisch den Wetterbedingungen an. Das System ist ausfallsicher aufgebaut und verfügt über eine **Resume-Fähigkeit** nach Verbindungsabbrüchen.
 
 ---
 
@@ -71,29 +71,37 @@ Die Ventil-Outputs sind **invertiert** (active-low Relais).
 
 ---
 
-## ⚙️ Funktionsweise
+## ⚙️ Funktionsweise & State Machine
 
-### Täglicher Ablauf
+### Architektur (Zustandsautomat)
+Ab Version 1.1.0 arbeitet das System als deterministische State Machine. Der Tagesstatus wird sicher im Flash-Speicher abgelegt, während die gelaufenen Minuten schonend im RTC-RAM (Real-Time Clock Memory) hochgezählt werden. 
 
-Das System prüft im Hintergrund minütlich, ob ein Startzyklus ausgelöst werden soll:
+Dies ermöglicht die **Resume-Fähigkeit**: Fällt der ESP während der Bewässerung aus (z. B. durch einen Home Assistant Neustart oder WLAN-Verlust), weiß er nach dem Reboot genau, wie viele Minuten noch fehlen, und setzt den Zyklus nahtlos fort.
 
-```text
-[ Trigger-Check jede Minute ]
-   │
-   ├─ 1. Ist der aktuelle Monat in der Saison?
-   ├─ 2. Wurde heute schon bewässert?
-   ├─ 3. Ist jetzt Sonnenaufgang (+/- Offset)?
-   │
-   ▼
-[ JA: Starte Bewässerungszyklus ]
+```mermaid
+stateDiagram-v2
+    [*] --> 0_Warten : Mitternacht (Reset)
+    
+    0_Warten --> 3_Abbruch_Temp : Startzeit (zu kalt)
+    0_Warten --> 2_Abbruch_Regen : Startzeit (zu nass)
+    0_Warten --> 5_Running : Startzeit (Start Zyklus)
+    
+    5_Running --> 5_Running : Minütliches Hochzählen (RTC)
+    5_Running --> 1_Fertig : Ziel-Laufzeit erreicht
+    5_Running --> 4_Abbruch_Manuell : Manuell gestoppt
+    
+    3_Abbruch_Temp --> [*]
+    2_Abbruch_Regen --> [*]
+    1_Fertig --> [*]
+    4_Abbruch_Manuell --> [*]
 ```
 
 ### Der Bewässerungszyklus
 
-Sobald der Zyklus gestartet ist, wird die Dauer ermittelt und geprüft, ob eine Bewässerung sicher und nötig ist:
+Sobald der Zyklus gestartet ist (Wechsel auf Status `5_Running`), wird die Dauer ermittelt und geprüft, ob eine Bewässerung sicher und nötig ist:
 
 ```text
-[ START BEWÄSSERUNGSZYKLUS ]
+[ START BERECHNUNG ]
    │
    ├─ 1. Temperatur-Check (Temp < Min?) ───────▶ ABBRUCH
    │
@@ -103,10 +111,10 @@ Sobald der Zyklus gestartet ist, wird die Dauer ermittelt und geprüft, ob eine 
    │
    ├─ 4. Ventile öffnen
    │
-   ├─ 5. Berechnete Dauer abwarten
+   ├─ 5. Laufzeit minütlich im RTC-Speicher hochzählen
    │
    ▼
-[ Alle Ventile schliessen ]
+[ Zielzeit erreicht: Alle Ventile schliessen ]
 ```
 
 ---
@@ -149,13 +157,13 @@ Der Score wird gegen das **Sättigungslimit** verglichen:
 Die endgültige Laufzeit wird berechnet und durch den "Safety Cap" begrenzt (darf nie das Not-Aus-Timeout überschreiten).
 
 `Dauer = Basis-Laufzeit × Nässe-Faktor × (Tuning / 100)`
-````text
+```text
 > `Regen-Score: 0 ─────────────────────────────── Limit (z.B. 1.0)`
 > `             │███████████████░░░░░░░░░░░░░░░│`
 > `             ↑                              ↑`
 > `          Trocken                       Gesättigt`
 > `        (100% Dauer)                    (0% Dauer)`
-````
+```
 ---
 
 ## 🎛️ Betriebsmodi
@@ -176,18 +184,24 @@ Die Sicherheit ist in mehreren Ebenen tief im Code verankert:
 3. **Not-Aus (Safety Timeout):** Letztes Sicherheitsnetz pro Ventil. Hat IMMER Vorrang und beendet ein klemmendes Skript.
 4. **Temperatur-Mindestgrenze:** Verhindert das Bewässern bei Frost oder Kälte.
 5. **Tages-Sperre:** Verhindert Mehrfach-Auslösungen am selben Tag.
+6. **Ausfallsicherheit & Resume:** Durch die Verknüpfung von Flash- und RTC-Speicher macht die Anlage nach einem Soft-Reboot exakt da weiter, wo sie unterbrochen wurde.
 
 ---
 
 ## 📊 Status & Logging
 
-### Activity-Log Meldungen
-Der Systemstatus wird als gut lesbarer Satz für die Home Assistant Historie aufbereitet:
+### Spam-freies Logbuch & Boot-Recovery
+Der Status wird ressourcenschonend und spam-frei an Home Assistant übermittelt. Um das HA-Logbuch sauber zu halten, werden periodische (unnötige) "Standby"-Meldungen um Mitternacht komplett unterdrückt. 
 
+Bei einem ESP-Neustart wird die exakte letzte Statusmeldung aus dem State-Machine-Speicher rekonstruiert (*Boot-Recovery*). Liegt kein spezieller Status vor (z. B. nach einem frischen Boot am Tag), meldet das System einmalig "Bereit", um den initialen `unknown`-Status in Home Assistant zu verhindern.
+
+### Activity-Log Meldungen
 | Ereignis | Beispiel-Meldung (Sensor Status) |
 | :--- | :--- |
-| **System-Boot** | `Standby` |
-| **Zyklus Start** | `Zyklus: 12.3 Min, Score 0.42 (V1,V2,V4)` |
+| **System-Boot** | `Bereit` |
+| **Zyklus Start** | `Zyklus läuft: 12.0 Min, Score 0.42 (V1,V2,V4)` |
+| **Wiederaufnahme**| `Zyklus läuft (Wiederaufnahme)` |
+| **Zyklus Ende** | `Zyklus beendet (12 Min gelaufen)` |
 | **Abbruch Temp.** | `Abbruch: Temp 8.2°C unter Limit 10.0°C` |
 | **Abbruch Regen** | `Abbruch: Regen-Sättigung (Score 1.25)` |
 | **Manuell aus** | `Manuell: V1 geschlossen nach 0.3 Min` |
@@ -226,7 +240,7 @@ Das System importiert zwingend diese **Sensoren aus Home Assistant** (diese müs
 
 ## 📱 Dashboard
 
-Für ein übersichtliches Interface werden die HACS-Karten `mushroom-cards` und `fold-entity-row` empfohlen. Kopiere den folgenden YAML-Code in dein Lovelace-Dashboard:
+Für ein übersichtliches Interface werden die HACS-Karten `mushroom-cards`, `fold-entity-row` und `logbook-card` (von *royto*) empfohlen. Kopiere den folgenden YAML-Code in dein Lovelace-Dashboard:
 
 ```yaml
 - type: sections
@@ -240,12 +254,13 @@ Für ein übersichtliches Interface werden die HACS-Karten `mushroom-cards` und 
         - type: custom:mushroom-title-card
           title: 💦 Bewässerung
           subtitle: Automatische Rasenbewässerung
-        - type: logbook
-          target:
-            entity_id:
-              - sensor.ha_irrigation_status
-          hours_to_show: 168
+        - type: custom:logbook-card
+          entity: sensor.ha_irrigation_status
           title: 📋 Status
+          hours_to_show: 168
+          hidden_state:
+            - unavailable
+            - unknown
         - type: custom:mushroom-select-card
           entity: select.ha_irrigation_modus_alle
           name: Betriebsmodus

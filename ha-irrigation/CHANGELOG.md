@@ -5,6 +5,20 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/)
 und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [1.1.0] - 2026-06-04
+
+### Hinzugefügt
+- **Architektur-Upgrade (State Machine):** Das System arbeitet nun deterministisch mit einem im Flash-Speicher gesicherten Tagesstatus. Dies verhindert unvorhersehbares Verhalten durch Verbindungsabbrüche oder ungeplante Reboots.
+- **Resume-Fähigkeit (Ausfallsicherheit):** Die gelaufene Bewässerungszeit wird minütlich schonend im RTC-Speicher (Real-Time Clock RAM) gesichert. Nach einem Reboot während des Zyklus (z. B. durch einen HA-Neustart) nimmt der ESP die Bewässerung nahtlos wieder auf, bis die berechnete Zielzeit erreicht ist.
+- **Boot-Recovery (Logbuch):** Beim Neustart des ESPs rekonstruiert das System den exakten letzten Status aus dem Speicher, um den Zustand `unknown` in Home Assistant zu verhindern. Im Leerlauf meldet das System nun einmalig `Bereit`.
+
+### Geändert
+- **Spam-freies Logging:** Der automatische Statuswechsel auf "Standby" um Mitternacht wurde entfernt. Das Logbuch wird nur noch bei funktionalen Änderungen (Start, Ende, Abbruch) aktualisiert, um unnötiges "Rauschen" zu vermeiden.
+- **Dashboard-Optimierung (HACS):** Anstelle der nativen HA-Logbuch-Karte wird nun die HACS-Komponente `logbook-card` empfohlen. Dies blendet systembedingte Netzwerk-Artefakte (`unavailable`, `unknown`) visuell aus und sorgt für ein perfekt sauberes Protokoll im Dashboard.
+
+### Behoben
+- **Race Condition (Sonnenaufgang):** Ein Fehler wurde behoben, bei dem die `sun`-Komponente exakt ab der Minute des Sonnenaufgangs bereits die Zielzeit für den Folgetag lieferte (Morgen-Flip), wodurch Zyklen übersprungen wurden. Die Zielzeit wird nun nach Mitternacht sicher gecacht.
+
 ## [1.0.1] - 2026-06-02
 
 ### Hinzugefügt
