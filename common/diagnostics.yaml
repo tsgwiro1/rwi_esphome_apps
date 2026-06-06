@@ -1,50 +1,70 @@
 # Datei: common/diagnostics.yaml
+# Version: 1.2.1
+# Kategorie 1.x ist für lokale Projekt-Sensoren reserviert.
 
 debug:
 
 substitutions:
   # --- STANDARDWERTE (FALLBACK) ---
-  # Wir nehmen hier konservative Werte (z.B. für ESP8266),
-  # damit es standardmäßig "sicher" ist.
   diag_min_heap_ok: "15000"
   diag_min_heap_critical: "8000"
   diag_wifi_signal_ok: "-70"
   diag_wifi_signal_critical: "-85"
+  # Brücke von secrets.yaml zu den Substitutions
+  bssid_ug: !secret mac_bssid_ug
+  bssid_eg: !secret mac_bssid_eg
+  bssid_dg: !secret mac_bssid_dg
   # Version der Diagnostics
-  version: "1.0.0"
+  version: "1.2.1"
 
 sensor:
-  # 1. Rohdaten Sensoren
+  # === KATEGORIE 2: WLAN & Konnektivität ===
   - platform: wifi_signal
-    name: "WLAN Signalpegel"
+    name: "2.1 WLAN Signalpegel"
     id: raw_wifi_signal
     update_interval: 60s
     entity_category: diagnostic
+    icon: "mdi:wifi-arrow-up-down"
     filters:
       - sliding_window_moving_average:
           window_size: 3
           send_every: 1
 
+  - platform: copy
+    source_id: raw_wifi_signal
+    name: "2.2 WLAN Signalqualität"
+    entity_category: diagnostic
+    unit_of_measurement: "%"
+    icon: "mdi:wifi-arrow-up-down"
+    filters:
+      - lambda: |-
+          if (x <= -100) return 0.0;
+          if (x >= -50) return 100.0;
+          return 2.0 * (x + 100.0);
+
+  # === KATEGORIE 4: System & Speicher ===
   - platform: debug
     free:
-      name: "Freier Speicher (Bytes)"
+      name: "4.1 Freier Speicher (Bytes)"
       id: raw_heap_free
       entity_category: diagnostic
+      icon: "mdi:memory"
 
-# Wie lange läuft das Gerät schon?
   - platform: uptime
-    name: "Laufzeit"
+    name: "4.2 Laufzeit"
     entity_category: diagnostic
+    icon: "mdi:timer-sand"
     filters:
-      - lambda: return x / 60.0;
-    unit_of_measurement: "min"
+      - lambda: return x / 3600.0;
+    unit_of_measurement: "h"
+    accuracy_decimals: 2
 
 text_sensor:
-  # 2. Interpretierte Sensoren
+  # === KATEGORIE 2: WLAN & Konnektivität (Fortsetzung) ===
   - platform: template
-    name: "WLAN Status"
+    name: "2.0 WLAN Status"
     entity_category: diagnostic
-    icon: "mdi:wifi-arrow-left-right"
+    icon: "mdi:wifi-check"
     lambda: |-
       float sig = id(raw_wifi_signal).state;
       if (sig > ${diag_wifi_signal_ok}) {
@@ -55,8 +75,48 @@ text_sensor:
         return {"🔴 Kritisch"};
       }
 
+  - platform: wifi_info
+    ssid:
+      name: "2.3 Verbundene SSID"
+      entity_category: diagnostic
+      icon: "mdi:access-point"
+    bssid:
+      name: "Verbundener AP (BSSID)"
+      id: raw_bssid
+      entity_category: diagnostic
+      internal: true
+    ip_address:
+      name: "3.0 IP Adresse"
+      entity_category: diagnostic
+      icon: "mdi:ip"
+    mac_address:
+      name: "3.1 Geräte MAC"
+      entity_category: diagnostic
+      icon: "mdi:identifier"
+
   - platform: template
-    name: "System Gesundheit"
+    name: "2.4 Verbundener Access Point"
+    entity_category: diagnostic
+    icon: "mdi:access-point-network"
+    update_interval: 30s
+    lambda: |-
+      std::string bssid = id(raw_bssid).state;
+      // Die Werte werden beim Kompilieren automatisch durch die Secrets ersetzt
+      if (bssid == "${bssid_ug}") {
+        return {"🏠 UG"};
+      } else if (bssid == "${bssid_eg}") {
+        return {"🏠 EG"};
+      } else if (bssid == "${bssid_dg}") {
+        return {"🏠 DG"};
+      } else if (bssid.empty() || bssid == "None") {
+        return {"⚠️ Nicht verbunden"};
+      } else {
+        return {"❓ " + bssid};
+      }
+
+  # === KATEGORIE 4: System & Speicher (Fortsetzung) ===
+  - platform: template
+    name: "4.0 System Gesundheit"
     entity_category: diagnostic
     icon: "mdi:chip"
     lambda: |-
@@ -69,37 +129,33 @@ text_sensor:
         return {"🔴 Kritisch"};
       }
 
-  # 3. System Informationen
-  # Welche IP Adresse hat das Gerät?
-  - platform: wifi_info
-    ip_address:
-      name: "IP Adresse"
-      entity_category: diagnostic
-    ssid:
-      name: "Verbundene SSID"
-      entity_category: diagnostic
-    bssid:
-      name: "Verbundener AP (MAC)" # Hier siehst du, ob er den AP wechselt!
-      entity_category: diagnostic
-    mac_address:
-      name: "Geräte MAC"
-      entity_category: diagnostic
-
-  # Welche Firmware läuft gerade?
-  - platform: version
-    name: "ESPHome Version"
-    entity_category: diagnostic
-    hide_timestamp: true
-
-  # Warum hat das Gerät neu gestartet? (Sehr wichtig für Debugging)
   - platform: debug
     reset_reason:
-      name: "Letzter Neustart Grund"
+      name: "4.3 Letzter Neustart Grund"
       entity_category: diagnostic
+      icon: "mdi:alert-circle-outline"
 
-  # Version dieses Common-Packages
+  # === KATEGORIE 5: Versionen ===
+  - platform: version
+    name: "5.0 ESPHome Version"
+    entity_category: diagnostic
+    icon: "mdi:package-variant"
+    hide_timestamp: true
+
   - platform: template
-    name: "Common Diagnostics Version"
+    name: "5.1 Common Diagnostics Version"
     entity_category: diagnostic
     icon: "mdi:tag-text-outline"
     lambda: 'return {"${version}"};'
+
+# === KATEGORIE 6: Steuerung ===
+button:
+  - platform: restart
+    name: "6.0 Neustart"
+    entity_category: diagnostic
+    icon: "mdi:restart"
+
+  - platform: safe_mode
+    name: "6.1 Safe Mode Neustart"
+    entity_category: diagnostic
+    icon: "mdi:shield-refresh"

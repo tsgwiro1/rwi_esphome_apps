@@ -4,6 +4,32 @@ Alle wichtigen Änderungen an diesem gemeinsamen Diagnose-Paket werden in dieser
 
 ---
 
+## [1.2.1] - 2026-06-06
+*(Hinweis: Dieses Release fasst die initialen Entwicklungsphasen V1.0.0 bis V1.2.1 in einem konsolidierten Update zusammen).*
+
+### Hinzugefügt
+- **Access Point Namensauflösung:** Neuer Template-Sensor `Verbundener Access Point`, der bekannte AP-BSSIDs auf benutzerfreundliche Namen auflöst (z. B. "🏠 UG", "🏠 EG", "🏠 DG"). Unbekannte APs werden mit ihrer MAC-Adresse und einem ❓-Prefix angezeigt, nicht verbundene Zustände mit ⚠️ abgefangen.
+- **WLAN Signalqualität (%):** Neuer `copy`-Sensor, der den RSSI-Wert (dBm) linear in eine intuitive Prozent-Skala (0–100 %) umrechnet. Ideal für Dashboards und Automations-Trigger in Home Assistant.
+- **Restart-Button:** Hinzufügen eines `button`-Elements (`platform: restart`) zur direkten Auslösung eines Neustarts über die Home Assistant UI, ohne OTA oder physischen Zugang.
+- **Safe Mode Button:** Zusätzlicher Button (`platform: safe_mode`) für einen Neustart in den abgesicherten Modus. Ermöglicht OTA-Updates auch bei fehlerhafter Firmware, die das normale Booten verhindert.
+- **Kategorisierte Sortierung:** Einführung eines Nummern-Prefix-Systems (2.x–6.x) für alle Entitäten, das eine thematische Gruppierung auf der Home Assistant Geräteseite erzwingt. Kategorie 1.x ist für projektspezifische lokale Sensoren reserviert. Reihenfolge: 2.x WLAN, 3.x Netzwerk-IDs, 4.x System, 5.x Versionen, 6.x Steuerung.
+- **Explizite Icons:** Alle Sensoren haben jetzt ein definiertes MDI-Icon zugewiesen, um das generische "Auge"-Standardicon zu eliminieren (`mdi:ip`, `mdi:identifier`, `mdi:access-point`, `mdi:access-point-network`, `mdi:wifi-check`, `mdi:wifi-arrow-up-down`, `mdi:memory`, `mdi:timer-sand`, `mdi:alert-circle-outline`, `mdi:package-variant`).
+
+### Geändert
+- **Laufzeit-Einheit:** Umstellung der Uptime-Anzeige von Minuten auf Stunden (`unit_of_measurement: "h"`, `accuracy_decimals: 2`) für bessere Lesbarkeit bei langlebigen Geräten.
+- **BSSID-Sensor auf `internal`:** Der rohe BSSID-Sensor (`wifi_info > bssid`) ist jetzt als `internal: true` markiert und wird nicht mehr als eigenständige Entität in Home Assistant exponiert. Er dient nur noch als Datenquelle für den neuen AP-Namens-Sensor.
+- **Sensor-Benennung:** Alle Entitäten tragen jetzt ein numerisches Prefix (z. B. "2.1 WLAN Status") zur Steuerung der Anzeigereihenfolge.
+- **WLAN Status:** An Position 2.1 verschoben (Ampel als erstes in der Gruppe). Icon geändert auf `mdi:wifi-check`.
+- **WLAN Signalpegel & Signalqualität:** Icon geändert auf `mdi:wifi-arrow-up-down`.
+- **SSID-Icon:** Geändert von Standard auf `mdi:access-point` für konsistentere Darstellung in der WLAN-Gruppe.
+- **AP-Sensor-Icon:** Geändert von `mdi:access-point` auf `mdi:access-point-network` zur Unterscheidung vom SSID-Sensor.
+- **Nummerierung:** Umstellung auf nullbasierte Nummerierung innerhalb jeder Kategorie (z. B. 2.0, 2.1, 2.2 statt 2.1, 2.2, 2.3). Die Ampel-/Status-Sensoren stehen jeweils an Position x.0 als Übersichtseintrag der Gruppe.
+
+### Entfernt
+- **Entität "Verbundener AP (MAC)":** Wird durch den neuen, aussagekräftigeren Sensor `Verbundener Access Point` ersetzt. Die Rohdaten bleiben intern verfügbar.
+
+---
+
 ## [1.0.0] - 2026-05-30
 
 ### Hinzugefügt
