@@ -44,28 +44,34 @@ Das Relais **muss** als **Öffner (Normally Closed / NC)** verdrahtet werden:
 * **Relais EIN (aktiviert):** Der ESP unterbricht den Stromkreis aktiv. Die Pumpe wird zwangsweise ausgeschaltet (Sommer-Sparbetrieb).
 
 ### Die Prioritäten-Kaskade (Logik-Pyramide)
-Die interne Steuerungslogik prüft jede Sekunde eine strikte Hierarchie ab. Höhere Prioritäten oversized niedrigere Zustände immer:
+Die interne Steuerungslogik prüft jede Sekunde eine strikte Hierarchie ab. Höhere Prioritäten übersteuern niedrigere Zustände immer:
 
 1. **Priorität 1: Überhitzungsschutz (Lokal)**
    * *Bedingung:* Die über den internen DS18B20-Sensor gemessene Gehäusetemperatur überschreitet das eingestellte Limit (Standard: 50°C).
    * *Aktion:* Relais fällt ab (**Pumpe EIN** / Heizungskontrolle). Display zeigt eine rote Überhitzungswarnung (`mdi:thermometer-alert`).
-2. **Priorität 2: WLAN-Ausfall (Lokal)**
+2. **Priorität 2: Temperatursensor-Ausfall (Lokal)**
+   * *Bedingung:* Der DS18B20 liefert länger als 60 Sekunden keinen gültigen Messwert (NaN oder exakt 85.0°C, der Power-On-Reset-Wert des Sensors). Ohne Sensor wäre der Überhitzungsschutz blind.
+   * *Aktion:* Relais fällt ab (**Pumpe EIN**). Display zeigt ein rotes Sensor-Aus-Symbol (`mdi:thermometer-off`).
+3. **Priorität 3: WLAN-Ausfall (Lokal)**
    * *Bedingung:* Die Verbindung zum lokalen Netzwerk bricht ab.
    * *Aktion:* Relais fällt ab (**Pumpe EIN**). Display zeigt ein rotes WLAN-Aus-Symbol (`mdi:wifi-off`).
-3. **Priorität 3: Home Assistant API-Ausfall (> 1 Stunde)**
+4. **Priorität 4: Home Assistant API-Ausfall (> 1 Stunde)**
    * *Bedingung:* Die Verbindung zur Home Assistant API ist für mehr als 3600 Sekunden unterbrochen.
    * *Aktion:* Relais fällt ab (**Pumpe EIN**). Display zeigt ein API-Fehlersymbol (`mdi:api-off`).
-4. **Priorität 4: Hauptschalter AUS (Über HA/Webserver)**
+5. **Priorität 5: Hauptschalter AUS (Über HA/Webserver)**
    * *Bedingung:* Der virtuelle Hauptschalter steht auf `OFF`.
    * *Aktion:* Relais fällt ab (**Pumpe EIN**). Display zeigt das Power-Symbol (`mdi:power`).
-5. **Priorität 5: Übersteuerung EIN (Über HA/Webserver)**
+6. **Priorität 6: Übersteuerung EIN (Über HA/Webserver)**
    * *Bedingung:* Der Übersteuerungsschalter steht auf `ON`.
    * *Aktion:* Relais zieht an (**Pumpe zwingend AUS**), um z.B. manuelle Wartungsarbeiten zu ermöglichen. Display zeigt ein großes Pumpen-Aus-Symbol (`mdi:pump-off`).
-6. **Priorität 6: Automatikmodus (Normalbetrieb)**
+7. **Priorität 7: Automatikmodus (Normalbetrieb)**
    * *Bedingung:* Alle obigen Prüfungen sind im grünen Bereich.
    * *Logik:*
      * Wenn `Mitteltemperatur` > `Schwellwert` -> Relais EIN (**Pumpe AUS**).
      * Wenn `Mitteltemperatur` < (`Schwellwert` - `Hysterese`) -> Relais OFF (**Pumpe EIN**).
+     * Fehlt die `Mitteltemperatur` aus HA länger als 60 Sekunden (z.B. Sensor in HA `unavailable`), fällt das Relais ab (**Pumpe EIN**). Kürzere Aussetzer (z.B. HA-Neustart) werden überbrückt, indem der letzte Zustand gehalten wird – so klackert das Relais nicht unnötig.
+
+Jeder Zustandswechsel wird zusätzlich als Klartext über den Text-Sensor **Status** an Home Assistant gemeldet (sichtbar im Logbuch) und ins ESPHome-Log geschrieben. Die Zeitfenster für die Fehlererkennung sind über die Substitutions `temp_sensor_timeout` und `mittel_temp_timeout` konfigurierbar.
 
 ---
 
@@ -75,15 +81,16 @@ Das Projekt basiert auf dem kompakten Seeed Studio XIAO ESP32-C6 Modul und einem
 
 | Peripherie / Funktion | XIAO Board Pin | Interner GPIO | Beschreibung / Besonderheit |
 | :--- | :---: | :---: | :--- |
-| **LDR (ADC)** | D0 | `GPIO2` | Misst die Umgebungshelligkeit zur Displaysteuerung |
-| **Backlight Control** | D1 | `GPIO3` | Schaltet die Hintergrundbeleuchtung des LCDs (An/Aus) |
-| **LCD Reset** | D2 | `GPIO4` | Display Reset Pin |
-| **LCD D/C** | D3 | `GPIO5` | Display Data/Command Pin |
-| **DS18B20 Temp** | D6 | `GPIO21` | Lokaler Temperatursensor auf der Platine (Überhitzungsschutz) |
-| **Relais** | D7 | `GPIO22` | Schaltet das physische Leistungsrelais (NC verdrahtet) |
+| **LDR (ADC)** | D0 | `GPIO0` | Misst die Umgebungshelligkeit zur Displaysteuerung |
+| **Backlight Control** | D1 | `GPIO1` | Schaltet die Hintergrundbeleuchtung des LCDs (An/Aus) |
+| **LCD Reset** | D2 | `GPIO2` | Display Reset Pin |
+| **LCD D/C** | D3 | `GPIO21` | Display Data/Command Pin |
+| **DS18B20 Temp** | D6 | `GPIO16` | Lokaler Temperatursensor auf der Platine (Überhitzungsschutz) |
+| **Relais** | D7 | `GPIO17` | Schaltet das physische Leistungsrelais (NC verdrahtet) |
 | **SPI SCK** | D8 | `GPIO19` | Serial Clock für das TFT-Display |
 | **SPI MOSI** | D10 | `GPIO18` | Master Out Slave In für das TFT-Display |
-| **Dummy CS** | — | `GPIO23` | **Wichtig:** Da der physische CS-Pin des Displays per Jumper (JP1) fest auf GND liegt, verwendet ESPHome diesen freien, nicht herausgeführten GPIO als Software-Dummy, um Konfigurationsfehler zu vermeiden. I2C (D4/D5) bleibt dadurch frei. |
+
+**Hinweis zum CS-Pin:** Der CS-Pin des Displays liegt per Jumper (JP1) fest auf GND und wird daher in der Konfiguration weggelassen (bei `mipi_spi` optional). Dadurch bleiben D4/D5 (I2C) vollständig frei.
 
 ---
 
@@ -94,8 +101,9 @@ Das ST7735 Display nutzt eine klare visuelle Hierarchie basierend auf Symbolen, 
 ### Vollbild-Fehlermeldungen (Zentrierte Groß-Icons)
 Wenn ein kritischer Zustand oder eine manuelle Übersteuerung aktiv ist, wird der normale Bildschirm ausgeblendet und durch ein einzelnes, unmissverständliches Icon ersetzt:
 * `mdi:thermometer-alert` (Rot): Gehäuse zu heiß!
+* `mdi:thermometer-off` (Rot): Gehäusesensor (DS18B20) ausgefallen.
 * `mdi:wifi-off` (Rot): Kein WLAN-Empfang.
-* `mdi:api-off` (Orange): Keine Verbindung zu Home Assistant.
+* `mdi:api-off` (Orange): Keine Verbindung zu Home Assistant oder Mitteltemperatur nicht verfügbar (die Unterscheidung ist im HA-Logbuch über den Status-Sensor ersichtlich).
 * `mdi:power` (Grau): System über Hauptschalter deaktiviert.
 * `mdi:pump-off` (Orange): Manuelle Übersteuerung aktiv (Pumpe dauerhaft aus).
 
@@ -109,8 +117,8 @@ Im regulären Automatikbetrieb ist das Display in 5 klar strukturierte Zonen unt
 5. **Zone 5 (Ganz unten):** Die lokale **Gehäusetemperatur** (Sehr klein & Dunkelgrau, z.B. `G: 34.2°C`), um den unauffälligen Betrieb des Überhitzungsschutzes zu kontrollieren.
 
 ### Lokale LDR-Hintergrundbeleuchtung
-Um das Display zu schonen und im Heizungskeller keinen unnötigen Lichtschein zu erzeugen, filtert der ESP die ADC-Werte des LDR über einen gleitenden Mittelwert (`sliding_window_moving_average`). 
-* Wird es im Raum dunkel (Spannung < 0.4V), schaltet der ESP das Backlight komplett aus.
+Um das Display zu schonen und im Heizungskeller keinen unnötigen Lichtschein zu erzeugen, filtert der ESP die ADC-Werte des LDR über einen asymmetrischen exponentiellen Glättungsfilter (EMA): Steigende Helligkeit wird schnell übernommen (α = 0.9), fallende Helligkeit nur langsam (α = 0.45). So erwacht das Display beim Einschalten des Lichts sofort, flackert aber bei kurzen Schatten nicht.
+* Wird es im Raum dauerhaft dunkel (Spannung < 0.5V), schaltet der ESP das Backlight komplett aus.
 * Wird das Raumlicht eingeschaltet (Spannung > 0.6V), erwacht das Display sofort wieder zum Leben.
 
 ---
@@ -127,9 +135,11 @@ Der Smartblock deklariert seine Steuerelemente direkt als native Entitäten, wod
 * **Überhitzung Limit (`number.uberhitzung_limit`):** Slider (30–80°C, Schrittweite 1°C) für den lokalen Hardwareschutz (Default: 50°C).
 
 ### Diagnose & Status (Read-Only in HA)
+* **Status (`sensor.status`):** Klartext-Systemzustand für Logbuch & Dashboard (z.B. `Automatik`, `FEHLER: Temperatursensor defekt`, `FEHLER: Mitteltemperatur fehlt`). Wird nur bei Zustandswechseln aktualisiert, sodass im HA-Logbuch genau ein Eintrag pro Ereignis entsteht.
 * **Relais Status (`binary_sensor.relais_status`):** Zeigt an, ob das Relais angezogen (Stromkreis offen / Pumpe aus) ist.
 * **Backlight Status (`binary_sensor.backlight_status`):** Gibt Rückmeldung, ob das Display-Backlight gerade aktiv ist.
-* **Gehäuse Temperatur (`sensor.gehause_temperatur`):** Der aktuelle Temperaturwert des DS18B20 auf der Platine.
+* **Gehäuse Temperatur (`sensor.gehause_temperatur`):** Der aktuelle Temperaturwert des DS18B20 auf der Platine, geglättet über einen gleitenden Mittelwert (10 Messungen, Update alle 10 s).
+* **LDR (`sensor.ldr`):** Die gefilterte Helligkeitsspannung des Fotowiderstands (Diagnose der Backlight-Automatik).
 
 ### Erforderliche HA-Entitäten (Importiert)
 * `sensor.wp_mitteltemperatur`: Liefert den berechneten Mittelwert der Außentemperatur an den ESP.

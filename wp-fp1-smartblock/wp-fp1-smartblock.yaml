@@ -4,6 +4,9 @@ substitutions:
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"        # Mindestens 80 KB freien RAM erwarten wir im Normalbetrieb
   diag_min_heap_critical: "40000"   # Unter 40 KB wird es kritisch
+  # FEHLERERKENNUNG (Sekunden)
+  temp_sensor_timeout: "60"         # Ohne gültigen DS18B20-Wert -> Fehler 6 (Sensor defekt)
+  mittel_temp_timeout: "60"         # Ohne Mitteltemperatur aus HA -> Fehler 7 (entprellt HA-Neustarts)
     
 esphome:
   name: wp-fp1-smartblock
@@ -22,12 +25,6 @@ esp32:
 packages:
   diagnostics: !include common/diagnostics.yaml
 
-esp32:
-  board: esp32-c6-devkitc-1
-  variant: esp32c6
-  framework:
-    type: esp-idf
-
 # Webserver aktivieren
 web_server:
   port: 80
@@ -41,6 +38,12 @@ globals:
     type: int
     initial_value: '0'
   - id: current_error
+    type: int
+    initial_value: '0'
+  - id: temp_sensor_timer
+    type: int
+    initial_value: '0'
+  - id: mittel_temp_timer
     type: int
     initial_value: '0'
 
@@ -82,8 +85,9 @@ spi:
   clk_pin: GPIO19
   mosi_pin: GPIO18
 
-dallas:
-  - pin: GPIO21
+one_wire:
+  - platform: gpio
+    pin: GPIO16
 
 # ==========================================
 # INTERNE OUTPUTS & RELAIS
@@ -91,14 +95,14 @@ dallas:
 switch:
   # Das physische Relais (Nicht bedienbar in HA)
   - platform: gpio
-    pin: GPIO22
+    pin: GPIO17
     id: relais
     internal: true
     restore_mode: ALWAYS_OFF # Failsafe bei Neustart
 
   # Die Hintergrundbeleuchtung (Nicht bedienbar in HA)
   - platform: gpio
-    pin: GPIO3
+    pin: GPIO1
     id: backlight_switch
     internal: true
     restore_mode: ALWAYS_ON
@@ -177,16 +181,30 @@ number:
 sensor:
   # LDR Helligkeit (Lokal, gefiltert)
   - platform: adc
-    pin: GPIO2
+    pin: GPIO0
     id: ldr_sensor
-    internal: true 
+    name: "LDR"
+    entity_category: "diagnostic" 
     update_interval: 2s
     filters:
-      - sliding_window_moving_average:
-          window_size: 5
-          send_every: 1
+      - lambda: |-
+          static float last_value = NAN;
+          if (isnan(last_value)) {
+            last_value = x;
+            return x;
+          }
+          float alpha;
+          if (x > last_value) {
+            // Schnell ansteigen → hoher Alpha-Wert (nah an 1.0)
+            alpha = 0.9;
+          } else {
+            // Langsam sinken → niedriger Alpha-Wert (nah an 0.0)
+            alpha = 0.45;
+          }
+          last_value = alpha * x + (1.0 - alpha) * last_value;
+          return last_value;
     on_value_range:
-      - below: 0.4
+      - below: 0.5
         then:
           - switch.turn_off: backlight_switch
       - above: 0.6
@@ -194,10 +212,23 @@ sensor:
           - switch.turn_on: backlight_switch
 
   # Innentemperatur
-  - platform: dallas
-    address: 0
+  - platform: dallas_temp
+    address: 0            # Wildcard, solange nur ein Sensor angeschlossen ist am Bus
     id: innen_temp
+    resolution: 10
+    update_interval: 10s
     name: "Gehäuse Temperatur"
+    filters:
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 1
+    on_raw_value:
+      then:
+        - lambda: |-
+            // 85.0°C ist der Power-On-Reset-Wert des DS18B20 -> wie Lesefehler behandeln
+            if (!isnan(x) && fabsf(x - 85.0f) > 0.01f) {
+              id(temp_sensor_timer) = 0;
+            }
 
 # ==========================================
 # HOME ASSISTANT SENSOREN (Importiert)
@@ -221,21 +252,36 @@ binary_sensor:
     lambda: 'return id(backlight_switch).state;'
 
 # ==========================================
+# STATUS-TEXT (HA Logbuch)
+# ==========================================
+text_sensor:
+  - platform: template
+    name: "Status"
+    id: status_sensor
+    icon: "mdi:pump"
+
+# ==========================================
 # HAUPTLOGIK (Prioritäten-Kaskade)
 # ==========================================
 interval:
   - interval: 1s
     then:
       - lambda: |-
-          // 1. API Timer aktualisieren
+          // 1. Watchdog-Timer aktualisieren
           if (!id(api_connected)) {
             id(api_disconnected_timer) += 1;
           } else {
             id(api_disconnected_timer) = 0;
           }
+          id(temp_sensor_timer) += 1; // wird in on_raw_value des DS18B20 zurückgesetzt
+          if (isnan(id(wp_mitteltemperatur).state)) {
+            id(mittel_temp_timer) += 1;
+          } else {
+            id(mittel_temp_timer) = 0;
+          }
 
           // 2. Variablen laden
-          float t_innen = id(innen_temp).has_state() ? id(innen_temp).state : 20.0;
+          float t_innen = id(innen_temp).state; // NaN solange kein gültiger Messwert
           float limit = id(ha_limit).state;
           float t_mittel = id(wp_mitteltemperatur).state; // NaN falls HA noch lädt
           float schwelle = id(ha_schwellwert).state;
@@ -247,34 +293,39 @@ interval:
           // --- PRIORITÄTEN-BAUM ---
 
           // Prio 1: Überhitzungsschutz
-          if (t_innen > limit) {
+          if (!isnan(t_innen) && t_innen > limit) {
             fail_safe = true;
             id(current_error) = 1;
           }
-          // Prio 2: WLAN Ausfall
+          // Prio 2: Temperatursensor defekt (kein gültiger Wert seit ${temp_sensor_timeout}s)
+          else if (id(temp_sensor_timer) > ${temp_sensor_timeout}) {
+            fail_safe = true;
+            id(current_error) = 6;
+          }
+          // Prio 3: WLAN Ausfall
           else if (!wifi::global_wifi_component->is_connected()) {
             fail_safe = true;
             id(current_error) = 2;
           }
-          // Prio 3: API Ausfall (> 1 Stunde / 3600s)
+          // Prio 4: API Ausfall (> 1 Stunde / 3600s)
           else if (id(api_disconnected_timer) > 3600) {
             fail_safe = true;
             id(current_error) = 3;
           }
-          // Prio 4: Hauptschalter AUS
+          // Prio 5: Hauptschalter AUS
           else if (!id(hauptschalter).state) {
             fail_safe = true;
             id(current_error) = 4;
           }
-          // Prio 5: Übersteuerung EIN
+          // Prio 6: Übersteuerung EIN
           else if (id(uebersteuerung).state) {
             target_relay_state = true; 
             id(current_error) = 5;
           }
-          // Prio 6: Automatik (Normalbetrieb)
+          // Prio 7: Automatik (Normalbetrieb)
           else {
-            id(current_error) = 0;
             if (!isnan(t_mittel)) {
+              id(current_error) = 0;
               if (t_mittel > schwelle) {
                 target_relay_state = true; // Sommer, Pumpe aus
               } else if (t_mittel < (schwelle - hyst)) {
@@ -282,9 +333,13 @@ interval:
               } else {
                 target_relay_state = id(relais).state; // Hysterese-Band halten
               }
-            } else {
+            } else if (id(mittel_temp_timer) > ${mittel_temp_timeout}) {
               fail_safe = true;
-              id(current_error) = 3; 
+              id(current_error) = 7; 
+            } else {
+              // Mitteltemperatur kurz nicht verfügbar (z.B. HA-Neustart): letzten Zustand halten
+              id(current_error) = 0;
+              target_relay_state = id(relais).state;
             }
           }
 
@@ -299,6 +354,29 @@ interval:
             } else {
               id(relais).turn_off();
             }
+          }
+
+          // 4. Status-Text bei Zustandswechsel publizieren (HA-Logbuch)
+          static int last_error = -1;
+          if (id(current_error) != last_error) {
+            last_error = id(current_error);
+            const char *status;
+            switch (id(current_error)) {
+              case 1: status = "FEHLER: Überhitzung Gehäuse"; break;
+              case 2: status = "FEHLER: WLAN getrennt"; break;
+              case 3: status = "FEHLER: HA-API >1h getrennt"; break;
+              case 4: status = "AUS: Hauptschalter"; break;
+              case 5: status = "Übersteuerung aktiv"; break;
+              case 6: status = "FEHLER: Temperatursensor defekt"; break;
+              case 7: status = "FEHLER: Mitteltemperatur fehlt"; break;
+              default: status = "Automatik"; break;
+            }
+            if (id(current_error) == 0 || id(current_error) == 4 || id(current_error) == 5) {
+              ESP_LOGI("smartblock", "Statuswechsel: %s", status);
+            } else {
+              ESP_LOGW("smartblock", "Statuswechsel: %s (Code %d)", status, id(current_error));
+            }
+            id(status_sensor).publish_state(status);
           }
 
 # ==========================================
@@ -316,28 +394,32 @@ font:
     size: 10
   - file: "https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf"
     id: icons_xlarge
-    size: 60
+    size: 80
     glyphs:
       - "\U000F0E01"  # mdi:thermometer-alert
+      - "\U000F1531"  # mdi:thermometer-off
       - "\U000F05AA"  # mdi:wifi-off
       - "\U000F1257"  # mdi:api-off
       - "\U000F0425"  # mdi:power
       - "\U000F1B22"  # mdi:pump-off
   - file: "https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf"
-    id: icons_medium
-    size: 40
+    id: icons_large
+    size: 60
     glyphs:
       - "\U000F05A8"  # mdi:white-balance-sunny
       - "\U000F0717"  # mdi:snowflake
+  - file: "https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf"
+    id: icons_medium
+    size: 40
+    glyphs:
       - "\U000F1B22"  # mdi:pump-off
       - "\U000F1402"  # mdi:pump
 
 display:
   - platform: mipi_spi
     model: ST7735
-    cs_pin: GPIO23 # Dummy Pin!
-    dc_pin: GPIO5
-    reset_pin: GPIO4
+    dc_pin: GPIO21
+    reset_pin: GPIO2
     dimensions:
       width: 80
       height: 160
@@ -356,38 +438,40 @@ display:
 
       if (err == 1) {
         it.printf(center_x, center_y, id(icons_xlarge), Color(255, 50, 50), TextAlign::CENTER, "\U000F0E01");
-        it.printf(center_x, center_y + 50, id(font_large), Color(255, 180, 50), TextAlign::CENTER, "%.1f°C", id(innen_temp).state);
+        it.printf(center_x, center_y + 55, id(font_large), Color(255, 180, 50), TextAlign::CENTER, "%.1f°C", id(innen_temp).state);
       } else if (err == 2) {
         it.printf(center_x, center_y, id(icons_xlarge), Color(255, 50, 50), TextAlign::CENTER, "\U000F05AA");
-      } else if (err == 3) {
+      } else if (err == 3 || err == 7) {
         it.printf(center_x, center_y, id(icons_xlarge), Color(255, 100, 50), TextAlign::CENTER, "\U000F1257");
+      } else if (err == 6) {
+        it.printf(center_x, center_y, id(icons_xlarge), Color(255, 50, 50), TextAlign::CENTER, "\U000F1531");
       } else if (err == 4) {
         it.printf(center_x, center_y, id(icons_xlarge), Color(200, 200, 200), TextAlign::CENTER, "\U000F0425");
       } else if (err == 5) {
         it.printf(center_x, center_y, id(icons_xlarge), Color(255, 150, 0), TextAlign::CENTER, "\U000F1B22");
       } else {
         if (id(relais).state) {
-          it.printf(center_x, 25, id(icons_medium), Color(255, 200, 0), TextAlign::CENTER, "\U000F05A8");
+          it.printf(center_x, 30, id(icons_large), Color(255, 200, 0), TextAlign::CENTER, "\U000F05A8");
         } else {
-          it.printf(center_x, 25, id(icons_medium), Color(100, 200, 255), TextAlign::CENTER, "\U000F0717");
+          it.printf(center_x, 30, id(icons_large), Color(100, 200, 255), TextAlign::CENTER, "\U000F0717");
         }
 
         if (id(wp_mitteltemperatur).has_state()) {
-          it.printf(center_x, 70, id(font_large), Color(100, 255, 100), TextAlign::CENTER, "%.1f°C", id(wp_mitteltemperatur).state);
+          it.printf(center_x, 72, id(font_large), Color(100, 255, 100), TextAlign::CENTER, "%.1f°C", id(wp_mitteltemperatur).state);
         } else {
-          it.print(center_x, 70, id(font_large), Color(100, 255, 100), TextAlign::CENTER, "--.-°C");
+          it.print(center_x, 72, id(font_large), Color(100, 255, 100), TextAlign::CENTER, "--.-°C");
         }
 
         float schwelle = id(ha_schwellwert).state;
-        it.printf(center_x, 95, id(font_medium), Color(180, 180, 180), TextAlign::CENTER, "S: %.0f°C", schwelle);
+        it.printf(center_x, 97, id(font_medium), Color(180, 180, 180), TextAlign::CENTER, "S: %.0f°C", schwelle);
 
         if (id(relais).state) {
-          it.printf(center_x, 128, id(icons_medium), Color(180, 180, 180), TextAlign::CENTER, "\U000F1B22");
+          it.printf(center_x, 130, id(icons_medium), Color(180, 180, 180), TextAlign::CENTER, "\U000F1B22");
         } else {
-          it.printf(center_x, 128, id(icons_medium), Color(180, 180, 180), TextAlign::CENTER, "\U000F1402");
+          it.printf(center_x, 130, id(icons_medium), Color(180, 180, 180), TextAlign::CENTER, "\U000F1402");
         }
 
         if (id(innen_temp).has_state()) {
-          it.printf(center_x, 158, id(font_tiny), Color(100, 100, 100), TextAlign::BASELINE_CENTER, "G: %.1f°C", id(innen_temp).state);
+          it.printf(center_x, 160, id(font_tiny), Color(100, 100, 100), TextAlign::BASELINE_CENTER, "G: %.1f°C", id(innen_temp).state);
         }
       }
