@@ -1,0 +1,585 @@
+substitutions:
+  fw_version: "1.0.0"
+  # ESP32-C6
+  # ANPASSUNG DER DIAGNOSE-GRENZWERTE
+  diag_min_heap_ok: "80000"        # Mindestens 80 KB freien RAM erwarten wir im Normalbetrieb
+  diag_min_heap_critical: "40000"  # Unter 40 KB wird es kritisch
+  # SCHALTER-ENTPRELLUNG
+  entprell_zeit: "50ms"            # Bei sehr starkem Prellen auf 100ms erhöhen
+  # FEHLERERKENNUNG & SCHUTZ
+  temp_sensor_timeout: "60"        # Ohne gültigen DS18B20-Wert -> Fehler 2 (Sensor defekt)
+  abkuehl_hysterese: "10"          # Kelvin unter Limit, bis die Übertemperatur-Sperre löst
+
+esphome:
+  name: ha-smartrelais
+  friendly_name: ha-smartrelais
+  project:
+    name: "tsgwiro1.ha-smartrelais"
+    version: "${fw_version}"
+  # Restaurierte Zählerstände nach dem Boot an HA publizieren
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          id(restzeit_sensor).publish_state(0);
+          id(schaltspiele_sensor).publish_state(id(schaltspiele_heute));
+          id(einschaltzeit_heute_sensor).publish_state(id(tages_einschaltzeit_s) / 3600.0f);
+          id(betriebsstunden_sensor).publish_state(id(betriebszeit_total_s) / 3600.0f);
+
+esp32:
+  board: esp32-c6-devkitc-1
+  variant: esp32c6
+  framework:
+    type: esp-idf
+
+# Einbinden des gemeinsamen Diagnose-Files
+packages:
+  diagnostics: !include common/diagnostics.yaml
+
+# Betriebsstundenzähler schonend ins Flash schreiben
+preferences:
+  flash_write_interval: 10min
+
+# Webserver aktivieren
+web_server:
+  port: 80
+
+# Globale Variablen für Logik und Zähler
+globals:
+  - id: restzeit_s
+    type: int
+    initial_value: '0'
+  - id: sperre_uebertemperatur
+    type: bool
+    initial_value: 'false'
+  - id: sperre_sensor
+    type: bool
+    initial_value: 'false'
+  - id: temp_sensor_timer
+    type: int
+    initial_value: '0'
+  - id: tages_einschaltzeit_s
+    type: int
+    initial_value: '0'
+  - id: betriebszeit_total_s
+    type: int
+    restore_value: yes
+    initial_value: '0'
+  - id: schaltspiele_heute
+    type: int
+    initial_value: '0'
+  - id: tagesmax_temp
+    type: float
+    initial_value: 'NAN'
+  - id: current_status
+    type: int
+    initial_value: '-1'
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret smartrelais_api_key
+
+ota:
+  platform: esphome
+  password: !secret smartrelais_ota_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: !secret smartrelais_fallback_ap_ssid
+    password: !secret smartrelais_fallback_ap_password
+
+logger:
+
+captive_portal:
+
+# Zeitquelle für Mitternachts-Resets (Tageszähler, Spitzentemperatur, Tageslimit)
+time:
+  - platform: homeassistant
+    id: ha_time
+    on_time:
+      - hours: 0
+        minutes: 0
+        seconds: 0
+        then:
+          - lambda: |-
+              id(tages_einschaltzeit_s) = 0;
+              id(schaltspiele_heute) = 0;
+              id(tagesmax_temp) = id(ssr_temp).state;  // Neustart mit aktuellem Wert (NaN erlaubt)
+              id(einschaltzeit_heute_sensor).publish_state(0);
+              id(schaltspiele_sensor).publish_state(0);
+              if (!isnan(id(tagesmax_temp))) {
+                id(spitzentemp_sensor).publish_state(id(tagesmax_temp));
+              }
+              ESP_LOGI("smartrelais", "Mitternacht: Tageszähler zurückgesetzt");
+
+# ==========================================
+# HARDWARE PINS & BUSSES
+# ==========================================
+one_wire:
+  - platform: gpio
+    pin: GPIO16
+
+# ==========================================
+# INTERNE OUTPUTS, RELAIS & SCHALTER
+# ==========================================
+output:
+  # Status-LED an J6 (LED hängt an +3.3V -> aktiv LOW)
+  - platform: gpio
+    pin:
+      number: GPIO0
+      inverted: true
+    id: led_out
+
+switch:
+  # Das physische SSR (Nicht bedienbar in HA)
+  - platform: gpio
+    pin: GPIO21
+    id: relais
+    internal: true
+    restore_mode: ALWAYS_OFF # Failsafe bei Neustart: Last immer aus
+
+# ==========================================
+# ESPHOME SCHALTER (an HA gesendet)
+# ==========================================
+  # Hauptschalter
+  - platform: template
+    name: "Hauptschalter"
+    id: hauptschalter
+    entity_category: "config"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+  # Dauerbetrieb (Relais dauerhaft EIN, schutzüberwacht)
+  - platform: template
+    name: "Dauerbetrieb"
+    id: dauerbetrieb
+    entity_category: "config"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+
+  # Nachtriggern (EIN: Flanke verlängert Timer / AUS: Flanke schaltet ab)
+  - platform: template
+    name: "Nachtriggern"
+    id: nachtriggern
+    entity_category: "config"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+# ==========================================
+# SCHALTEREINGANG AN J3 (GPIO18 gegen GND)
+# ==========================================
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO18
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    id: wandschalter
+    internal: true
+    filters:
+      # Software-Entprellung: Pegel muss ${entprell_zeit} stabil anliegen
+      - delayed_on: ${entprell_zeit}
+      - delayed_off: ${entprell_zeit}
+    on_state:
+      # Beide Flanken lösen dieselbe Aktion aus - die Schalterstellung ist egal
+      - script.execute: flanke_ausloesen
+
+# ==========================================
+# STATUS-RÜCKMELDUNGEN (Read-Only in HA)
+# ==========================================
+  - platform: template
+    name: "Relais Status"
+    lambda: 'return id(relais).state;'
+
+  # Frühwarnung: SSR-Temperatur über Warnschwelle (schaltet nicht ab)
+  - platform: template
+    name: "Temperatur-Warnung"
+    id: temp_warnung
+    entity_category: "diagnostic"
+    device_class: heat
+    lambda: |-
+      float t = id(ssr_temp).state;
+      if (isnan(t)) return false;
+      // Warnschwelle ist immer unterhalb des Abschalt-Limits wirksam
+      float warn = std::min(id(ha_fruehwarn).state, id(ha_limit).state - 1.0f);
+      return t >= warn;
+    on_state:
+      - lambda: |-
+          if (x) {
+            ESP_LOGW("smartrelais", "WARNUNG: SSR-Temperatur hoch (%.1f°C)", id(ssr_temp).state);
+          } else {
+            ESP_LOGI("smartrelais", "SSR-Temperatur wieder im Normalbereich");
+          }
+
+# ==========================================
+# FLANKEN-LOGIK (Schalter, Button & HA)
+# ==========================================
+script:
+  - id: flanke_ausloesen
+    mode: single
+    then:
+      - lambda: |-
+          // Gesperrt? Flanke ignorieren (Grund ins Log)
+          if (id(sperre_uebertemperatur)) {
+            ESP_LOGW("smartrelais", "Flanke ignoriert: Übertemperatur-Sperre aktiv");
+            return;
+          }
+          if (id(sperre_sensor)) {
+            ESP_LOGW("smartrelais", "Flanke ignoriert: Temperatursensor defekt");
+            return;
+          }
+          if (!id(hauptschalter).state) {
+            ESP_LOGI("smartrelais", "Flanke ignoriert: Hauptschalter AUS");
+            return;
+          }
+          float tl = id(ha_tageslimit).state;
+          if (tl > 0.05f && id(tages_einschaltzeit_s) >= (int)(tl * 3600.0f)) {
+            ESP_LOGW("smartrelais", "Flanke ignoriert: Tageslimit erreicht");
+            return;
+          }
+          if (id(dauerbetrieb).state) {
+            ESP_LOGI("smartrelais", "Flanke ignoriert: Dauerbetrieb aktiv");
+            return;
+          }
+          int dauer = (int)(id(ha_einschaltdauer).state * 60.0f);
+          if (id(restzeit_s) > 0) {
+            if (id(nachtriggern).state) {
+              id(restzeit_s) = dauer;
+              ESP_LOGI("smartrelais", "Timer neu gestartet (%d min)", dauer / 60);
+            } else {
+              id(restzeit_s) = 0;
+              id(relais).turn_off();
+              ESP_LOGI("smartrelais", "Vorzeitig gestoppt");
+            }
+          } else {
+            id(restzeit_s) = dauer;
+            id(relais).turn_on();  // sofort schalten, nicht erst beim nächsten Interval-Tick
+            ESP_LOGI("smartrelais", "Timer gestartet (%d min)", dauer / 60);
+          }
+
+# ==========================================
+# ESPHOME BUTTONS (Bedienung aus HA/Webserver)
+# ==========================================
+button:
+  - platform: template
+    name: "Manuell starten"
+    icon: "mdi:play"
+    on_press:
+      - script.execute: flanke_ausloesen
+
+  - platform: template
+    name: "Sofort stoppen"
+    icon: "mdi:stop"
+    on_press:
+      - lambda: |-
+          id(restzeit_s) = 0;
+          if (!id(dauerbetrieb).state) {
+            id(relais).turn_off();
+          }
+          ESP_LOGI("smartrelais", "Sofort gestoppt (manuell)");
+
+# ==========================================
+# ESPHOME NUMBERS (Werte in HA einstellbar)
+# ==========================================
+number:
+  # Einschaltdauer Slider
+  - platform: template
+    name: "Einschaltdauer"
+    id: ha_einschaltdauer
+    entity_category: "config"
+    icon: "mdi:timer-outline"
+    optimistic: true
+    restore_value: true
+    initial_value: 30
+    min_value: 1
+    max_value: 120
+    step: 1
+    mode: slider
+    unit_of_measurement: "min"
+
+  # Übertemperatur Limit Slider
+  - platform: template
+    name: "Übertemperatur Limit"
+    id: ha_limit
+    device_class: TEMPERATURE
+    entity_category: "config"
+    optimistic: true
+    restore_value: true
+    initial_value: 70
+    min_value: 40
+    max_value: 90
+    step: 1
+    mode: slider
+    unit_of_measurement: "°C"
+
+  # Frühwarnschwelle Slider
+  - platform: template
+    name: "Frühwarnschwelle"
+    id: ha_fruehwarn
+    device_class: TEMPERATURE
+    entity_category: "config"
+    optimistic: true
+    restore_value: true
+    initial_value: 60
+    min_value: 30
+    max_value: 85
+    step: 1
+    mode: slider
+    unit_of_measurement: "°C"
+
+  # Tageslimit Slider (0 = deaktiviert)
+  - platform: template
+    name: "Tageslimit"
+    id: ha_tageslimit
+    entity_category: "config"
+    icon: "mdi:timer-lock-outline"
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+    min_value: 0
+    max_value: 12
+    step: 0.5
+    mode: slider
+    unit_of_measurement: "h"
+
+# ==========================================
+# LOKALE SENSOREN (DS18B20 AM SSR)
+# ==========================================
+sensor:
+  - platform: dallas_temp
+    address: 0            # Wildcard, solange nur ein Sensor angeschlossen ist am Bus
+    id: ssr_temp
+    resolution: 10
+    update_interval: 10s
+    name: "SSR Temperatur"
+    filters:
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 1
+    on_raw_value:
+      then:
+        - lambda: |-
+            // 85.0°C ist der Power-On-Reset-Wert des DS18B20 -> wie Lesefehler behandeln
+            if (!isnan(x) && fabsf(x - 85.0f) > 0.01f) {
+              id(temp_sensor_timer) = 0;
+            }
+    on_value:
+      then:
+        - lambda: |-
+            // Tagesmaximum mitführen (Vorschlag 6)
+            if (!isnan(x) && (isnan(id(tagesmax_temp)) || x > id(tagesmax_temp))) {
+              id(tagesmax_temp) = x;
+              id(spitzentemp_sensor).publish_state(x);
+            }
+
+# ==========================================
+# STATUS- & ZÄHLER-SENSOREN (aus der Logik publiziert)
+# ==========================================
+  - platform: template
+    name: "Restzeit"
+    id: restzeit_sensor
+    icon: "mdi:timer-sand"
+    unit_of_measurement: "min"
+    accuracy_decimals: 1
+    update_interval: never
+
+  - platform: template
+    name: "SSR Spitzentemperatur heute"
+    id: spitzentemp_sensor
+    entity_category: "diagnostic"
+    device_class: temperature
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    update_interval: never
+
+  - platform: template
+    name: "Einschaltzeit heute"
+    id: einschaltzeit_heute_sensor
+    entity_category: "diagnostic"
+    icon: "mdi:clock-check-outline"
+    unit_of_measurement: "h"
+    accuracy_decimals: 2
+    update_interval: never
+
+  - platform: template
+    name: "Betriebsstunden total"
+    id: betriebsstunden_sensor
+    entity_category: "diagnostic"
+    icon: "mdi:counter"
+    unit_of_measurement: "h"
+    accuracy_decimals: 1
+    update_interval: never
+
+  - platform: template
+    name: "Schaltspiele heute"
+    id: schaltspiele_sensor
+    entity_category: "diagnostic"
+    icon: "mdi:gesture-tap"
+    accuracy_decimals: 0
+    update_interval: never
+
+# ==========================================
+# STATUS-TEXT (HA Logbuch)
+# ==========================================
+text_sensor:
+  - platform: template
+    name: "Status"
+    id: status_sensor
+    icon: "mdi:electric-switch"
+
+# ==========================================
+# HAUPTLOGIK (Prioritäten-Kaskade)
+# ==========================================
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          // 1. Sensor-Watchdog aktualisieren
+          id(temp_sensor_timer) += 1;  // wird in on_raw_value des DS18B20 zurückgesetzt
+          id(sperre_sensor) = id(temp_sensor_timer) > ${temp_sensor_timeout};
+
+          // 2. Übertemperatur-Sperre mit Abkühl-Hysterese
+          float t = id(ssr_temp).state;  // NaN solange kein gültiger Messwert
+          float limit = id(ha_limit).state;
+          if (!isnan(t) && t > limit) {
+            id(sperre_uebertemperatur) = true;
+          }
+          if (id(sperre_uebertemperatur) && !isnan(t) && t < (limit - ${abkuehl_hysterese})) {
+            id(sperre_uebertemperatur) = false;
+          }
+
+          // 3. Tageslimit prüfen (0 = deaktiviert)
+          float tl = id(ha_tageslimit).state;
+          bool tageslimit_erreicht = (tl > 0.05f) &&
+                                     (id(tages_einschaltzeit_s) >= (int)(tl * 3600.0f));
+
+          // --- PRIORITÄTEN-BAUM ---
+          bool target_relay_state = false;
+          // Prio 1: Übertemperaturschutz
+          if (id(sperre_uebertemperatur)) {
+            id(restzeit_s) = 0;
+            id(current_status) = 1;
+          }
+          // Prio 2: Temperatursensor defekt (Schutz wäre blind)
+          else if (id(sperre_sensor)) {
+            id(restzeit_s) = 0;
+            id(current_status) = 2;
+          }
+          // Prio 3: Hauptschalter AUS
+          else if (!id(hauptschalter).state) {
+            id(restzeit_s) = 0;
+            id(current_status) = 3;
+          }
+          // Prio 4: Tageslimit erreicht
+          else if (tageslimit_erreicht) {
+            id(restzeit_s) = 0;
+            id(current_status) = 4;
+          }
+          // Prio 5: Dauerbetrieb
+          else if (id(dauerbetrieb).state) {
+            target_relay_state = true;
+            id(current_status) = 11;
+          }
+          // Prio 6: Normalbetrieb (Timer)
+          else if (id(restzeit_s) > 0) {
+            target_relay_state = true;
+            id(restzeit_s) -= 1;
+            id(current_status) = 10;
+          } else {
+            id(current_status) = 0;
+          }
+
+          // 4. Relais schalten
+          if (id(relais).state != target_relay_state) {
+            if (target_relay_state) {
+              id(relais).turn_on();
+            } else {
+              id(relais).turn_off();
+            }
+          }
+
+          // 5. Betriebszeit- und Schaltspielzähler (Vorschlag 7)
+          static bool last_relais_on = false;
+          if (id(relais).state) {
+            id(tages_einschaltzeit_s) += 1;
+            id(betriebszeit_total_s) += 1;
+            if (!last_relais_on) {
+              id(schaltspiele_heute) += 1;
+              id(schaltspiele_sensor).publish_state(id(schaltspiele_heute));
+            }
+          }
+          last_relais_on = id(relais).state;
+
+          // 6. Zähler-Sensoren nur bei Wertänderung publizieren
+          static float last_restzeit_pub = -1.0f;
+          float rest_min = roundf(id(restzeit_s) / 6.0f) / 10.0f;  // auf 0.1 min gerundet
+          if (rest_min != last_restzeit_pub) {
+            last_restzeit_pub = rest_min;
+            id(restzeit_sensor).publish_state(rest_min);
+          }
+          static int last_tages_pub = -1;
+          int tages_001h = id(tages_einschaltzeit_s) / 36;  // Hundertstel-Stunden
+          if (tages_001h != last_tages_pub) {
+            last_tages_pub = tages_001h;
+            id(einschaltzeit_heute_sensor).publish_state(id(tages_einschaltzeit_s) / 3600.0f);
+          }
+          static int last_total_pub = -1;
+          int total_01h = id(betriebszeit_total_s) / 360;  // Zehntel-Stunden
+          if (total_01h != last_total_pub) {
+            last_total_pub = total_01h;
+            id(betriebsstunden_sensor).publish_state(id(betriebszeit_total_s) / 3600.0f);
+          }
+
+          // 7. Status-Text bei Zustandswechsel publizieren (HA-Logbuch)
+          static int last_status = -1;
+          if (id(current_status) != last_status) {
+            last_status = id(current_status);
+            const char *status;
+            switch (id(current_status)) {
+              case 1:  status = "FEHLER: Übertemperatur SSR - gesperrt bis Abkühlung"; break;
+              case 2:  status = "FEHLER: Temperatursensor defekt - Gerät gesperrt"; break;
+              case 3:  status = "AUS: Hauptschalter"; break;
+              case 4:  status = "AUS: Tageslimit erreicht"; break;
+              case 10: status = "Aktiv (Timer läuft)"; break;
+              case 11: status = "Dauerbetrieb aktiv"; break;
+              default: status = "Bereit"; break;
+            }
+            if (id(current_status) == 1 || id(current_status) == 2 || id(current_status) == 4) {
+              ESP_LOGW("smartrelais", "Statuswechsel: %s (Code %d)", status, id(current_status));
+            } else {
+              ESP_LOGI("smartrelais", "Statuswechsel: %s", status);
+            }
+            id(status_sensor).publish_state(status);
+          }
+
+# ==========================================
+# STATUS-LED (Blinkmuster, 250ms-Raster)
+# ==========================================
+  - interval: 250ms
+    then:
+      - lambda: |-
+          // 3-Sekunden-Zyklus mit 12 Ticks à 250ms
+          static int tick = 0;
+          tick = (tick + 1) % 12;
+
+          bool led_on;
+          if (id(sperre_uebertemperatur)) {
+            led_on = (tick % 2 == 0);            // schnelles Blinken (2 Hz)
+          } else if (id(sperre_sensor)) {
+            led_on = (tick % 8) < 4;             // langsames Blinken (0.5 Hz)
+          } else if (!id(hauptschalter).state || id(current_status) == 4) {
+            led_on = (tick == 0 || tick == 2);   // Doppelblitz alle 3 s
+          } else {
+            led_on = id(relais).state;           // Dauerlicht = Relais EIN
+          }
+
+          if (led_on) {
+            id(led_out).turn_on();
+          } else {
+            id(led_out).turn_off();
+          }
