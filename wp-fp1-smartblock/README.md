@@ -131,6 +131,8 @@ Um das Display zu schonen und im Heizungskeller keinen unnötigen Lichtschein zu
 
 Der Smartblock deklariert seine Steuerelemente direkt als native Entitäten, wodurch sie in Home Assistant automatisch in der Kategorie **Konfiguration** bzw. **Diagnose** auftauchen. Dank `restore_value: true` bleiben alle Einstellungen auch nach einem Stromausfall direkt auf dem ESP gespeichert.
 
+> **Hinweis zu den Entity-IDs:** Die folgenden Entitäten sind der Lesbarkeit halber nur mit dem **Suffix** angegeben (z.B. `switch.hauptschalter`). Home Assistant stellt jeder Entity-ID den slugifizierten Gerätenamen voran. In dieser Installation heißt das Gerät „Infrastructure wp-fp1-smartblock", die vollständige ID lautet also z.B. `switch.infrastructure_wp_fp1_smartblock_hauptschalter`. Wird das Gerät in HA umbenannt, ändert sich dieses Präfix entsprechend.
+
 ### Konfiguration (Bedienbar in HA)
 * **Hauptschalter (`switch.hauptschalter`):** Aktiviert oder deaktiviert das gesamte Automatiksystem (Default: ON).
 * **Übersteuerung (`switch.ubersteuerung`):** Erzwingt das sofortige Ausschalten der Pumpe (Default: OFF).
