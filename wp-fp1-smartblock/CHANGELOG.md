@@ -13,7 +13,8 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 - **Sensor-Watchdog:** Ausfallerkennung für den DS18B20 – liefert der Sensor länger als 60 s (Substitution `temp_sensor_timeout`) keinen gültigen Wert (NaN oder den 85.0°C-Power-On-Reset-Wert), fällt das Relais ab und das Display zeigt `mdi:thermometer-off`.
 - **Mitteltemperatur-Überwachung:** Fehlt die von HA gelieferte Mitteltemperatur länger als 60 s (Substitution `mittel_temp_timeout`), greift der Failsafe als eigener Fehlercode. Kürzere Aussetzer (z.B. HA-Neustart) werden durch Halten des letzten Zustands überbrückt – kein Relais-Klackern.
 - **Status-Text-Sensor:** Klartext-Systemzustand (z.B. `Automatik`, `FEHLER: Temperatursensor defekt`, `FEHLER: Mitteltemperatur fehlt`) wird nur bei Zustandswechseln an HA publiziert – genau ein Logbuch-Eintrag pro Ereignis, zusätzlich Einträge im ESPHome-Log.
-- **Intelligentes Backlight:** Automatische Abschaltung der Display-Hintergrundbeleuchtung (`GPIO1`) bei Dunkelheit via LDR (`GPIO0`), stabilisiert durch einen asymmetrischen EMA-Filter (schnell hell bei α = 0.9, langsam dunkel bei α = 0.45; Schwellen 0.5/0.6 V).
+- **Feste Antennenwahl:** Beim Boot (`on_boot`, Priorität 800) wird der Onboard-RF-Switch über `GPIO3` aktiviert und mit `GPIO14` fest die interne Keramikantenne gewählt – der Funkpfad ist damit unabhängig vom Auslieferungszustand des XIAO-Moduls eindeutig definiert.
+- **Intelligentes Backlight:** Automatische Abschaltung der Display-Hintergrundbeleuchtung (`GPIO1`) bei Dunkelheit via LDR (`GPIO0`), stabilisiert durch einen asymmetrischen EMA-Filter (sehr schnell hell bei α = 0.99, langsam dunkel bei α = 0.45; Schaltschwellen 0.2/0.4 V).
 - **Home Assistant native Entities:** Bereitstellung von Slidern (`number`) für Schwellwert, Hysterese und Überhitzungslimit sowie Schaltern (`switch`) für Hauptschalter und Übersteuerung direkt vom ESP aus. Alle Entitäten sind als `config` kategorisiert.
 - **Zustandsspeicherung:** Aktivierung von `restore_value: true` und passenden `restore_mode`-Optionen, damit der ESP alle Einstellungen bei einem Stromausfall lokal behält und autark startet.
 - **Lokaler Webserver:** Aktivierung des `web_server`-Moduls auf Port 80, um Statuswerte und Steuerungsmöglichkeiten auch bei komplettem HA-Ausfall im Browser bereitzustellen.
@@ -24,6 +25,8 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 - **Neues Display-Framework:** Umstellung des ST7735-Displays auf das `mipi_spi`-Framework. Der CS-Pin entfällt in der Konfiguration komplett (per Jumper JP1 fest auf GND, bei `mipi_spi` optional) – dadurch bleiben D4/D5 (I2C) vollständig frei.
 - **Versions-Anpassung:** Projektversion im `esphome`-Konfigurationsblock offiziell auf `1.0.0` angehoben.
 - **Entkopplung der Hardware-Ebene:** Das physische Relais (`GPIO17`) und der Backlight-Ausgang wurden auf `internal: true` gesetzt. Sie können von Home Assistant nicht mehr direkt manipuliert werden, um Fehlbedienungen auszuschließen. Die Steuerung erfolgt ausschließlich über das interne Regelwerk.
+- **Display-Ausrichtung:** Display um 180° gedreht (`rotation: 180`) passend zur Einbaulage.
+- **Entity-Benennung:** Diagnose-Entitäten an das nummerierte Namensschema angeglichen (`1.0 Backlight`, `1.1 LDR`); Relais-Statussensor auf `Relais` verkürzt.
 
 ### Sicherheit
 - **Fail-Safe-Verdrahtung:** Das Relais agiert als Öffner (Normally Closed). Bei jeglicher logischer Störung (Überhitzung, Sensorausfall, WLAN weg, API für > 1h getrennt, Mitteltemperatur fehlt) fällt das Relais ab. Dadurch wird der Stromkreis geschlossen und die Hoheit augenblicklich und zu 100% an die originale Heizungssteuerung zurückgegeben.

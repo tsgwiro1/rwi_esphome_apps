@@ -89,8 +89,12 @@ Das Projekt basiert auf dem kompakten Seeed Studio XIAO ESP32-C6 Modul und einem
 | **Relais** | D7 | `GPIO17` | Schaltet das physische Leistungsrelais (NC verdrahtet) |
 | **SPI SCK** | D8 | `GPIO19` | Serial Clock für das TFT-Display |
 | **SPI MOSI** | D10 | `GPIO18` | Master Out Slave In für das TFT-Display |
+| **RF-Switch Power** | — | `GPIO3` | Onboard-RF-Switch aktivieren (intern, beim Boot auf LOW) |
+| **Antennen-Auswahl** | — | `GPIO14` | Antennenumschaltung (LOW = interne Keramikantenne) |
 
 **Hinweis zum CS-Pin:** Der CS-Pin des Displays liegt per Jumper (JP1) fest auf GND und wird daher in der Konfiguration weggelassen (bei `mipi_spi` optional). Dadurch bleiben D4/D5 (I2C) vollständig frei.
+
+**Hinweis zur Antenne:** Beim Boot (`on_boot`, Priorität 800) wird der RF-Switch über `GPIO3` aktiviert und mit `GPIO14` fest die **interne Keramikantenne** ausgewählt. So ist der Funkpfad unabhängig vom Auslieferungszustand des Moduls eindeutig definiert; eine externe U.FL-Antenne wird nicht verwendet.
 
 ---
 
@@ -117,9 +121,9 @@ Im regulären Automatikbetrieb ist das Display in 5 klar strukturierte Zonen unt
 5. **Zone 5 (Ganz unten):** Die lokale **Gehäusetemperatur** (Sehr klein & Dunkelgrau, z.B. `G: 34.2°C`), um den unauffälligen Betrieb des Überhitzungsschutzes zu kontrollieren.
 
 ### Lokale LDR-Hintergrundbeleuchtung
-Um das Display zu schonen und im Heizungskeller keinen unnötigen Lichtschein zu erzeugen, filtert der ESP die ADC-Werte des LDR über einen asymmetrischen exponentiellen Glättungsfilter (EMA): Steigende Helligkeit wird schnell übernommen (α = 0.9), fallende Helligkeit nur langsam (α = 0.45). So erwacht das Display beim Einschalten des Lichts sofort, flackert aber bei kurzen Schatten nicht.
-* Wird es im Raum dauerhaft dunkel (Spannung < 0.5V), schaltet der ESP das Backlight komplett aus.
-* Wird das Raumlicht eingeschaltet (Spannung > 0.6V), erwacht das Display sofort wieder zum Leben.
+Um das Display zu schonen und im Heizungskeller keinen unnötigen Lichtschein zu erzeugen, filtert der ESP die ADC-Werte des LDR über einen asymmetrischen exponentiellen Glättungsfilter (EMA): Steigende Helligkeit wird sehr schnell übernommen (α = 0.99), fallende Helligkeit nur langsam (α = 0.45). So erwacht das Display beim Einschalten des Lichts sofort, flackert aber bei kurzen Schatten nicht.
+* Wird es im Raum dauerhaft dunkel (Spannung < 0.2V), schaltet der ESP das Backlight komplett aus.
+* Wird das Raumlicht eingeschaltet (Spannung > 0.4V), erwacht das Display sofort wieder zum Leben.
 
 ---
 
@@ -136,10 +140,10 @@ Der Smartblock deklariert seine Steuerelemente direkt als native Entitäten, wod
 
 ### Diagnose & Status (Read-Only in HA)
 * **Status (`sensor.status`):** Klartext-Systemzustand für Logbuch & Dashboard (z.B. `Automatik`, `FEHLER: Temperatursensor defekt`, `FEHLER: Mitteltemperatur fehlt`). Wird nur bei Zustandswechseln aktualisiert, sodass im HA-Logbuch genau ein Eintrag pro Ereignis entsteht.
-* **Relais Status (`binary_sensor.relais_status`):** Zeigt an, ob das Relais angezogen (Stromkreis offen / Pumpe aus) ist.
-* **Backlight Status (`binary_sensor.backlight_status`):** Gibt Rückmeldung, ob das Display-Backlight gerade aktiv ist.
+* **Relais (`binary_sensor.relais`):** Zeigt an, ob das Relais angezogen (Stromkreis offen / Pumpe aus) ist.
+* **1.0 Backlight (`binary_sensor.1_0_backlight`):** Gibt Rückmeldung, ob das Display-Backlight gerade aktiv ist.
 * **Gehäuse Temperatur (`sensor.gehause_temperatur`):** Der aktuelle Temperaturwert des DS18B20 auf der Platine, geglättet über einen gleitenden Mittelwert (10 Messungen, Update alle 10 s).
-* **LDR (`sensor.ldr`):** Die gefilterte Helligkeitsspannung des Fotowiderstands (Diagnose der Backlight-Automatik).
+* **1.1 LDR (`sensor.1_1_ldr`):** Die gefilterte Helligkeitsspannung des Fotowiderstands (Diagnose der Backlight-Automatik).
 
 ### Erforderliche HA-Entitäten (Importiert)
 * `sensor.wp_mitteltemperatur`: Liefert den berechneten Mittelwert der Außentemperatur an den ESP.
