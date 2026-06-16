@@ -14,7 +14,13 @@ esphome:
   project:
     name: "tsgwiro1.wp-fp1-smartblock"
     version: "${fw_version}"
-
+  on_boot:
+    priority: 800
+    then:
+      - output.turn_off: rf_switch_enable   # GPIO3 LOW -> RF-Switch-Steuerung aktiv
+      - delay: 100ms
+      - output.turn_off: rf_antenna_select  # GPIO14 LOW -> interne Keramikantenne
+      
 esp32:
   board: esp32-c6-devkitc-1
   variant: esp32c6
@@ -88,6 +94,14 @@ spi:
 one_wire:
   - platform: gpio
     pin: GPIO16
+
+output:
+  - platform: gpio
+    pin: GPIO3
+    id: rf_switch_enable
+  - platform: gpio
+    pin: GPIO14
+    id: rf_antenna_select
 
 # ==========================================
 # INTERNE OUTPUTS & RELAIS
@@ -183,7 +197,7 @@ sensor:
   - platform: adc
     pin: GPIO0
     id: ldr_sensor
-    name: "LDR"
+    name: "1.1 LDR"
     entity_category: "diagnostic" 
     update_interval: 2s
     filters:
@@ -196,7 +210,7 @@ sensor:
           float alpha;
           if (x > last_value) {
             // Schnell ansteigen → hoher Alpha-Wert (nah an 1.0)
-            alpha = 0.9;
+            alpha = 0.99;
           } else {
             // Langsam sinken → niedriger Alpha-Wert (nah an 0.0)
             alpha = 0.45;
@@ -204,10 +218,10 @@ sensor:
           last_value = alpha * x + (1.0 - alpha) * last_value;
           return last_value;
     on_value_range:
-      - below: 0.5
+      - below: 0.2
         then:
           - switch.turn_off: backlight_switch
-      - above: 0.6
+      - above: 0.4
         then:
           - switch.turn_on: backlight_switch
 
@@ -243,11 +257,11 @@ sensor:
 # ==========================================
 binary_sensor:
   - platform: template
-    name: "Relais Status"
+    name: "Relais"
     lambda: 'return id(relais).state;'
 
   - platform: template
-    name: "Backlight Status"
+    name: "1.0 Backlight"
     entity_category: "diagnostic"
     lambda: 'return id(backlight_switch).state;'
 
@@ -427,7 +441,7 @@ display:
       offset_height: 1
     invert_colors: true
     color_order: bgr
-    rotation: 0
+    rotation: 180
     update_interval: 1s
     lambda: |-
       int err = id(current_error);
