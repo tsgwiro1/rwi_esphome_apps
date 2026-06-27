@@ -2,6 +2,8 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert. Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/) und diese Versionierung folgt dem [Semantic Versioning](https://semver.org/lang/de/).
 
+> ⚠️ **Bekanntes Problem – ESPHome-Version:** Mit **ESPHome ≥ 2026.6.0** bleibt das ST7735S-Display komplett schwarz (Regression im `mipi_spi`-Treiber, Upstream-Issue [esphome#17050](https://github.com/esphome/esphome/issues/17050)). Verifiziert: selbst ein Minimal-Build (rotation 0, Offset 0/0, Vollbild-Fill) zeigt nichts; `pad_*`/`transform` helfen nicht. Dieses Gerät daher auf **ESPHome 2026.5.3** halten (in Fleet pinnen), bis der Bug upstream behoben ist.
+
 ---
 
 ## [1.0.2] - 2026-06-27

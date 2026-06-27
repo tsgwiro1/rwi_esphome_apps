@@ -421,6 +421,9 @@ font:
       - "\U000F1402"  # mdi:pump
 
 display:
+  # ACHTUNG: Nur mit ESPHome <= 2026.5.x bauen/flashen!
+  # Auf 2026.6.x bleibt das Display schwarz (mipi_spi-Regression, esphome#17050).
+  # Dort NICHT mit pad_*/transform "reparieren" – wurde verifiziert, hilft nicht.
   - platform: mipi_spi
     model: ST7735
     dc_pin: GPIO21
