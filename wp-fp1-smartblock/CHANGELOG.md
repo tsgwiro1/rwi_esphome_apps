@@ -4,6 +4,13 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 
 ---
 
+## [1.0.2] - 2026-06-27
+
+### Geändert
+- **Display-Tausch:** Das ursprüngliche LCD war defekt und wurde ersetzt. Das neue Panel benötigt eine andere Farbeinstellung – `invert_colors` von `true` auf `false` umgestellt, damit die Farben wieder korrekt dargestellt werden.
+
+---
+
 ## [1.0.1] - 2026-06-27
 
 ### Behoben

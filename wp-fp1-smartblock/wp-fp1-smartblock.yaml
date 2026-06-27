@@ -1,5 +1,5 @@
 substitutions:
-  fw_version: "1.0.1"
+  fw_version: "1.0.2"
   # ESP32-C6 
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"        # Mindestens 80 KB freien RAM erwarten wir im Normalbetrieb
@@ -430,7 +430,7 @@ display:
       height: 160
       offset_width: 26
       offset_height: 1
-    invert_colors: true
+    invert_colors: false
     color_order: bgr
     rotation: 180
     update_interval: 1s
