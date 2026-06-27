@@ -1,5 +1,5 @@
 substitutions:
-  fw_version: "1.0.0"
+  fw_version: "1.0.1"
   # ESP32-C6 
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"        # Mindestens 80 KB freien RAM erwarten wir im Normalbetrieb
@@ -37,9 +37,6 @@ web_server:
 
 # Globale Variablen für Logik und Fallbacks
 globals:
-  - id: api_connected
-    type: bool
-    initial_value: 'false'
   - id: api_disconnected_timer
     type: int
     initial_value: '0'
@@ -55,19 +52,9 @@ globals:
 
 # Enable Home Assistant API
 api:
+  id: api_id
   encryption:
     key: !secret smartblock_api_key
-  on_client_connected:
-    - globals.set:
-        id: api_connected
-        value: 'true'
-    - globals.set:
-        id: api_disconnected_timer
-        value: '0'
-  on_client_disconnected:
-    - globals.set:
-        id: api_connected
-        value: 'false'
 
 ota:
   platform: esphome
@@ -282,10 +269,14 @@ interval:
     then:
       - lambda: |-
           // 1. Watchdog-Timer aktualisieren
-          if (!id(api_connected)) {
-            id(api_disconnected_timer) += 1;
-          } else {
+          // is_connected() prüft die Anzahl aktiver API-Verbindungen (nicht eine
+          // kippbare Boolean): solange HA verbunden ist, bleibt der Zähler >= 1,
+          // auch wenn ein Logger-/Ping-Client (z.B. Fleet-Live-Log) auf-/zugeht.
+          // Gescheiterte Klartext-Probes erhöhen den Zähler gar nicht erst.
+          if (id(api_id).is_connected()) {
             id(api_disconnected_timer) = 0;
+          } else {
+            id(api_disconnected_timer) += 1;
           }
           id(temp_sensor_timer) += 1; // wird in on_raw_value des DS18B20 zurückgesetzt
           if (isnan(id(wp_mitteltemperatur).state)) {

@@ -4,6 +4,14 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 
 ---
 
+## [1.0.1] - 2026-06-27
+
+### Behoben
+- **Fehlerhafte API-Verbindungserkennung:** Der Verbindungsstatus wurde über eine globale Boolean in `on_client_connected`/`on_client_disconnected` geführt. Ein einzelner zusätzlicher oder unverschlüsselter Client (z.B. ein Fleet-Live-Log oder ein Klartext-Ping ohne Encryption-Key) löste `on_client_disconnected` aus und setzte den Status dauerhaft auf „getrennt", obwohl die Home-Assistant-Hauptverbindung bestand. In der Folge lief der API-Watchdog voll und hätte nach einer Stunde fälschlich den Failsafe (Prio 4) ausgelöst.
+- **Lösung:** Direkte Abfrage der API über `id(api_id).is_connected()` im 1-Sekunden-Interval. Diese Methode wertet die Anzahl aktiver Verbindungen aus statt einer kippbaren Boolean – solange Home Assistant verbunden ist, bleibt der Status korrekt, auch wenn ein Logger-/Ping-Client (z.B. Fleet-Live-Log) auf- und wieder zugeht. Die globale `api_connected`-Variable und die `on_client_connected`/`on_client_disconnected`-Handler wurden entfernt.
+
+---
+
 ## [1.0.0] - 2026-06-11
 
 ### Hinzugefügt
