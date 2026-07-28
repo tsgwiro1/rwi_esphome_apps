@@ -13,11 +13,15 @@ esphome:
           // 1. Kalibrierungs-Sensoren initialisieren
           id(cal_status).publish_state("Initialisiere...");
           id(cal_active).publish_state(false);
-          
+
           // 2. SHT Defog-Sensoren initialisieren
           id(sht_defog_status).publish_state("Normalbetrieb");
-          
-          // 3. PID-Regler beim Start hart auf AUS zwingen
+          id(sht_defog_active).publish_state(false);
+
+          // 3. Regen-Status einmalig setzen (danach nur noch bei Flankenwechsel)
+          id(rain_binary).publish_state(id(is_raining));
+
+          // 4. PID-Regler beim Start hart auf AUS zwingen
           auto call = id(rain_heater_pid).make_call();
           call.set_mode(climate::CLIMATE_MODE_OFF);
           call.perform();
@@ -29,11 +33,13 @@ esp32:
     type: esp-idf
     
 # Speichert Einstellungen (Nummern, Dropdowns) im Flash-Speicher
+# 10 min statt 1 min: Der PID-Regler sichert bei jedem Sollwertwechsel seinen
+# Zustand ins NVS; ein kurzes Intervall führt zu dauerhaftem Flash-Verschleiss.
 preferences:
-  flash_write_interval: 1min
+  flash_write_interval: 10min
 
 substitutions:
-  fw_version: "1.0.0"
+  fw_version: "1.0.1"
   # ESP32
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
@@ -272,7 +278,9 @@ script:
       - globals.set:
           id: sht_heating_active
           value: 'true'
-      - lambda: 'id(sht_defog_status).publish_state("Heizt (Kondensationsschutz)");'
+      - lambda: |-
+          id(sht_defog_status).publish_state("Heizt (Kondensationsschutz)");
+          id(sht_defog_active).publish_state(true);
           
       # ESPHome Native I2C Write via C++ Lambda (Heizung EIN)
       - lambda: |-
@@ -297,7 +305,9 @@ script:
       - globals.set:
           id: sht_heating_active
           value: 'false'
-      - lambda: 'id(sht_defog_status).publish_state("Normalbetrieb");'
+      - lambda: |-
+          id(sht_defog_status).publish_state("Normalbetrieb");
+          id(sht_defog_active).publish_state(false);
 
 # --------------------------------------------------------
 # LOGIK-SCHLEIFEN (Regen, Heizung, LEDs)
@@ -335,19 +345,38 @@ interval:
           if (target_temp < id(heater_min_temp).state) target_temp = id(heater_min_temp).state;
           if (target_temp > id(heater_max_temp).state) target_temp = id(heater_max_temp).state;
             
+          // Jeder perform() am PID löst intern ein publish_state() (HA-Traffic)
+          // UND ein save_state_() ins NVS (Flash-Verschleiss) aus. Deshalb wird
+          // der Regler nur noch angefasst, wenn sich Modus oder Sollwert wirklich
+          // ändern - die Regelung selbst läuft davon unabhängig autonom weiter.
+          static bool pid_mode_heat = false;
+          static float pid_last_target = NAN;
+          static bool pid_initialized = false;
+
           // FAILSAFE: Prüfen, ob die Sensoren gültige Werte liefern
           if (std::isnan(source_temp) || std::isnan(elev)) {
             // SENSOR-DATEN FEHLEN (z.B. direkt nach dem Booten) -> Heizung ZWINGEND AUS!
-            auto call = id(rain_heater_pid).make_call();
-            call.set_mode(climate::CLIMATE_MODE_OFF); 
-            call.perform();
+            if (!pid_initialized || pid_mode_heat) {
+              auto call = id(rain_heater_pid).make_call();
+              call.set_mode(climate::CLIMATE_MODE_OFF);
+              call.perform();
+              pid_mode_heat = false;
+              pid_last_target = NAN;
+              pid_initialized = true;
+            }
           } else {
-            // SENSOR-DATEN GÜLTIG -> Zieltemperatur berechnen und Heizung EIN! 
-            // Befehl an den PID-Regler absetzen
-            auto call = id(rain_heater_pid).make_call();
-            call.set_mode(climate::CLIMATE_MODE_HEAT); // Schaltet den Regler aktiv
-            call.set_target_temperature(target_temp);  // Übergibt das neue Ziel
-            call.perform();
+            // SENSOR-DATEN GÜLTIG -> Zieltemperatur berechnen und Heizung EIN!
+            bool target_changed = std::isnan(pid_last_target) ||
+                                  fabsf(target_temp - pid_last_target) >= 0.1f;
+            if (!pid_initialized || !pid_mode_heat || target_changed) {
+              auto call = id(rain_heater_pid).make_call();
+              call.set_mode(climate::CLIMATE_MODE_HEAT); // Schaltet den Regler aktiv
+              call.set_target_temperature(target_temp);  // Übergibt das neue Ziel
+              call.perform();
+              pid_mode_heat = true;
+              pid_last_target = target_temp;
+              pid_initialized = true;
+            }
           }
 
           // --- 2. REGEN- & KALIBRIERUNGS-LOGIK ---
@@ -377,6 +406,7 @@ interval:
               // Wenn die Schwelle für echten Regen unterschritten wird -> SOFORT EIN!
               if (f < rain_start && !id(is_raining)) {
                 id(is_raining) = true;
+                id(rain_binary).publish_state(true);
               }
             } else {
               // Die Frequenz ist über rain_stop -> Sensor scheint aktuell trocken zu sein.
@@ -385,13 +415,14 @@ interval:
               
               if (id(is_raining) && (millis() - last_wet_time > dry_delay_ms)) {
                 id(is_raining) = false;
+                id(rain_binary).publish_state(false);
                 id(time_since_dry) = millis(); // Wichtig: Für die Kalibrierung merken!
               }
             }
 
             bool sensor_warm = current_temp >= (target_temp - 2.0);
             bool delay_passed = (millis() - id(time_since_dry)) > (id(cal_delay_min).state * 60 * 1000);
-            float drift = abs(f - id(freq_dry)) / id(freq_dry);
+            float drift = fabsf(f - id(freq_dry)) / id(freq_dry);
             bool in_cal_range = (drift <= id(cal_range).state);
 
             // Den exakten Grund ermitteln
@@ -416,9 +447,22 @@ interval:
             }
           }
           
-          // Status senden
-          id(cal_active).publish_state(is_calibrating);
-          id(cal_status).publish_state(status_msg);
+          // Status senden - aber nur bei echter Änderung. Beide Werte ändern sich
+          // wenige Male pro Tag; ein 10-s-Takt erzeugte bisher rund 8'600
+          // identische Meldungen je Entität und Tag.
+          static bool last_cal_active = false;
+          static bool cal_active_valid = false;
+          if (!cal_active_valid || is_calibrating != last_cal_active) {
+            id(cal_active).publish_state(is_calibrating);
+            last_cal_active = is_calibrating;
+            cal_active_valid = true;
+          }
+
+          static std::string last_status_msg;
+          if (status_msg != last_status_msg) {
+            id(cal_status).publish_state(status_msg);
+            last_status_msg = status_msg;
+          }
 
       # --- 3. ACTIVITY FLASH ---
       - script.execute: flash_activity
@@ -455,6 +499,7 @@ sensor:
     humidity:
       name: "Humidity Shed"
       id: hum_shed
+      state_class: measurement
       filters:
         - lambda: |-
             // 1. Sperre aktiv? -> Wert verwerfen, HA hält alte Linie
@@ -476,6 +521,7 @@ sensor:
     pressure:
       name: "Barometic Pressure Shed"
       id: bp_shed
+      state_class: measurement
       filters:
         - lambda: 'return x + id(baro_corr).state;'
 
@@ -487,6 +533,7 @@ sensor:
     id: dewpoint_shed
     unit_of_measurement: "°C"
     device_class: temperature
+    state_class: measurement
     lambda: |-
       return (243.5 * (log(id(hum_shed).state/100) + ((17.67 * id(temp_shed).state) / (243.5 + id(temp_shed).state))) / (17.67 - (log(id(hum_shed).state/100) + ((17.67 * id(temp_shed).state) / (243.5 + id(temp_shed).state)))));
 
@@ -509,18 +556,25 @@ sensor:
     name: "Weather Station Frequency"
     unit_of_measurement: "Hz"
     device_class: frequency
+    state_class: measurement
     accuracy_decimals: 0
     update_interval: 1s
     lambda: 'return id(rain_freq).state;'
     filters:
-      - throttle_average: 10s
+      # 60s statt 10s: Die Regenentscheidung fällt auf dem Gerät (10-s-Schleife),
+      # in HA dient der Wert nur der Beobachtung. Gemittelt wird weiterhin über
+      # jede Sekunde, es geht also keine Information verloren.
+      - throttle_average: 60s
 
   - platform: template
     name: "1.0 Weather Station Dry Frequency"
     unit_of_measurement: "Hz"
     device_class: frequency
+    state_class: measurement
     accuracy_decimals: 0
-    update_interval: 60s
+    # 5 min: Der Wert wandert nur beim Kalibrieren und dann mit 1/16-Gewichtung,
+    # bewegt sich also über Stunden nur um wenige Hertz.
+    update_interval: 300s
     entity_category: diagnostic
     lambda: 'return id(freq_dry);'
 
@@ -553,29 +607,39 @@ sensor:
       reference_temperature: 25°C
       reference_resistance: 1000ohm
     filters:
+      # Der ADC tastet weiterhin mit 10 Hz ab (gute Rauschunterdrückung), der
+      # Sensor publiziert aber nur alle 2 s einen 2-s-Mittelwert. Da der PID-Regler
+      # an genau diesem Callback hängt, bestimmt 'send_every' zugleich seine
+      # Rechen- UND Publiziererate: vorher 10 Hz, jetzt 0.5 Hz. Für die träge
+      # Thermik der Sensorheizung (~0.1 K/s beim Aufheizen) ist das reichlich.
       - sliding_window_moving_average:
-          window_size: 10
-          send_every: 1
+          window_size: 20
+          send_every: 20
 
-  # Stufe 4: Schaufenster für Home Assistant (Sammelt die Werte und sendet alle 10s)
+  # Stufe 4: Schaufenster für Home Assistant (Sammelt die Werte und sendet alle 60s)
   - platform: template
     name: "Weather Station Sensor Heater"
     id: heater_temp
     unit_of_measurement: "°C"
     device_class: temperature
-    update_interval: 100ms
+    state_class: measurement
+    update_interval: 2s
     lambda: 'return id(heater_temp_fast).state;'
     filters:
-      - throttle_average: 10s
+      - throttle_average: 60s
 
 binary_sensor:
   # --------------------------------------------------------
   # REGEN-STATUS
   # --------------------------------------------------------
+  # Kein lambda: Der Wert wird direkt aus der 10-s-Logik publiziert, sobald die
+  # Flanke kippt. Das senkt nicht nur die Meldungsrate (vorher 60-s-Takt, immer
+  # derselbe Wert), sondern verkuerzt auch die Reaktionszeit in HA von bis zu
+  # 60 s auf maximal 10 s.
   - platform: template
     name: "Regen Shed"
+    id: rain_binary
     device_class: moisture
-    lambda: 'return id(is_raining);'
 
   # --------------------------------------------------------
   # DIAGNOSTIC SENSOR FÜR DIE KALIBRIERUNG
@@ -594,9 +658,8 @@ binary_sensor:
     id: sht_defog_active
     entity_category: diagnostic
     device_class: running
-    # Da wir ohnehin die globale Variable 'sht_heating_active' haben, 
-    # kann dieser Sensor einfach immer deren Status spiegeln!
-    lambda: 'return id(sht_heating_active);'
+    # Kein lambda: Der Zustand kippt genau zweimal pro Defog-Zyklus und wird
+    # direkt im Skript publiziert - ein 60-s-Polling waere reine Wiederholung.
 
 text_sensor:
   # --------------------------------------------------------

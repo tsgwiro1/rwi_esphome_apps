@@ -2,6 +2,26 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.0.1] - 2026-07-28
+
+### Geändert
+
+* **Datenrate gegenüber Home Assistant um rund 90 % gesenkt.** Am laufenden Gerät gemessen: 224 der 236 wiederkehrenden Meldungen in 30 s (96 %) stammten von der Climate-Entität - hochgerechnet rund 645'000 Meldungen pro Tag, die in HA jeweils eine neue `states`- plus `state_attributes`-Zeile erzeugten, weil `current_temperature` als Attribut ständig wechselt.
+  * `heater_temp_fast` publiziert über `sliding_window_moving_average` (Fenster 20, `send_every: 20`) nur noch alle 2 s statt 10-mal pro Sekunde. Da `PIDClimate` an diesem Sensor-Callback hängt, senkt das zugleich Rechen- und Meldungsrate des Reglers. Der ADC tastet unverändert mit 10 Hz ab, die Mittelung wird dadurch sogar besser.
+  * Der PID-Regler wird von der Hauptschleife nur noch angefasst, wenn der Modus wechselt oder sich der Sollwert um ≥ 0.1 K ändert - vorher bei jedem 10-s-Durchlauf.
+  * `Weather Station Frequency` und `Weather Station Sensor Heater` mitteln jetzt über 60 s statt 10 s, `1.0 Weather Station Dry Frequency` meldet alle 300 s statt 60 s.
+  * Kalibrierstatus und -Flag werden nur noch bei Wertänderung publiziert (vorher alle 10 s identisch).
+  * `Regen Shed` und `1.4 SHT Defog Cycle Active` sind von zyklischem Polling auf ereignisgesteuertes Publizieren umgestellt.
+* **Reaktionszeit der Regenerkennung in HA verbessert:** von bis zu 60 s (Polling-Intervall des Binärsensors) auf maximal 10 s (Flanke wird direkt aus der Logikschleife gemeldet).
+* **Flash-Verschleiss reduziert:** `flash_write_interval` von 1 min auf 10 min. Zusammen mit dem selteneren PID-Aufruf entfallen die bisherigen rund 525'000 NVS-Schreibvorgänge pro Jahr weitgehend.
+* **`state_class: measurement`** ergänzt bei Luftfeuchte, Luftdruck, Taupunkt, beiden Frequenz-Sensoren und der Heizungstemperatur. Home Assistant führt für diese Werte damit Langzeitstatistik.
+
+### Behoben
+
+* Driftberechnung der Kalibrierung nutzt `fabsf()` statt `abs()`. Das bisherige Verhalten war korrekt (der Compiler löste nachweislich auf die Fliesskomma-Variante auf), hing aber an Header-Details.
+
+Keine Änderung an Regelverhalten, Schwellenlogik oder Bedienung. Getestet mit ESPHome 2026.7.2 (`config` und `compile` fehlerfrei, RAM 27.9 %, Flash 54.4 %).
+
 ## [1.0.0] - 2026-07-28
 
 ### Erstrelease

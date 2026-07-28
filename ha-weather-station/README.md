@@ -1,6 +1,6 @@
 # ha-weather-station - Wetterstation mit beheiztem Regensensor
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -146,8 +146,8 @@ Alle Werte sind als Eingabefeld (`mode: box`) ausgeführt, in der Kategorie *Kon
 * **Barometic Pressure Shed (`sensor.barometic_pressure_shed`):** Luftdruck vom BMP280 inkl. Höhenkorrektur.
 * **Dew Point Shed (`sensor.dew_point_shed`):** Berechneter Taupunkt (Magnus-Formel).
 * **Regen Shed (`binary_sensor.raining`):** Niederschlagserkennung, `device_class: moisture`.
-* **Weather Station Frequency (`sensor.weather_station_frequency`):** Aktuelle Sensorfrequenz, über 10 s gemittelt.
-* **Weather Station Sensor Heater (`sensor.weather_station_sensor_heater`):** Isttemperatur der Sensorheizung, über 10 s gemittelt.
+* **Weather Station Frequency (`sensor.weather_station_frequency`):** Aktuelle Sensorfrequenz, sekündlich gemessen und über 60 s gemittelt.
+* **Weather Station Sensor Heater (`sensor.weather_station_sensor_heater`):** Isttemperatur der Sensorheizung, über 60 s gemittelt.
 * **Rain Sensor Heater PID (`climate.ha_weather_station_rain_sensor_heater_pid`):** Der PID-Regler als Climate-Entität, inkl. Soll-/Isttemperatur und Betriebszustand.
 
 > **Hinweis zu Namen und IDs:** Die hier genannten Bezeichnungen sind die Namen aus der Firmware. In der bestehenden Home-Assistant-Instanz sind mehrere Entitäten manuell umbenannt (`Humidity Shed` → «Outdoor Humidity», `Weather Station Frequency` → «Sensor Frequency», `Weather Station Sensor Heater` → «Temperature Rainsensor», `Regen Shed` → «Raining»). Solche Umbenennungen liegen in der HA-Registry und werden von Firmware-Updates nicht überschrieben. Auch die Entity-IDs hängen vom Registrierungszeitpunkt ab - ältere Entitäten tragen keinen Gerätepräfix, später hinzugekommene (u. a. alle Diagnose-Entitäten) dagegen schon. Bei einer Neuinstallation ergeben sich daher andere IDs.
@@ -174,12 +174,31 @@ Nach dem ersten Start sollte die Trockenfrequenz beobachtet werden: `1.0 Weather
 
 ---
 
-## 7. Bekannte Punkte
+## 7. Datenrate gegenüber Home Assistant
 
-Offene Themen, die für V1.0.0 bewusst nicht angefasst wurden:
+Die Entitäten sind bewusst darauf ausgelegt, wenig zu senden - jede Meldung erzeugt in der HA-Datenbank Zeilen in `states` und `state_attributes`. Die Regelung läuft davon unabhängig, sie ist nicht an die Publiziererate gekoppelt.
 
-* **Flash-Schreibzyklen:** Die Hauptschleife setzt alle 10 s Modus und Sollwert am PID-Regler. Jeder dieser Aufrufe löst in ESPHome ein `save_state_()` der Climate-Entität aus; da der Sollwert am Taupunkt hängt und sich als Float praktisch immer minimal ändert, ergibt das mit `flash_write_interval: 1min` dauerhaft rund einen NVS-Schreibvorgang pro Minute. Abhilfe: Intervall auf 10 min erhöhen und den PID-Aufruf nur bei relevanter Änderung (> 0.1 K oder Moduswechsel) absetzen.
-* **SHT31-Defog ohne Begrenzung:** Bei anhaltendem Nebel triggert der Zyklus unmittelbar neu, was auf ca. 62 % Einschaltdauer des internen Sensorheizers führt. Der Heizer ist laut Datenblatt nicht für Dauerbetrieb vorgesehen; ein Zykluszähler oder eine Mindestpause wäre sinnvoll.
-* **Fehlende `state_class: measurement`** bei Feuchte, Luftdruck, Taupunkt, Frequenz und Heizungstemperatur - ohne diese Angabe führt Home Assistant für diese Entitäten keine Langzeitstatistik.
-* **`abs()` statt `fabsf()`** in der Driftberechnung der Kalibrierung. Im aktuellen Build löst der Compiler nachweislich auf die Fliesskomma-Variante auf (`abs.s`-Instruktion im Disassembly), die Auflösung hängt aber an Header-Details.
-* **Schreibweise `Barometic`** statt `Barometric` im Entitätsnamen. Eine Korrektur ändert die Entity-ID in Home Assistant und ist deshalb kein reiner Kosmetik-Fix.
+| Entität | Kadenz | Meldungen/Tag |
+| :--- | :--- | ---: |
+| `climate` Rain Sensor Heater PID | ≤ alle 2 s (an die PID-Rechenrate gekoppelt) | ~43'000 |
+| Temperatur, Feuchte, Luftdruck, Taupunkt | 60 s | je 1'440 |
+| Sensor Frequency, Temperature Rainsensor | 60 s (Mittelwert) | je 1'440 |
+| 1.0 Dry Frequency | 300 s | 288 |
+| 1.1 Calibration Status, 1.2 Calibration Active | nur bei Änderung | wenige |
+| Regen Shed, 1.4 SHT Defog Cycle Active | nur bei Flankenwechsel | wenige |
+
+Drei Entwurfsentscheidungen dahinter:
+
+* **Der PID-Regler bestimmt seine eigene Meldungsrate.** ESPHomes `PIDClimate` publiziert bei jeder Änderung der Isttemperatur, und der Regler rechnet genau dann, wenn sein Eingangssensor einen Wert liefert. `send_every` an `heater_temp_fast` steuert deshalb beides zugleich. Der ADC tastet weiterhin mit 10 Hz ab, publiziert aber nur alle 2 s einen Mittelwert - bei einer Aufheizrate von rund 0.1 K/s bewegt sich die Temperatur zwischen zwei Abtastungen um 0.2 K, für eine träge Heizung völlig ausreichend.
+* **Der PID wird nur bei echter Änderung angefasst.** Jeder `ClimateCall::perform()` löst intern ein `publish_state()` **und** ein `save_state_()` ins NVS aus. Die Hauptschleife setzt Modus und Sollwert daher nur noch, wenn der Modus wechselt oder sich der Sollwert um mindestens 0.1 K verschiebt.
+* **Statusmeldungen werden entprellt.** `BinarySensor::publish_state` und `TextSensor::publish_state` senden in ESPHome ohne Vergleich mit dem Vorwert. Kalibrierstatus, Regenstatus und Defog-Status führen deshalb in der Firmware selbst Buch und melden nur Änderungen.
+
+Nicht angefasst ist das gemeinsame `common/diagnostics.yaml` (Kategorien 2.x bis 6.x, zusammen rund 12'000 Meldungen/Tag), weil es von allen Projekten geteilt wird. Wer dort sparen will, sollte es projektübergreifend entscheiden.
+
+---
+
+## 8. Bekannte Punkte
+
+* **SHT31-Defog ohne Begrenzung:** Bei anhaltendem Nebel triggert der Zyklus unmittelbar neu, was auf ca. 62 % Einschaltdauer des internen Sensorheizers führt. Der Heizer ist laut Datenblatt nicht für Dauerbetrieb vorgesehen; ein Zykluszähler oder eine Mindestpause wäre sinnvoll. Vor einer Änderung lohnt ein Blick in den Verlauf von `1.4 SHT Defog Cycle Active` - tritt der Fall selten auf, ist der Aufwand nicht gerechtfertigt.
+* **Schreibweise `Barometic`** statt `Barometric` im Entitätsnamen. Eine Korrektur ändert die Entity-ID in Home Assistant und kostet den bisherigen Verlauf, ist deshalb kein reiner Kosmetik-Fix.
+* **Climate-Entität als grösster verbleibender Sender:** Wer die ~43'000 Meldungen/Tag auch noch loswerden will, kann `climate` auf `internal: true` setzen. Funktional kostet das nichts - die Hauptschleife überschreibt jede manuelle Änderung ohnehin innerhalb von 10 s -, man verliert aber die Sicht auf Soll-/Isttemperatur und Reglerzustand in HA. Alternativ lässt sich die Entität in HAs `recorder` ausschliessen, dann bleibt sie sichtbar, landet aber nicht mehr in der Datenbank.
