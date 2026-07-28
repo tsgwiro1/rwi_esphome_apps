@@ -4,6 +4,21 @@ Alle wichtigen Änderungen an diesem gemeinsamen Diagnose-Paket werden in dieser
 
 ---
 
+## [1.3.0] - 2026-07-28
+
+### Geändert
+- **Interpretierende Text-Sensoren melden nur noch bei Wertänderung.** Betroffen sind `2.0 WLAN Status`, `2.4 Verbundener Access Point`, `4.0 System Gesundheit` und `5.1 Common Diagnostics Version`. ESPHome dedupliziert in `TextSensor::publish_state()` nicht — die dortige Prüfung spart nur die Heap-Allokation, `notify_frontend_()` wird trotzdem immer aufgerufen. Ein zyklisch pollender Template-Sensor schickte seinen Wert also auch dann erneut, wenn sich nichts geändert hatte, und erzeugte in Home Assistant entsprechend Datenbankzeilen. Umgesetzt über einen Lambda-Filter, der die Filterkette bei unverändertem Wert abbricht (`LambdaFilter::new_value` liefert `false`, `internal_send_state_to_frontend` wird nicht erreicht).
+
+  Einsparung pro Gerät: rund **7'200 Meldungen pro Tag** (2.4 im 30-s-Takt: 2'880; die drei übrigen im 60-s-Takt: je 1'440). Besonders `5.1` ist eine zur Compilezeit eingesetzte Konstante, die bisher 1'440-mal täglich unverändert gemeldet wurde und jetzt genau einmal meldet.
+
+  Unbedenklich für Home Assistant: ESPHome schickt jedem sich verbindenden Client über den `INITIAL_STATE`-Iterator ohnehin den aktuellen Stand aller Entitäten. Nach einem HA-Neustart sind die Werte also sofort wieder da, ohne auf die nächste Wertänderung warten zu müssen.
+
+### Nicht geändert
+- Die numerischen Sensoren (`2.1 WLAN Signalpegel`, `2.2 WLAN Signalqualität`, `4.1 Freier Speicher`, `4.2 Laufzeit`) behalten ihren 60-s-Takt. Das sind echte, sich laufend ändernde Messwerte — hier würde Deduplizierung nur Auflösung im Verlauf kosten.
+- `2.3 Verbundene SSID`, `3.0 IP Adresse`, `3.1 Geräte MAC` (`wifi_info`), `4.3 Letzter Neustart Grund` und `5.0 ESPHome Version` publizieren bereits von sich aus nur bei Änderung — nachgemessen über ein 120-s-Fenster, in dem sie ausschliesslich im Initial-Burst auftauchten.
+
+---
+
 ## [1.2.1] - 2026-06-06
 *(Hinweis: Dieses Release fasst die initialen Entwicklungsphasen V1.0.0 bis V1.2.1 in einem konsolidierten Update zusammen).*
 

@@ -1,6 +1,14 @@
 # Datei: common/diagnostics.yaml
-# Version: 1.2.1
+# Version: 1.3.0
 # Kategorie 1.x ist für lokale Projekt-Sensoren reserviert.
+#
+# Die vier interpretierenden Text-Sensoren (2.0, 2.4, 4.0, 5.1) melden nur noch
+# bei echter Wertänderung. ESPHome dedupliziert in publish_state() nicht, ein
+# zyklisch pollender Template-Sensor schickt seinen Wert also auch dann erneut,
+# wenn sich nichts geändert hat - was in Home Assistant unnötige Datenbank-
+# zeilen erzeugt. Der Lambda-Filter bricht die Kette bei unverändertem Wert ab.
+# Unbedenklich, weil ESPHome jedem sich verbindenden Client über den
+# INITIAL_STATE-Iterator ohnehin den aktuellen Stand aller Entitäten schickt.
 
 debug:
 
@@ -15,7 +23,7 @@ substitutions:
   bssid_eg: !secret mac_bssid_eg
   bssid_dg: !secret mac_bssid_dg
   # Version der Diagnostics
-  version: "1.2.1"
+  version: "1.3.0"
 
 sensor:
   # === KATEGORIE 2: WLAN & Konnektivität ===
@@ -74,6 +82,13 @@ text_sensor:
       } else {
         return {"🔴 Kritisch"};
       }
+    filters:
+      # Nur bei Ampelwechsel melden statt im 60-s-Takt denselben Zustand
+      - lambda: |-
+          static std::string last;
+          if (x == last) return {};
+          last = x;
+          return x;
 
   - platform: wifi_info
     ssid:
@@ -113,6 +128,13 @@ text_sensor:
       } else {
         return {"❓ " + bssid};
       }
+    filters:
+      # Nur beim Roaming melden statt im 30-s-Takt denselben AP
+      - lambda: |-
+          static std::string last;
+          if (x == last) return {};
+          last = x;
+          return x;
 
   # === KATEGORIE 4: System & Speicher (Fortsetzung) ===
   - platform: template
@@ -128,6 +150,13 @@ text_sensor:
       } else {
         return {"🔴 Kritisch"};
       }
+    filters:
+      # Nur bei Ampelwechsel melden statt im 60-s-Takt denselben Zustand
+      - lambda: |-
+          static std::string last;
+          if (x == last) return {};
+          last = x;
+          return x;
 
   - platform: debug
     reset_reason:
@@ -147,6 +176,13 @@ text_sensor:
     entity_category: diagnostic
     icon: "mdi:tag-text-outline"
     lambda: 'return {"${version}"};'
+    filters:
+      # Compile-Zeit-Konstante: genau einmal melden statt 1'440-mal pro Tag
+      - lambda: |-
+          static std::string last;
+          if (x == last) return {};
+          last = x;
+          return x;
 
 # === KATEGORIE 6: Steuerung ===
 button:

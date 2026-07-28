@@ -1,6 +1,6 @@
 # 🩺 Common Diagnostics (ESPHome Package)
 
-![Version](https://img.shields.io/badge/version-1.2.1-blue)
+![Version](https://img.shields.io/badge/version-1.3.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -133,7 +133,7 @@ Das Package löst bekannte AP-MAC-Adressen (BSSIDs) auf lesbare Namen auf. So si
 
 ### Bekannte APs anpassen
 
-Die Zuordnung ist im Lambda des Template-Sensors `2.5 Verbundener Access Point` in der `diagnostics.yaml` hinterlegt. Passe die MAC-Adressen und Namen an dein Setup an.
+Die Zuordnung ist im Lambda des Template-Sensors `2.4 Verbundener Access Point` in der `diagnostics.yaml` hinterlegt. Passe die MAC-Adressen und Namen an dein Setup an.
 
 > 💡 **Tipp:** Die BSSID deiner Access Points findest du über Home Assistant (alter Sensor vor v1.1.0) oder in der Admin-Oberfläche deines Routers/Mesh-Systems.
 
@@ -144,5 +144,28 @@ Die Zuordnung ist im Lambda des Template-Sensors `2.5 Verbundener Access Point` 
 Da eine Änderung an dieser Datei nicht automatisch alle ESPs im Haus aktualisiert (jeder muss einzeln per OTA neu geflasht werden), enthält das Package einen eigenen Text-Sensor `5.1 Common Diagnostics Version`.
 
 Dadurch siehst du in Home Assistant bei jedem Gerät sofort, auf welchem Stand sich das Diagnose-Package befindet und ob ein erneutes Flashen nötig ist, um neue Features aus der `common/diagnostics.yaml` zu erhalten.
+
+---
+
+## 🔇 Meldeverhalten (ab v1.3.0)
+
+Die vier **interpretierenden** Text-Sensoren (`2.0 WLAN Status`, `2.4 Verbundener Access Point`, `4.0 System Gesundheit`, `5.1 Common Diagnostics Version`) melden nur noch bei echter Wertänderung an Home Assistant.
+
+Hintergrund: ESPHome dedupliziert in `TextSensor::publish_state()` **nicht**. Ein zyklisch pollender Template-Sensor schickte seinen Wert also auch dann erneut, wenn sich nichts geändert hatte — jede dieser Meldungen erzeugt in Home Assistant eine Datenbankzeile. Das summierte sich pro Gerät auf rund **7'200 unnötige Meldungen pro Tag**; allein `5.1` meldete seine zur Compilezeit eingesetzte Konstante 1'440-mal täglich.
+
+Umgesetzt ist das über einen Lambda-Filter, der die Filterkette bei unverändertem Wert abbricht:
+
+```yaml
+    filters:
+      - lambda: |-
+          static std::string last;
+          if (x == last) return {};
+          last = x;
+          return x;
+```
+
+**Das kostet keine Sichtbarkeit:** ESPHome schickt jedem sich verbindenden Client über den `INITIAL_STATE`-Iterator ohnehin den aktuellen Stand aller Entitäten. Nach einem Home-Assistant-Neustart stehen die Werte also sofort wieder da, ohne auf die nächste Wertänderung zu warten.
+
+Die **numerischen** Sensoren (2.1, 2.2, 4.1, 4.2) behalten bewusst ihren 60-Sekunden-Takt — das sind sich laufend ändernde Messwerte, bei denen Deduplizierung nur Auflösung im Verlauf kosten würde.
 
 
