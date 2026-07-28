@@ -5,6 +5,22 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/)
 und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [1.1.2] - 2026-07-28
+
+### Geändert
+* **Die neun Konfigurationsregler pollen nicht mehr.** Sie waren als Template-`number` mit `lambda:` gebaut und damit Polling-Komponenten, die ihren Wert im Standardtakt von 60 s bedingungslos neu publizierten - obwohl es reine Konfigurationswerte sind, die sich nur ändern, wenn man den Regler bewegt. Das waren rund **13'000 Meldungen pro Tag**, die in Home Assistant jeweils Datenbankzeilen erzeugten.
+
+  Umgesetzt über `update_interval: never` plus gezieltes Publizieren an genau zwei Stellen:
+  * einmalig im `on_boot` (vor dem 10-s-Delay, damit Home Assistant die Werte sofort hat und nicht kurzzeitig `unknown` anzeigt),
+  * im jeweiligen `set_action` nach dem Schreiben des Globals.
+
+  Der Publish im `set_action` ist zwingend: `TemplateNumber::control()` publiziert nur bei `optimistic: true`, und diese Regler nutzen `lambda:`, sind also nicht optimistisch. Ohne ihn würde der Regler in Home Assistant nach dem Verstellen auf den alten Wert zurückspringen, weil kein Poll mehr nachliefert.
+
+  Abgesichert ist das dadurch, dass die `conf_*`-Globals ausschliesslich in diesen neun `set_action`-Blöcken geschrieben werden - es gibt keinen anderen Pfad, der einen Wert ändern könnte, ohne dass der Publish mitläuft.
+
+### Nicht geändert
+* Bewässerungslogik, State Machine, Resume-Fähigkeit und Sicherheitsmechanismen sind unberührt. Die Regler liefern ihre Werte weiterhin aus denselben neustartfesten Globals.
+
 ## [1.1.1] - 2026-07-28
 
 Dieser Eintrag holt Änderungen nach, die bereits auf dem Gerät liefen, aber nie ins Repository zurückgeflossen sind. Die Repo-Fassung beschrieb damit einen Stand, den es real nicht mehr gab.

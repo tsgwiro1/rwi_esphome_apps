@@ -1,5 +1,5 @@
 substitutions:
-  fw_version: "1.1.1"
+  fw_version: "1.1.2"
 
 esphome:
   name: ha-irrigation
@@ -13,6 +13,22 @@ esphome:
     then:
       - output.turn_off: unused_led_d6
       - output.turn_off: unused_led_d7
+
+      # Konfigurationsregler einmalig publizieren. Sie pollen nicht mehr
+      # (update_interval: never), melden also nur noch hier beim Boot und
+      # danach im jeweiligen set_action. Vor dem delay, damit HA die Werte
+      # sofort hat und nicht 10 s lang 'unknown' anzeigt.
+      - lambda: |-
+          id(setting_month_start).publish_state(id(conf_month_start));
+          id(setting_month_end).publish_state(id(conf_month_end));
+          id(setting_min_temp).publish_state(id(conf_min_temp));
+          id(setting_base_duration).publish_state(id(conf_base_duration_min));
+          id(setting_tuning).publish_state(id(conf_tuning_percent));
+          id(setting_rain_limit).publish_state(id(conf_rain_saturation_limit));
+          id(setting_sun_offset).publish_state(id(conf_sun_offset_min));
+          id(setting_safety).publish_state(id(conf_safety_cutoff_min));
+          id(setting_manual_timeout).publish_state(id(conf_manual_timeout_min));
+
       - delay: 10s
       - lambda: |-
           // Boot-Recovery: Rekonstruiert den exakten Status nach einem Reboot (ohne Spam)
@@ -391,10 +407,12 @@ number:
     step: 1
     mode: slider
     entity_category: "config"
+    update_interval: never
     lambda: "return id(conf_month_start);"
     set_action:
       then:
         - globals.set: {id: conf_month_start, value: !lambda "return x;"}
+        - lambda: "id(setting_month_start).publish_state(x);"
 
   - platform: template
     name: "Saison Ende (Monat)"
@@ -404,10 +422,12 @@ number:
     step: 1
     mode: slider
     entity_category: "config"
+    update_interval: never
     lambda: "return id(conf_month_end);"
     set_action:
       then:
         - globals.set: {id: conf_month_end, value: !lambda "return x;"}
+        - lambda: "id(setting_month_end).publish_state(x);"
 
   - platform: template
     name: "Min Temperatur (°C)"
@@ -417,10 +437,12 @@ number:
     step: 0.5
     mode: slider
     entity_category: "config"
+    update_interval: never
     lambda: "return id(conf_min_temp);"
     set_action:
       then:
         - globals.set: {id: conf_min_temp, value: !lambda "return x;"}
+        - lambda: "id(setting_min_temp).publish_state(x);"
 
   - platform: template
     name: "Basis Laufzeit (Min)"
@@ -430,10 +452,12 @@ number:
     step: 1
     mode: slider
     entity_category: "config"
+    update_interval: never
     lambda: "return id(conf_base_duration_min);"
     set_action:
       then:
         - globals.set: {id: conf_base_duration_min, value: !lambda "return x;"}
+        - lambda: "id(setting_base_duration).publish_state(x);"
 
   - platform: template
     name: "Wasser Tuning (%)"
@@ -443,10 +467,12 @@ number:
     step: 10
     mode: slider
     entity_category: "config"
+    update_interval: never
     lambda: "return id(conf_tuning_percent);"
     set_action:
       then:
         - globals.set: {id: conf_tuning_percent, value: !lambda "return x;"}
+        - lambda: "id(setting_tuning).publish_state(x);"
 
   - platform: template
     name: "Regen Sättigung (Score)"
@@ -456,10 +482,12 @@ number:
     step: 0.1
     mode: slider
     entity_category: "config"
+    update_interval: never
     lambda: "return id(conf_rain_saturation_limit);"
     set_action:
       then:
         - globals.set: {id: conf_rain_saturation_limit, value: !lambda "return x;"}
+        - lambda: "id(setting_rain_limit).publish_state(x);"
 
   - platform: template
     name: "Start Versatz Sonne (Min)"
@@ -469,10 +497,12 @@ number:
     step: 10
     mode: slider
     entity_category: "config"
+    update_interval: never
     lambda: "return id(conf_sun_offset_min);"
     set_action:
       then:
         - globals.set: {id: conf_sun_offset_min, value: !lambda "return x;"}
+        - lambda: "id(setting_sun_offset).publish_state(x);"
         - globals.set: {id: tages_status, value: '0'}
         - globals.set: {id: target_start_time, value: '0'}
         - lambda: 'ESP_LOGI("config", "Offset geändert. Tages-Status & Cache zurückgesetzt.");'
@@ -485,10 +515,12 @@ number:
     step: 1
     mode: slider
     entity_category: "config"
+    update_interval: never
     lambda: "return id(conf_safety_cutoff_min);"
     set_action:
       then:
         - globals.set: {id: conf_safety_cutoff_min, value: !lambda "return x;"}
+        - lambda: "id(setting_safety).publish_state(x);"
 
   - platform: template
     name: "Manuelles Timeout (Min)"
@@ -498,10 +530,12 @@ number:
     step: 1
     mode: slider
     entity_category: "config"
+    update_interval: never
     lambda: "return id(conf_manual_timeout_min);"
     set_action:
       then:
         - globals.set: {id: conf_manual_timeout_min, value: !lambda "return x;"}
+        - lambda: "id(setting_manual_timeout).publish_state(x);"
 
 # ---------------------------------------------------------
 # 5. LOGIK (Autopilot State Machine)
