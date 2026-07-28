@@ -1,5 +1,5 @@
 substitutions:
-  fw_version: "1.1.0"
+  fw_version: "1.1.1"
 
 esphome:
   name: ha-irrigation
@@ -20,13 +20,13 @@ esphome:
           auto time = id(sntp_time).now();
           const char* inv = (time.is_valid() && time.day_of_year % 2 == 0) ? "\u200B" : "";
           char buf[128];
-          
+            
           if (status == 1) snprintf(buf, sizeof(buf), "Zyklus beendet (%d Min gelaufen)%s", id(laufzeit_heute_min), inv);
           else if (status == 2) snprintf(buf, sizeof(buf), "Abbruch: Regen-Sättigung (Score %.2f)%s", id(last_rain_score), inv);
           else if (status == 3) snprintf(buf, sizeof(buf), "Abbruch: Temp %.1f°C unter Limit %.1f°C%s", id(cache_temp), id(conf_min_temp), inv);
           else if (status == 5) snprintf(buf, sizeof(buf), "Zyklus läuft (Wiederaufnahme)%s", inv);
           else snprintf(buf, sizeof(buf), "Bereit%s", inv); // Deckt Status 0 (Warten) und 4 (Manuell) ab
-          
+            
           id(status_sensor).publish_state(buf);
 
 esp8266:
@@ -320,12 +320,6 @@ text_sensor:
     name: "Status"
     id: status_sensor
     icon: "mdi:sprinkler"
-  - platform: template
-    name: "Firmware Version"
-    id: fw_version_sensor
-    icon: "mdi:cellphone-arrow-down"
-    entity_category: "diagnostic"
-    lambda: 'return {"${fw_version}"};'
 
 # ---------------------------------------------------------
 # 4. GUI KONFIGURATION
@@ -1005,11 +999,3 @@ switch:
                 snprintf(buf, sizeof(buf), "NOT-AUS: Ventil 4 nach %d Min zwangsgeschlossen!",
                   id(conf_safety_cutoff_min));
                 id(status_sensor).publish_state(buf);
-
-# ---------------------------------------------------------
-# 8. DIAGNOSE
-# ---------------------------------------------------------
-button:
-  - platform: restart
-    name: "Neustart"
-    entity_category: "diagnostic"

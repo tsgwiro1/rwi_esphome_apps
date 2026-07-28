@@ -1,6 +1,6 @@
 # 🌱 HA-Irrigation – Intelligente Bewässerungssteuerung
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -331,7 +331,7 @@ Für ein übersichtliches Interface werden die HACS-Karten `mushroom-cards`, `fo
               name: Not-Aus Timeout (Min)
             - type: section
               label: System
-            - entity: button.ha_irrigation_neustart
+            - entity: button.ha_irrigation_6_0_neustart
               name: Neustart
 ```
 

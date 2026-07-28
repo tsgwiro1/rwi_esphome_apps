@@ -5,6 +5,17 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/)
 und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [1.1.1] - 2026-07-28
+
+Dieser Eintrag holt Änderungen nach, die bereits auf dem Gerät liefen, aber nie ins Repository zurückgeflossen sind. Die Repo-Fassung beschrieb damit einen Stand, den es real nicht mehr gab.
+
+### Entfernt
+* **Projektlokaler Sensor «Firmware Version»** (`fw_version_sensor`). Das gemeinsame Diagnose-Paket liefert die Versionsinformation bereits über `5.0 ESPHome Version` und `5.1 Common Diagnostics Version`; der eigene Sensor war eine Dublette.
+* **Projektlokaler Button «Neustart».** Ebenfalls doppelt - das Diagnose-Paket stellt ihn als `6.0 Neustart` bereit, zusätzlich zu `6.1 Safe Mode Neustart`.
+
+### Geändert
+* README: Das Dashboard-Beispiel verwies noch auf die alte Entity-ID `button.ha_irrigation_neustart`. Korrigiert auf `button.ha_irrigation_6_0_neustart`, die Entität aus dem Diagnose-Paket.
+
 ## [1.1.0] - 2026-06-04
 
 ### Hinzugefügt
