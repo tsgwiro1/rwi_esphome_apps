@@ -1,0 +1,654 @@
+esphome:
+  name: ha-weather-station
+  friendly_name: ha-weather-station
+  project:
+    name: "tsgwiro1.ha-weather-station"
+    version: "${fw_version}"
+
+# Startwerte direkt beim Booten setzen
+  on_boot:
+    priority: -100 # Wartet, bis alle internen Sensoren bereit sind
+    then:
+      - lambda: |-
+          // 1. Kalibrierungs-Sensoren initialisieren
+          id(cal_status).publish_state("Initialisiere...");
+          id(cal_active).publish_state(false);
+          
+          // 2. SHT Defog-Sensoren initialisieren
+          id(sht_defog_status).publish_state("Normalbetrieb");
+          
+          // 3. PID-Regler beim Start hart auf AUS zwingen
+          auto call = id(rain_heater_pid).make_call();
+          call.set_mode(climate::CLIMATE_MODE_OFF);
+          call.perform();
+
+# Hier wird das Board definiert
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+    
+# Speichert Einstellungen (Nummern, Dropdowns) im Flash-Speicher
+preferences:
+  flash_write_interval: 1min
+
+substitutions:
+  fw_version: "1.0.0"
+  # ESP32
+  # ANPASSUNG DER DIAGNOSE-GRENZWERTE
+  diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
+  diag_min_heap_critical: "40000" # 40kb ist kritisch
+
+packages:
+  my_diagnostics: !include common/diagnostics.yaml
+
+# Enable logging
+logger:
+  level: DEBUG 
+  logs:
+    sensor: INFO
+    climate: INFO
+    pulse_counter: INFO
+
+# Local Webserver
+web_server:
+  port: 80
+  ota: false
+  version: 3
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret weatherstation_api_key
+
+ota:
+  platform: esphome
+  password: !secret weatherstation_ota_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  min_auth_mode: WPA2
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: !secret weatherstation_fallback_ap_ssid
+    password: !secret weatherstation_fallback_ap_password
+
+captive_portal:
+
+i2c:
+  id: i2c_bus
+  sda: GPIO21
+  scl: GPIO22
+  scan: true
+
+# --------------------------------------------------------
+# DYNAMISCHE EINSTELLUNGEN FÜR HOME ASSISTANT
+# Alle Felder als Eingabebox ('mode: box') 
+# und gruppiert ('entity_category: config')
+# --------------------------------------------------------
+select:
+  - platform: template
+    name: "Heater Source"
+    id: heater_source
+    optimistic: true
+    options:
+      - "Dew Point"
+      - "Ambient"
+    initial_option: "Dew Point"
+    restore_value: true
+    entity_category: config
+
+number:
+  - platform: template
+    name: "Barometer Elevation Correction"
+    id: baro_corr
+    optimistic: true
+    min_value: -200.0
+    max_value: 200.0
+    step: 0.1
+    initial_value: 0.0
+    restore_value: true
+    unit_of_measurement: "hPa"
+    mode: box
+    entity_category: config
+
+  - platform: template
+    name: "Heater Min Temperature"
+    id: heater_min_temp
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 1
+    initial_value: 10
+    restore_value: true
+    mode: box
+    entity_category: config
+
+  - platform: template
+    name: "Heater Max Temperature"
+    id: heater_max_temp
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 1
+    initial_value: 50
+    restore_value: true
+    mode: box
+    entity_category: config
+
+  - platform: template
+    name: "Heater Temperature Elevation"
+    id: heater_elevation
+    optimistic: true
+    min_value: 0
+    max_value: 50
+    step: 1
+    initial_value: 10
+    restore_value: true
+    mode: box
+    entity_category: config
+
+  - platform: template
+    name: "Range for Calibration"
+    id: cal_range
+    optimistic: true
+    min_value: 0.01
+    max_value: 0.2
+    step: 0.01
+    initial_value: 0.04
+    restore_value: true
+    mode: box
+    entity_category: config
+
+  - platform: template
+    name: "Trigger point Rain"
+    id: rain_trigger
+    optimistic: true
+    min_value: 0.1
+    max_value: 1.0
+    step: 0.01
+    initial_value: 0.80
+    restore_value: true
+    mode: box
+    entity_category: config
+
+  - platform: template
+    name: "Rain trigger hysteresis"
+    id: rain_hysteresis
+    optimistic: true
+    min_value: 0.01
+    max_value: 0.5
+    step: 0.01
+    initial_value: 0.12
+    restore_value: true
+    mode: box
+    entity_category: config
+
+  - platform: template
+    name: "Calibration delay [min]"
+    id: cal_delay_min
+    optimistic: true
+    min_value: 1
+    max_value: 120
+    step: 1
+    initial_value: 30
+    restore_value: true
+    mode: box
+    entity_category: config
+
+  - platform: template
+    name: "SHT Heater Time [min]"
+    id: sht_heat_time
+    optimistic: true
+    min_value: 1
+    max_value: 30
+    step: 1
+    initial_value: 5
+    restore_value: true
+    mode: box
+    entity_category: config
+
+  - platform: template
+    name: "SHT Recovery Time [min]"
+    id: sht_recovery_time
+    optimistic: true
+    min_value: 1
+    max_value: 30
+    step: 1
+    initial_value: 3
+    restore_value: true
+    mode: box
+    entity_category: config
+
+  - platform: template
+    name: "Rain Off Delay [min]"
+    id: rain_off_delay_min
+    optimistic: true
+    min_value: 0
+    max_value: 60
+    step: 1
+    initial_value: 3
+    restore_value: true
+    mode: box
+    entity_category: config
+
+# --------------------------------------------------------
+# GLOBALE VARIABLEN (Unsichtbares "Gedächtnis")
+# --------------------------------------------------------
+globals:
+  - id: freq_dry
+    type: float
+    restore_value: true
+    initial_value: '32000.0'
+  - id: is_raining
+    type: bool
+    initial_value: 'false'
+  - id: time_since_dry
+    type: uint32_t
+    initial_value: '0'
+  - id: sht_heating_active
+    type: bool
+    initial_value: 'false'
+
+# --------------------------------------------------------
+# SKRIPTE (Für das Blitzen der Activity LED)
+# --------------------------------------------------------
+script:
+  # 1. Activity Flash (50ms)
+  - id: flash_activity
+    mode: restart
+    then:
+      - output.turn_on: led_activity
+      - delay: 50ms
+      - output.turn_off: led_activity
+
+  # 2. SHT31 Anti-Kondensations-Zyklus
+  - id: sht_defog_cycle
+    mode: single 
+    then:
+      # Zyklus startet
+      - globals.set:
+          id: sht_heating_active
+          value: 'true'
+      - lambda: 'id(sht_defog_status).publish_state("Heizt (Kondensationsschutz)");'
+          
+      # ESPHome Native I2C Write via C++ Lambda (Heizung EIN)
+      - lambda: |-
+          uint8_t data_on[2] = {0x30, 0x6D};
+          id(i2c_bus)->write(0x44, data_on, 2, true);
+          
+      # Dynamische Pause (Heizzeit)
+      - delay: !lambda "return id(sht_heat_time).state * 60000;"
+      
+      # Heizung geht aus, Abkühlphase beginnt
+      - lambda: 'id(sht_defog_status).publish_state("Abkühlphase");'
+      
+      # ESPHome Native I2C Write via C++ Lambda (Heizung AUS)
+      - lambda: |-
+          uint8_t data_off[2] = {0x30, 0x66};
+          id(i2c_bus)->write(0x44, data_off, 2, true);
+          
+      # Dynamische Pause (Erholungszeit)
+      - delay: !lambda "return id(sht_recovery_time).state * 60000;"
+      
+      # Zyklus komplett beendet
+      - globals.set:
+          id: sht_heating_active
+          value: 'false'
+      - lambda: 'id(sht_defog_status).publish_state("Normalbetrieb");'
+
+# --------------------------------------------------------
+# LOGIK-SCHLEIFEN (Regen, Heizung, LEDs)
+# --------------------------------------------------------
+interval:
+  # RGB Status Prüfung alle 2 Sekunden
+  - interval: 2s
+    then:
+      - lambda: |-
+          if (api::global_api_server->is_connected()) {
+            id(led_red).turn_off();
+            id(led_green).turn_on();
+            id(led_blue).turn_off();
+          } else if (wifi::global_wifi_component->is_connected()) {
+            id(led_red).turn_off();
+            id(led_green).turn_off();
+            id(led_blue).turn_on();
+          } else {
+            id(led_red).turn_on();
+            id(led_green).turn_off();
+            id(led_blue).turn_off();
+          }
+
+  # Sensor-Heizung-Logik alle 1 Sekunden
+  # Haupt-Wetter-Logik alle 10 Sekunden
+  - interval: 10s
+    then:
+      - lambda: |-
+          // --- 1. ZIELTEMPERATUR BERECHNEN UND AN PID SENDEN ---
+          float source_temp = (id(heater_source).current_option() == "Dew Point") ? id(dewpoint_shed).state : id(temp_shed).state;
+          float elev = id(heater_elevation).state;
+          
+          float target_temp = source_temp + elev;
+          // Min/Max Begrenzung
+          if (target_temp < id(heater_min_temp).state) target_temp = id(heater_min_temp).state;
+          if (target_temp > id(heater_max_temp).state) target_temp = id(heater_max_temp).state;
+            
+          // FAILSAFE: Prüfen, ob die Sensoren gültige Werte liefern
+          if (std::isnan(source_temp) || std::isnan(elev)) {
+            // SENSOR-DATEN FEHLEN (z.B. direkt nach dem Booten) -> Heizung ZWINGEND AUS!
+            auto call = id(rain_heater_pid).make_call();
+            call.set_mode(climate::CLIMATE_MODE_OFF); 
+            call.perform();
+          } else {
+            // SENSOR-DATEN GÜLTIG -> Zieltemperatur berechnen und Heizung EIN! 
+            // Befehl an den PID-Regler absetzen
+            auto call = id(rain_heater_pid).make_call();
+            call.set_mode(climate::CLIMATE_MODE_HEAT); // Schaltet den Regler aktiv
+            call.set_target_temperature(target_temp);  // Übergibt das neue Ziel
+            call.perform();
+          }
+
+          // --- 2. REGEN- & KALIBRIERUNGS-LOGIK ---
+          float f = id(rain_freq).state;
+          float current_temp = id(heater_temp).state;
+          
+          std::string status_msg = "Initialisiere...";
+          bool is_calibrating = false;
+
+          // Ein statischer Timer, der sich merkt, wann der Sensor zuletzt nass war
+          static uint32_t last_wet_time = millis();
+
+          // Prüfen, ob der Frequenzzähler schon gültige Werte liefert
+          if (std::isnan(f) || f <= 0) {
+            status_msg = "Warte auf Sensorwerte";
+          } else {
+            float trigger_point = id(freq_dry) * id(rain_trigger).state;
+            float hyst = trigger_point * id(rain_hysteresis).state / 2.0;
+            float rain_start = trigger_point - hyst;
+            float rain_stop = trigger_point + hyst;
+
+            if (f < rain_stop) {
+              // Der Sensor ist im nassen Bereich (oder im Hysterese-Band).
+              // Wir setzen unseren "Zuletzt Nass"-Timer immer wieder auf JETZT.
+              last_wet_time = millis();
+              
+              // Wenn die Schwelle für echten Regen unterschritten wird -> SOFORT EIN!
+              if (f < rain_start && !id(is_raining)) {
+                id(is_raining) = true;
+              }
+            } else {
+              // Die Frequenz ist über rain_stop -> Sensor scheint aktuell trocken zu sein.
+              // Wir schalten HA aber erst auf "Trocken", wenn das für X MINUTEN so bleibt!
+              uint32_t dry_delay_ms = (uint32_t)(id(rain_off_delay_min).state * 60.0f * 1000.0f);
+              
+              if (id(is_raining) && (millis() - last_wet_time > dry_delay_ms)) {
+                id(is_raining) = false;
+                id(time_since_dry) = millis(); // Wichtig: Für die Kalibrierung merken!
+              }
+            }
+
+            bool sensor_warm = current_temp >= (target_temp - 2.0);
+            bool delay_passed = (millis() - id(time_since_dry)) > (id(cal_delay_min).state * 60 * 1000);
+            float drift = abs(f - id(freq_dry)) / id(freq_dry);
+            bool in_cal_range = (drift <= id(cal_range).state);
+
+            // Den exakten Grund ermitteln
+            if (id(is_raining)) {
+              status_msg = "Regen aktiv";
+            } else if (f <= rain_stop) {
+              status_msg = "Sensor noch zu nass";
+            } else if (!sensor_warm) {
+              status_msg = "Heizt auf";
+            } else if (!delay_passed) {
+              status_msg = "Wartet auf Delay";
+            } else if (!in_cal_range) {
+              status_msg = "Frequenz-Drift zu hoch";
+            } else {
+              status_msg = "Kalibriert";
+              is_calibrating = true;
+            }
+
+            // Eigentliche Kalibrierung durchführen
+            if (is_calibrating) {
+              id(freq_dry) = (15.0 * id(freq_dry) + f) / 16.0;
+            }
+          }
+          
+          // Status senden
+          id(cal_active).publish_state(is_calibrating);
+          id(cal_status).publish_state(status_msg);
+
+      # --- 3. ACTIVITY FLASH ---
+      - script.execute: flash_activity
+
+climate:
+  # --------------------------------------------------------
+  # DER NATIVE PID-REGLER (Läuft völlig autonom!)
+  # --------------------------------------------------------
+  - platform: pid
+    name: "Rain Sensor Heater PID"
+    id: rain_heater_pid
+    sensor: heater_temp_fast
+    default_target_temperature: 0.0
+    heat_output: heater_pwm
+    control_parameters:
+      kp: 0.157   
+      ki: 0.040   
+      kd: 0.039
+
+sensor:
+  # --------------------------------------------------------
+  # TEMPERATUR (AM2315 via am2320 Plattform)
+  # --------------------------------------------------------
+  - platform: am2320
+    temperature:
+      name: "Temperature Shed"
+      state_class: measurement
+      id: temp_shed
+
+  # --------------------------------------------------------
+  # LUFTFEUCHTIGKEIT (SHT31)
+  # --------------------------------------------------------
+  - platform: sht3xd
+    humidity:
+      name: "Humidity Shed"
+      id: hum_shed
+      filters:
+        - lambda: |-
+            // 1. Sperre aktiv? -> Wert verwerfen, HA hält alte Linie
+            if (id(sht_heating_active)) {
+              return {}; 
+            }
+            // 2. Extrem feucht? -> Zyklus starten
+            if (x > 98.0) {
+              id(sht_defog_cycle).execute(); 
+            }
+            // 3. Normalbetrieb -> Wert weitergeben
+            return x;
+
+  # --------------------------------------------------------
+  # LUFTDRUCK (BMP280 mit Elevation Correction)
+  # --------------------------------------------------------
+  - platform: bmp280_i2c
+    address: 0x76
+    pressure:
+      name: "Barometic Pressure Shed"
+      id: bp_shed
+      filters:
+        - lambda: 'return x + id(baro_corr).state;'
+
+  # --------------------------------------------------------
+  # TAUPUNKT (Kombiniert AM2315 Temp & SHT31 Hum)
+  # --------------------------------------------------------
+  - platform: template
+    name: "Dew Point Shed"
+    id: dewpoint_shed
+    unit_of_measurement: "°C"
+    device_class: temperature
+    lambda: |-
+      return (243.5 * (log(id(hum_shed).state/100) + ((17.67 * id(temp_shed).state) / (243.5 + id(temp_shed).state))) / (17.67 - (log(id(hum_shed).state/100) + ((17.67 * id(temp_shed).state) / (243.5 + id(temp_shed).state)))));
+
+  # --------------------------------------------------------
+  # REGENSENSOR FREQUENZEN (Pin 32)
+  # --------------------------------------------------------
+  - platform: pulse_counter
+    pin: GPIO32
+    id: rain_freq
+    internal: true
+    update_interval: 1s
+    internal_filter: 2us
+    filters:
+      - multiply: 0.016666667  # Rechnet Pulses/min in Hz um
+      - exponential_moving_average:
+          alpha: 0.166  
+          send_every: 1
+
+  - platform: template
+    name: "Weather Station Frequency"
+    unit_of_measurement: "Hz"
+    device_class: frequency
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: 'return id(rain_freq).state;'
+    filters:
+      - throttle_average: 10s
+
+  - platform: template
+    name: "1.0 Weather Station Dry Frequency"
+    unit_of_measurement: "Hz"
+    device_class: frequency
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: 'return id(freq_dry);'
+
+  # --------------------------------------------------------
+  # HEIZUNG TEMPERATUR (NTC Pin 36) - 3-Stufen-Umrechnung
+  # --------------------------------------------------------
+  # Stufe 1: Reine Spannungsmessung am Pin
+  - platform: adc
+    id: adc_sensor_ntc
+    pin: GPIO36
+    attenuation: 12db
+    update_interval: 100ms
+    internal: true
+
+  # Stufe 2: Spannungsteiler-Berechnung mit 680 Ohm Vorwiderstand
+  - platform: resistance
+    id: resistance_sensor
+    sensor: adc_sensor_ntc
+    configuration: DOWNSTREAM # NTC ist gegen GND geschaltet (Standard). Falls die Temp sinkt wenn du ihn wärmst, ändere das auf UPSTREAM.
+    resistor: 680ohm
+    internal: true
+
+  # Stufe 3: Temperatur-Berechnung aus dem Widerstandswert
+  - platform: ntc
+    sensor: resistance_sensor
+    id: heater_temp_fast
+    internal: true
+    calibration:
+      b_constant: 3750          
+      reference_temperature: 25°C
+      reference_resistance: 1000ohm
+    filters:
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 1
+
+  # Stufe 4: Schaufenster für Home Assistant (Sammelt die Werte und sendet alle 10s)
+  - platform: template
+    name: "Weather Station Sensor Heater"
+    id: heater_temp
+    unit_of_measurement: "°C"
+    device_class: temperature
+    update_interval: 100ms
+    lambda: 'return id(heater_temp_fast).state;'
+    filters:
+      - throttle_average: 10s
+
+binary_sensor:
+  # --------------------------------------------------------
+  # REGEN-STATUS
+  # --------------------------------------------------------
+  - platform: template
+    name: "Regen Shed"
+    device_class: moisture
+    lambda: 'return id(is_raining);'
+
+  # --------------------------------------------------------
+  # DIAGNOSTIC SENSOR FÜR DIE KALIBRIERUNG
+  # -------------------------------------------------------- 
+  - platform: template
+    name: "1.2 Dry Frequency Calibration Active"
+    id: cal_active
+    entity_category: diagnostic
+    device_class: running
+
+  # --------------------------------------------------------
+  # DIAGNOSTIC SENSOR FÜR DEN SHT ZYKLUS
+  # --------------------------------------------------------
+  - platform: template
+    name: "1.4 SHT Defog Cycle Active"
+    id: sht_defog_active
+    entity_category: diagnostic
+    device_class: running
+    # Da wir ohnehin die globale Variable 'sht_heating_active' haben, 
+    # kann dieser Sensor einfach immer deren Status spiegeln!
+    lambda: 'return id(sht_heating_active);'
+
+text_sensor:
+  # --------------------------------------------------------
+  # DIAGNOSTIC SENSOR FÜR DIE KALIBRIERUNG STATUS
+  # --------------------------------------------------------
+  - platform: template
+    name: "1.1 Dry Frequency Calibration Status"
+    id: cal_status
+    entity_category: diagnostic
+    icon: mdi:information-outline
+
+  # --------------------------------------------------------
+  # DIAGNOSTIC SENSOR FÜR SHT DEFOG STATUS
+  # -------------------------------------------------------- 
+  - platform: template
+    name: "1.3 SHT Defog Status"
+    id: sht_defog_status
+    entity_category: diagnostic
+    icon: mdi:water-thermometer
+
+# --------------------------------------------------------
+# PWM AUSGANG FÜR HEIZUNG (Pin 27)
+# --------------------------------------------------------
+output:
+  - platform: ledc
+    pin: GPIO27
+    inverted: true
+    id: heater_pwm
+    frequency: 2000Hz
+
+  # RGB LED
+  - platform: gpio
+    pin:
+      number: GPIO16
+      inverted: true
+    id: led_red
+
+  - platform: gpio
+    pin:
+      number: GPIO17
+      inverted: true
+    id: led_green
+
+  - platform: gpio
+    pin:
+      number: GPIO18
+      inverted: true
+    id: led_blue
+
+  # Activity LED
+  - platform: gpio
+    pin:
+      number: GPIO15
+      inverted: true
+    id: led_activity
