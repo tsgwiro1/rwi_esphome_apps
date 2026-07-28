@@ -1,6 +1,6 @@
 # ha-smartrelais - Zeitgesteuertes SSR-Relais mit Schalterbedienung
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -74,6 +74,10 @@ Das Projekt basiert auf dem kompakten Seeed Studio XIAO ESP32-C6 Modul, einem AQ
 | I2C SCL (J2 Pin 3) | D5 | `GPIO23` | 4K7 Pull-up bestückt, Reserve für Erweiterungen |
 | **DS18B20 Temp** | D6 | `GPIO16` | Lokaler Temperatursensor am SSR (Übertemperaturschutz) |
 | **Wandschalter (J3 Pin 1)** | D10 | `GPIO18` | Interner Pull-up, invertiert; Schalter gegen GND |
+| **RF-Switch Power** | — | `GPIO3` | Onboard-RF-Switch aktivieren (intern, beim Boot auf LOW) |
+| **Antennen-Auswahl** | — | `GPIO14` | Antennenumschaltung (LOW = interne Keramikantenne) |
+
+**Hinweis zur Antenne:** Beim Boot (`on_boot`, Priorität 800) wird der RF-Switch über `GPIO3` aktiviert und mit `GPIO14` fest die **interne Keramikantenne** ausgewählt. So ist der Funkpfad unabhängig vom Auslieferungszustand des Moduls eindeutig definiert; eine externe U.FL-Antenne wird nicht verwendet.
 
 ### Steckerbelegung
 
@@ -125,11 +129,13 @@ Alle Steuerelemente erscheinen als native Entitäten in den Kategorien **Konfigu
 * **Relais Status (`binary_sensor.relais_status`):** Zeigt an, ob das SSR angezogen ist.
 * **Restzeit (`sensor.restzeit`):** Verbleibende Laufzeit in Minuten (0.1-min-Auflösung).
 * **SSR Temperatur (`sensor.ssr_temperatur`):** Geglätteter Messwert des DS18B20 (gleitender Mittelwert, 10 Messungen, Update alle 10 s).
-* **SSR Spitzentemperatur heute (`sensor.ssr_spitzentemperatur_heute`):** Tagesmaximum, Reset um Mitternacht.
-* **Temperatur-Warnung (`binary_sensor.temperatur_warnung`):** EIN sobald die Frühwarnschwelle überschritten ist.
-* **Einschaltzeit heute (`sensor.einschaltzeit_heute`):** Relais-Laufzeit seit Mitternacht in Stunden.
-* **Betriebsstunden total (`sensor.betriebsstunden_total`):** Kumulierte Relais-Laufzeit, übersteht Neustarts (Flash-Schreibintervall: 10 min).
-* **Schaltspiele heute (`sensor.schaltspiele_heute`):** Anzahl Einschaltvorgänge seit Mitternacht.
+* **1.0 Betriebsstunden total (`sensor.betriebsstunden_total`):** Kumulierte Relais-Laufzeit, übersteht Neustarts (Flash-Schreibintervall: 10 min).
+* **1.1 Einschaltzeit heute (`sensor.einschaltzeit_heute`):** Relais-Laufzeit seit Mitternacht in Stunden.
+* **1.2 Schaltspiele heute (`sensor.schaltspiele_heute`):** Anzahl Einschaltvorgänge seit Mitternacht.
+* **1.3 Temperatur-Warnung (`binary_sensor.temperatur_warnung`):** EIN sobald die Frühwarnschwelle überschritten ist.
+* **1.4 SSR Spitzentemperatur heute (`sensor.ssr_spitzentemperatur_heute`):** Tagesmaximum, Reset um Mitternacht.
+
+*(Die Nummerierung folgt dem Schema des Diagnose-Pakets, das die Kategorie 1.x für projektlokale Sensoren reserviert. Die Entity-IDs bestehender Installationen bleiben davon unberührt, es ändern sich nur die Anzeigenamen.)*
 
 ### Zeitquelle
 Die Mitternachts-Resets (Tageszähler, Spitzentemperatur, Tageslimit) benötigen `time: homeassistant`. Ohne HA-Verbindung läuft die Logik normal weiter; der Reset erfolgt dann erst nach Wiederverbindung.

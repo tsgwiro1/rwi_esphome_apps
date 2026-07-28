@@ -1,5 +1,5 @@
 substitutions:
-  fw_version: "1.0.0"
+  fw_version: "1.0.1"
   # ESP32-C6
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"        # Mindestens 80 KB freien RAM erwarten wir im Normalbetrieb
@@ -16,15 +16,21 @@ esphome:
   project:
     name: "tsgwiro1.ha-smartrelais"
     version: "${fw_version}"
-  # Restaurierte Zählerstände nach dem Boot an HA publizieren
   on_boot:
-    priority: -100
-    then:
-      - lambda: |-
-          id(restzeit_sensor).publish_state(0);
-          id(schaltspiele_sensor).publish_state(id(schaltspiele_heute));
-          id(einschaltzeit_heute_sensor).publish_state(id(tages_einschaltzeit_s) / 3600.0f);
-          id(betriebsstunden_sensor).publish_state(id(betriebszeit_total_s) / 3600.0f);
+    # Restaurierte Zählerstände nach dem Boot an HA publizieren
+    - priority: -100
+      then:
+        - lambda: |-
+            id(restzeit_sensor).publish_state(0);
+            id(schaltspiele_sensor).publish_state(id(schaltspiele_heute));
+            id(einschaltzeit_heute_sensor).publish_state(id(tages_einschaltzeit_s) / 3600.0f);
+            id(betriebsstunden_sensor).publish_state(id(betriebszeit_total_s) / 3600.0f);
+    # Antenne setzen
+    - priority: 800
+      then:
+        - output.turn_off: rf_switch_enable   # GPIO3 LOW -> RF-Switch-Steuerung aktiv
+        - delay: 100ms
+        - output.turn_off: rf_antenna_select  # GPIO14 LOW -> interne Keramikantenne
 
 esp32:
   board: esp32-c6-devkitc-1
@@ -132,6 +138,12 @@ output:
       number: GPIO0
       inverted: true
     id: led_out
+  - platform: gpio
+    pin: GPIO3
+    id: rf_switch_enable
+  - platform: gpio
+    pin: GPIO14
+    id: rf_antenna_select
 
 switch:
   # Das physische SSR (Nicht bedienbar in HA)
@@ -198,7 +210,7 @@ binary_sensor:
 
   # Frühwarnung: SSR-Temperatur über Warnschwelle (schaltet nicht ab)
   - platform: template
-    name: "Temperatur-Warnung"
+    name: "1.3 Temperatur-Warnung"
     id: temp_warnung
     entity_category: "diagnostic"
     device_class: heat
@@ -389,7 +401,7 @@ sensor:
     update_interval: never
 
   - platform: template
-    name: "SSR Spitzentemperatur heute"
+    name: "1.4 SSR Spitzentemperatur heute"
     id: spitzentemp_sensor
     entity_category: "diagnostic"
     device_class: temperature
@@ -398,7 +410,7 @@ sensor:
     update_interval: never
 
   - platform: template
-    name: "Einschaltzeit heute"
+    name: "1.1 Einschaltzeit heute"
     id: einschaltzeit_heute_sensor
     entity_category: "diagnostic"
     icon: "mdi:clock-check-outline"
@@ -407,7 +419,7 @@ sensor:
     update_interval: never
 
   - platform: template
-    name: "Betriebsstunden total"
+    name: "1.0 Betriebsstunden total"
     id: betriebsstunden_sensor
     entity_category: "diagnostic"
     icon: "mdi:counter"
@@ -416,7 +428,7 @@ sensor:
     update_interval: never
 
   - platform: template
-    name: "Schaltspiele heute"
+    name: "1.2 Schaltspiele heute"
     id: schaltspiele_sensor
     entity_category: "diagnostic"
     icon: "mdi:gesture-tap"
