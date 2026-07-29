@@ -22,6 +22,19 @@ Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokument
 
 Keine Änderung an Regelverhalten, Schwellenlogik oder Bedienung. Getestet mit ESPHome 2026.7.2 (`config` und `compile` fehlerfrei, RAM 27.9 %, Flash 54.4 %).
 
+> **Nachtrag vom 2026-07-29 — nach 24 Stunden im Betrieb nachgemessen:**
+>
+> | Entität | vorher/Tag | jetzt/Tag |
+> | :--- | ---: | ---: |
+> | `climate` Rain Sensor Heater PID | ~645'000 | **0** (zusätzlich im `recorder` ausgeschlossen) |
+> | `Weather Station Sensor Heater` | ~8'640 | **1'442** |
+> | `Weather Station Frequency` | ~8'640 | **1'442** |
+> | `1.0 Dry Frequency` | 1'440 | **288** |
+>
+> Zur Einordnung, welche Massnahmen tatsächlich Datenbankzeilen gespart haben: Die drei Punkte zur Melderate (`heater_temp_fast`, PID-Aufruf, 60-s-Mittelung) wirken voll, weil sich diese Werte bei jeder Meldung real ändern. Die Entprellung von **Kalibrierstatus, Regensensor und Defog-Flag** senkt dagegen nur Netzwerk- und Event-Bus-Last: Home Assistant verwirft identische Wiederholungen ohnehin, ohne eine Zeile zu schreiben. Die ursprüngliche Formulierung in Abschnitt 7 der README legte das Gegenteil nahe und ist korrigiert.
+>
+> Funktional bestätigt: Die Selbstkalibrierung arbeitet, der Status steht auf `Kalibriert` und die gelernte Trockenfrequenz ist im ersten Tag von 33'165 auf 32'587 Hz eingelaufen.
+
 ## [1.0.0] - 2026-07-28
 
 ### Erstrelease

@@ -176,7 +176,9 @@ Nach dem ersten Start sollte die Trockenfrequenz beobachtet werden: `1.0 Weather
 
 ## 7. Datenrate gegenüber Home Assistant
 
-Die Entitäten sind bewusst darauf ausgelegt, wenig zu senden - jede Meldung erzeugt in der HA-Datenbank Zeilen in `states` und `state_attributes`. Die Regelung läuft davon unabhängig, sie ist nicht an die Publiziererate gekoppelt.
+Die Entitäten sind bewusst darauf ausgelegt, wenig zu senden. Die Regelung läuft davon unabhängig, sie ist nicht an die Publiziererate gekoppelt.
+
+> **Wichtig zur Einordnung:** Eine Meldung ist nicht automatisch eine Datenbankzeile. Home Assistant schreibt nur, wenn sich Status **oder** Attribute tatsächlich ändern; eine identische Wiederholung feuert bloss `STATE_REPORTED` und wird vom Recorder verworfen. Die Kadenzen unten senken deshalb zuverlässig **Netzwerk- und Event-Bus-Last** — Datenbankzeilen sparen sie nur dort, wo sich der Wert real bei jeder Meldung ändert. Das ist bei den Messwerten mit vielen Nachkommastellen der Fall und war es vor allem bei der Climate-Entität, deren `current_temperature` als Attribut ständig mitlief.
 
 | Entität | Kadenz | Meldungen/Tag |
 | :--- | :--- | ---: |
