@@ -8,7 +8,7 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 ## [1.1.2] - 2026-07-28
 
 ### Geändert
-* **Die neun Konfigurationsregler pollen nicht mehr.** Sie waren als Template-`number` mit `lambda:` gebaut und damit Polling-Komponenten, die ihren Wert im Standardtakt von 60 s bedingungslos neu publizierten - obwohl es reine Konfigurationswerte sind, die sich nur ändern, wenn man den Regler bewegt. Das waren rund **13'000 Meldungen pro Tag**, die in Home Assistant jeweils Datenbankzeilen erzeugten.
+* **Die neun Konfigurationsregler pollen nicht mehr.** Sie waren als Template-`number` mit `lambda:` gebaut und damit Polling-Komponenten, die ihren Wert im Standardtakt von 60 s bedingungslos neu publizierten - obwohl es reine Konfigurationswerte sind, die sich nur ändern, wenn man den Regler bewegt. Das waren rund **13'000 Meldungen pro Tag** — Netzwerk-, Event-Bus- und ESP-Last für Werte, die tage- bis monatelang konstant sind.
 
   Umgesetzt über `update_interval: never` plus gezieltes Publizieren an genau zwei Stellen:
   * einmalig im `on_boot` (vor dem 10-s-Delay, damit Home Assistant die Werte sofort hat und nicht kurzzeitig `unknown` anzeigt),
@@ -20,6 +20,12 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ### Nicht geändert
 * Bewässerungslogik, State Machine, Resume-Fähigkeit und Sicherheitsmechanismen sind unberührt. Die Regler liefern ihre Werte weiterhin aus denselben neustartfesten Globals.
+
+> **Nachtrag vom 2026-07-29 (Korrektur):** Die ursprüngliche Fassung behauptete, die 13'000 Meldungen erzeugten in Home Assistant Datenbankzeilen. Das ist falsch. Home Assistant dedupliziert bereits selbst — bei unverändertem Status und unveränderten Attributen feuert nur `STATE_REPORTED` statt `STATE_CHANGED`, und der Recorder schreibt nichts.
+>
+> Über ein 48-Stunden-Fenster nachgemessen, das die Zeit vor und nach dem Umbau abdeckt: Die Regler standen durchgehend bei 19–21 Zeilen — vorher wie nachher. Der Umbau spart also Netzwerk-, Event-Bus- und ESP-Last, aber keine Datenbankzeilen.
+>
+> Die Massnahme bleibt trotzdem richtig: Ein Polling-Zyklus für Werte, die sich monatelang nicht ändern, ist unnötige Arbeit auf einem ESP8266 mit knappem Heap.
 
 ## [1.1.1] - 2026-07-28
 
