@@ -151,7 +151,13 @@ Dadurch siehst du in Home Assistant bei jedem Gerät sofort, auf welchem Stand s
 
 Die vier **interpretierenden** Text-Sensoren (`2.0 WLAN Status`, `2.4 Verbundener Access Point`, `4.0 System Gesundheit`, `5.1 Common Diagnostics Version`) melden nur noch bei echter Wertänderung an Home Assistant.
 
-Hintergrund: ESPHome dedupliziert in `TextSensor::publish_state()` **nicht**. Ein zyklisch pollender Template-Sensor schickte seinen Wert also auch dann erneut, wenn sich nichts geändert hatte — jede dieser Meldungen erzeugt in Home Assistant eine Datenbankzeile. Das summierte sich pro Gerät auf rund **7'200 unnötige Meldungen pro Tag**; allein `5.1` meldete seine zur Compilezeit eingesetzte Konstante 1'440-mal täglich.
+Hintergrund: ESPHome dedupliziert in `TextSensor::publish_state()` **nicht**. Ein zyklisch pollender Template-Sensor schickte seinen Wert also auch dann erneut, wenn sich nichts geändert hatte. Das summierte sich pro Gerät auf rund **7'200 unnötige Meldungen pro Tag**; allein `5.1` meldete seine zur Compilezeit eingesetzte Konstante 1'440-mal täglich.
+
+Die Einsparung wirkt bei der **API-Verbindung** zwischen Gerät und Home Assistant, beim **Event-Bus** von Home Assistant und bei der **Rechenzeit auf dem ESP**.
+
+> ⚠️ **Nicht in der Datenbank.** Home Assistant dedupliziert bereits selbst: Wird eine Entität mit unverändertem Status **und** unveränderten Attributen neu gemeldet, feuert nur `STATE_REPORTED` statt `STATE_CHANGED` — der Recorder schreibt in diesem Fall nichts. Über 24 Stunden nachgemessen schrieben Geräte mit und ohne diesen Filter für `5.1`, `2.4` und `4.0` identisch je 3 Zeilen pro Tag.
+>
+> Wer Datenbankzeilen sparen will, muss bei Entitäten ansetzen, deren Wert sich **tatsächlich** bei jeder Meldung ändert — etwa Messwerte mit vielen Nachkommastellen oder Climate-Entitäten, deren `current_temperature` als Attribut mitläuft. Dort hilft eine niedrigere Melderate oder ein `recorder`-Ausschluss.
 
 Umgesetzt ist das über einen Lambda-Filter, der die Filterkette bei unverändertem Wert abbricht:
 

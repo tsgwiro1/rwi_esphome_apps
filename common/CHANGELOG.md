@@ -7,9 +7,15 @@ Alle wichtigen Änderungen an diesem gemeinsamen Diagnose-Paket werden in dieser
 ## [1.3.0] - 2026-07-28
 
 ### Geändert
-- **Interpretierende Text-Sensoren melden nur noch bei Wertänderung.** Betroffen sind `2.0 WLAN Status`, `2.4 Verbundener Access Point`, `4.0 System Gesundheit` und `5.1 Common Diagnostics Version`. ESPHome dedupliziert in `TextSensor::publish_state()` nicht — die dortige Prüfung spart nur die Heap-Allokation, `notify_frontend_()` wird trotzdem immer aufgerufen. Ein zyklisch pollender Template-Sensor schickte seinen Wert also auch dann erneut, wenn sich nichts geändert hatte, und erzeugte in Home Assistant entsprechend Datenbankzeilen. Umgesetzt über einen Lambda-Filter, der die Filterkette bei unverändertem Wert abbricht (`LambdaFilter::new_value` liefert `false`, `internal_send_state_to_frontend` wird nicht erreicht).
+- **Interpretierende Text-Sensoren melden nur noch bei Wertänderung.** Betroffen sind `2.0 WLAN Status`, `2.4 Verbundener Access Point`, `4.0 System Gesundheit` und `5.1 Common Diagnostics Version`. ESPHome dedupliziert in `TextSensor::publish_state()` nicht — die dortige Prüfung spart nur die Heap-Allokation, `notify_frontend_()` wird trotzdem immer aufgerufen. Ein zyklisch pollender Template-Sensor schickte seinen Wert also auch dann erneut, wenn sich nichts geändert hatte. Umgesetzt über einen Lambda-Filter, der die Filterkette bei unverändertem Wert abbricht (`LambdaFilter::new_value` liefert `false`, `internal_send_state_to_frontend` wird nicht erreicht).
 
   Einsparung pro Gerät: rund **7'200 Meldungen pro Tag** (2.4 im 30-s-Takt: 2'880; die drei übrigen im 60-s-Takt: je 1'440). Besonders `5.1` ist eine zur Compilezeit eingesetzte Konstante, die bisher 1'440-mal täglich unverändert gemeldet wurde und jetzt genau einmal meldet.
+
+  **Wo die Einsparung wirkt:** bei der API-Verbindung zwischen Gerät und Home Assistant, beim Event-Bus von Home Assistant und bei der Rechenzeit auf dem ESP. **Nicht** in der Datenbank — siehe Nachtrag.
+
+  > **Nachtrag vom 2026-07-29 (Korrektur):** Die ursprüngliche Fassung dieses Eintrags behauptete, die wiederholten Meldungen erzeugten in Home Assistant Datenbankzeilen. Das ist falsch. Home Assistant dedupliziert bereits selbst: Wird eine Entität mit unverändertem Status **und** unveränderten Attributen neu gemeldet, feuert nur `STATE_REPORTED` statt `STATE_CHANGED`, und der Recorder schreibt nichts.
+  >
+  > Nachgemessen über 24 Stunden mit `ha-flowmeter` und `wp-solar-monitor` als Kontrollgruppe (beide noch auf V1.2.1, also ohne Deduplizierung) gegen `ha-weather-station` und `ha-irrigation` (V1.3.0): Für `5.1`, `2.4` und `4.0` schrieben **alle** Geräte exakt 3 Zeilen pro Tag — mit und ohne Filter identisch. Die Änderung spart also Netzwerk- und Event-Bus-Last, aber keine Datenbankzeilen.
 
   Unbedenklich für Home Assistant: ESPHome schickt jedem sich verbindenden Client über den `INITIAL_STATE`-Iterator ohnehin den aktuellen Stand aller Entitäten. Nach einem HA-Neustart sind die Werte also sofort wieder da, ohne auf die nächste Wertänderung warten zu müssen.
 
