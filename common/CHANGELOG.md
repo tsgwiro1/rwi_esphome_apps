@@ -4,6 +4,20 @@ Alle wichtigen Änderungen an diesem gemeinsamen Diagnose-Paket werden in dieser
 
 ---
 
+## [1.4.0] - 2026-07-30
+
+### Behoben
+- **Kein falsches „🔴 Kritisch" mehr nach einem Neustart.** `2.0 WLAN Status` und `4.0 System Gesundheit` fangen den Startwert `NAN` jetzt mit `std::isnan()` ab und melden stattdessen **„⚪ Startet"**, bis der jeweilige Quellsensor seine erste Messung geliefert hat.
+
+  Ursache: Ein ESPHome-Sensor beginnt mit `Sensor::Sensor() : state(NAN), raw_state(NAN)` (`sensor/sensor.cpp:45`). Die Quellsensoren `2.1 WLAN Signalpegel` und `4.1 Freier Speicher` haben beide `polling_component_schema("60s")` und liefern ihren ersten Wert daher erst nach 60 Sekunden. Die Ampel-Lambdas verglichen diesen Startwert ungeprüft mit ihren Schwellen — und in C++ ist **jeder** `>`-Vergleich gegen `NAN` falsch. Beide fielen dadurch in den `else`-Zweig und meldeten nach jedem Reboot oder OTA rund eine Minute lang „🔴 Kritisch", obwohl das Gerät einwandfrei lief.
+
+  Praktische Folge: Die Werte waren nicht nur optisch irritierend, sondern hätten auch jede Home-Assistant-Automation oder Benachrichtigung, die auf diese beiden Ampeln reagiert, bei jedem Neustart fälschlich ausgelöst.
+
+### Nicht geändert
+- `2.4 Verbundener Access Point` steht nach dem Start weiterhin kurz auf „⚠️ Nicht verbunden", weil `raw_bssid` noch leer ist. Der Zustand ist inhaltlich korrekt — das Gerät *ist* in diesem Moment noch nicht verbunden — und lässt sich ohne zusätzliche Uptime-Prüfung nicht von einem echten Verbindungsabbruch unterscheiden. Bewusst so belassen.
+
+---
+
 ## [1.3.0] - 2026-07-28
 
 ### Geändert

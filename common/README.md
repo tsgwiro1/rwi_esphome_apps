@@ -1,6 +1,6 @@
 # 🩺 Common Diagnostics (ESPHome Package)
 
-![Version](https://img.shields.io/badge/version-1.3.0-blue)
+![Version](https://img.shields.io/badge/version-1.4.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -55,7 +55,7 @@ Alle Entitäten sind mit einem Nummern-Prefix versehen, das die Sortierung auf d
 | `6.x` | 🔘 Steuerung |
 
 ### 2.x – WLAN & Konnektivität
-* **2.0 WLAN Status:** Ampel-Bewertung (🟢 Exzellent / 🟡 Okay / 🔴 Kritisch) anhand konfigurierbarer RSSI-Schwellen.
+* **2.0 WLAN Status:** Ampel-Bewertung (🟢 Exzellent / 🟡 Okay / 🔴 Kritisch) anhand konfigurierbarer RSSI-Schwellen. Direkt nach dem Start steht der Sensor auf **⚪ Startet**, bis die erste Messung vorliegt.
 * **2.1 WLAN Signalpegel:** Die RSSI-Signalstärke in dBm, geglättet über 3 Messungen (`sliding_window_moving_average`).
 * **2.2 WLAN Signalqualität:** Der RSSI-Wert umgerechnet in Prozent (0–100 %) für eine intuitivere Darstellung in Dashboards und Automationen.
 * **2.3 Verbundene SSID:** Zeigt an, mit welchem WLAN das Gerät verbunden ist.
@@ -66,7 +66,7 @@ Alle Entitäten sind mit einem Nummern-Prefix versehen, das die Sortierung auf d
 * **3.1 Geräte MAC:** Die Hardware-MAC-Adresse des Geräts.
 
 ### 4.x – System & Speicher
-* **4.0 System Gesundheit:** Ampel-Bewertung des RAM-Zustands (🟢 Stabil / 🟡 Warnung / 🔴 Kritisch).
+* **4.0 System Gesundheit:** Ampel-Bewertung des RAM-Zustands (🟢 Stabil / 🟡 Warnung / 🔴 Kritisch). Direkt nach dem Start steht der Sensor auf **⚪ Startet**, bis die erste Messung vorliegt.
 * **4.1 Freier Speicher (Bytes):** Der aktuell verfügbare Arbeitsspeicher (Heap).
 * **4.2 Laufzeit:** Die Uptime des Geräts in Stunden.
 * **4.3 Letzter Neustart Grund:** Zeigt an, ob das Gerät geplant neugestartet wurde, den Strom verloren hat oder durch einen Watchdog neugestartet wurde.
