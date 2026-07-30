@@ -1,0 +1,343 @@
+esphome:
+  name: wp-solar-monitor
+  friendly_name: wp-solar-monitor
+  project:
+    name: "tsgwiro1.wp-solar-monitor"
+    version: "${fw_version}"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+# HIER überschreiben wir die Grenzen für den starken ESP32
+substitutions:
+  fw_version: "1.0.0"
+  diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
+  diag_min_heap_critical: "40000" # 40kb ist kritisch
+
+packages:
+  my_diagnostics: !include common/diagnostics.yaml
+
+#external_components:
+#  - source: github://nrandell/dallasng
+  
+# Enable logging
+logger:
+  logs:
+    component: ERROR
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret solarmonitor_api_key
+
+ota:
+  platform: esphome
+  password: !secret solarmonitor_ota_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: !secret solarmonitor_fallback_ap_ssid
+    password: !secret solarmonitor_fallback_ap_password
+
+web_server:
+  port: 80
+  ota: false
+  version: 3
+
+captive_portal:
+
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO23
+
+#dallasng:
+#  - pin: GPIO25
+#    update_interval: 5s
+
+one_wire:
+  - platform: gpio
+    pin: GPIO25
+
+output:
+  - id: backlight_pin
+    platform: gpio
+    pin: GPIO32
+
+sensor:
+  - platform: dallas_temp
+    address: 0x8d00000019d27c28
+    name: "Vorlauf"
+    id: vl
+    resolution: 10
+    update_interval: 5s
+    filters:
+      - sliding_window_moving_average:
+          window_size: 2
+          send_every: 2
+
+  - platform: dallas_temp
+    address: 0x43000000196fe828
+    name: "Ruecklauf"
+    id: rl
+    resolution: 10
+    update_interval: 5s
+    filters:
+      - sliding_window_moving_average:
+          window_size: 2
+          send_every: 2
+
+  - platform: template
+    name: Energy today
+    id: energyCounter
+    update_interval: 10s
+    device_class: energy
+    state_class: total_increasing
+    unit_of_measurement: Wh
+    lambda: |-
+      return id(energyWh);
+
+  - platform: template
+    name: Power
+    id: st_power
+    update_interval: 10s
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    lambda: |-
+      return id(power);
+
+  - platform: adc
+    pin: GPIO34
+    name: "Ambient Brightness"
+    icon: "mdi:brightness-6"
+    id: ambient
+    raw: true
+    internal: true
+    accuracy_decimals: 0
+    unit_of_measurement: ""
+    update_interval: 5s
+    entity_category: "diagnostic"
+    on_value_range:
+      - below: 3900
+        then:
+          - output.turn_on: backlight_pin
+      - above: 3950
+        then:
+          - output.turn_off: backlight_pin
+
+  - platform: duty_time
+    id: pump_runtime
+    name: "1.1 Pump runtime today"
+    lambda: "return id(pump).state == true;"
+    restore: true
+    last_time:
+      name: "1.2 Pump last turn-on"
+      id: pump_last_on
+
+binary_sensor:
+  - platform: gpio
+    pin: 
+     number: GPIO5
+     mode:
+       input: true
+       pulldown: true
+    device_class: RUNNING
+    name: "Pumpe"
+    id: pump
+
+button:
+  - platform: template
+    name: "1.0 Reset Counters"
+    icon: "mdi:restart-alert"
+    entity_category: "diagnostic"
+    on_press:
+      then:
+        - sensor.duty_time.reset: pump_runtime
+        - lambda: id(energyWh) = 0;
+        - logger.log: "Manual Reset of Counters for Energy and Pump Runtime"
+
+time:
+  - platform: homeassistant
+    id: ha_time
+  - platform: homeassistant
+    id: the_loop
+    on_time:
+      seconds: /5
+      then:
+        - script.execute: calculate_energy
+  - platform: homeassistant
+    id: the_reset
+    on_time:
+      hours: 0
+      minutes: 0
+      seconds: 0
+      then:
+        - sensor.duty_time.reset: pump_runtime
+        - lambda: id(energyWh) = 0;
+        - logger.log: "Automatic Reset of Counters for Energy and Pump Runtime"
+
+number:
+  - platform: template
+    name: "spez. Wärmekap."
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "kJ/kg°K"
+    id: swk
+    entity_category: "config"
+    mode: box
+    min_value: 3.40
+    max_value: 4.00
+    step: 0.01
+
+  - platform: template
+    name: "spez. Dichte"
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "kg/m3"
+    id: sdi
+    entity_category: "config"
+    mode: box
+    min_value: 960
+    max_value: 1060
+    step: 1.0
+
+  - platform: template
+    name: "Durchfluss"
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "l/min"
+    id: flow
+    entity_category: "config"
+    mode: box
+    min_value: 0
+    max_value: 10
+    step: 0.1
+
+globals:
+  - id: energyWh
+    type: float
+    restore_value: yes
+    initial_value: '0.0'
+  - id: power
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+
+script:
+  - id: calculate_energy
+    then:
+      - lambda: !lambda |-
+          float deltaT = 0.0;
+          float weight = 0.0;
+          float energySlice = 0.0;
+          deltaT = max(id(vl).state - id(rl).state, (float)0.0);
+          if (id(pump).state && deltaT > 0.5) {
+            weight = id(flow).state / 60 * 5 / 1000 * id(sdi).state;
+            energySlice = weight * deltaT * id(swk).state;
+            energySlice *= 0.277778;   // kJ to Wh
+            if (isnan(id(energyWh))) {
+              id(energyWh) = 0;
+              ESP_LOGD("Calculate", "Energy read as NAN! --> reset to 0 (%.2fWh)", id(energyWh));
+            } 
+            id(energyWh) = id(energyWh) + energySlice;
+            id(power) = energySlice * 3600 / 5;
+            ESP_LOGD("Calculate", "Temp Diff: %.1f%°C Energy last 5s: %.2fWh  Energy today: %.2fWh Power: %.2fW", id(vl).state - id(rl).state, energySlice, id(energyWh), id(power));
+          } else {
+            id(power) = 0;
+            ESP_LOGD("Calculate", "Pump off  Energy today: %.2fWh  Power: %.2fW", id(energyWh), id(power));
+          }
+
+image:
+  - file: "pic/wlan.png"
+    id: wlan_icon
+    type: GRAYSCALE
+    resize: 32x32
+  - file: "pic/solar_schema_no_pump3.png"
+    id: schema
+    type: RGB565
+    resize: 280x154
+  - file: "pic/pump_green.png"
+    id: pump_on
+    type: RGB565
+    resize: 32x32
+  - file: "pic/pump_gray.png"
+    id: pump_off
+    type: RGB565
+    resize: 32x32
+
+font:
+  - file: "gfonts://Open Sans@medium"
+    id: robo32
+    size: 32
+  - file: "gfonts://Open Sans@medium"
+    id: robo26
+    size: 26  
+  - file: "gfonts://Open Sans@medium"
+    id: robo20
+    size: 20
+  - file: "gfonts://Open Sans@medium"
+    id: robo12
+    size: 12
+
+color:
+  - id: black
+    red: 0%
+    green: 0%
+    blue: 0%
+  - id: red
+    red: 100%
+    green: 0%
+    blue: 0%
+  - id: blue
+    red: 0%
+    green: 0%
+    blue: 100%
+  - id: dark_green
+    red: 0%
+    green: 50%
+    blue: 0%
+
+display:
+  - platform: st7789v
+    model: Adafruit RR 280x240
+    eightbitcolor: true
+    rotation: 90
+    cs_pin: 14
+    dc_pin: 27
+    reset_pin: 33
+    lambda: |-
+      it.fill(Color::WHITE);
+      it.print(107, 37, id(robo32), id(black), TextAlign::BOTTOM_CENTER, "SOLAR");
+      it.line(0, 34, 280, 34, id(black));
+      it.line(215, 0, 215, 34, id(black));
+      if (id(raw_wifi_signal).state > -70) {it.image(220, 0, id(wlan_icon));}
+      it.image(0, 75, id(schema));
+      if (id(pump).state) {
+        it.image(52, 180, id(pump_on));
+      } else {
+        it.image(52, 180, id(pump_off));
+      }
+      it.printf(108, 99, id(robo20), id(red), TextAlign::TOP_LEFT, "%4.1f°C", id(vl).state);
+      it.printf(108, 169, id(robo20), id(blue), TextAlign::TOP_LEFT, "%4.1f°C", id(rl).state);
+      it.printf(68, 152, id(robo20), id(black), TextAlign::TOP_CENTER, "%s", id(pump).state ? "ON" : "OFF");
+      if (id(energyWh) < 1000) {
+        it.printf(218, 58, id(robo26), id(dark_green), TextAlign::TOP_CENTER, "%4.0f Wh", id(energyWh));
+      } else {
+        it.printf(218, 58, id(robo26), id(dark_green), TextAlign::TOP_CENTER, "%3.1f kWh", id(energyWh) / 1000.0);
+      }
+      it.line(162,90,275,90,id(black)); it.line(220,90,246,138,id(black));
+      if (id(power) < 1000) {
+        it.printf(72, 75, id(robo20), id(dark_green), TextAlign::BOTTOM_CENTER, "%4.0f W", id(power));
+      } else {
+        it.printf(72, 75, id(robo20), id(dark_green), TextAlign::BOTTOM_CENTER, "%5.1f kW", id(power) / 1000.0);
+      }
+      int h = ((int)id(pump_runtime).state)/3600;
+      int m = ((int)id(pump_runtime).state)%3600/60;
+      int s = ((int)id(pump_runtime).state)%3600%60;
+      it.printf(62, 210, id(robo20), id(black), TextAlign::TOP_CENTER, "%02d:%02d:%02d", h, m, s);
