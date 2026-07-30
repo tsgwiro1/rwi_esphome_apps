@@ -1,0 +1,222 @@
+substitutions:
+  fw_version: "1.0.0"
+
+esphome:
+  name: ha-flowmeter
+  friendly_name: ha-flowmeter
+  project:
+    name: "tsgwiro1.ha-flowmeter"
+    version: "${fw_version}"
+
+  # LED D6 und D7 sicherheitshalber beim Start ausschalten
+  on_boot:
+    priority: -100
+    then:
+      - output.turn_off: unused_led_d6
+      - output.turn_off: unused_led_d7
+
+esp8266:
+  board: d1_mini
+
+packages:
+  my_diagnostics: !include common/diagnostics.yaml
+
+# Enable logging
+logger:
+
+# Local Webserver
+web_server:
+  port: 80
+  ota: false
+  version: 3
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret flowmeter_api_key
+
+ota:
+  platform: esphome
+  password: !secret flowmeter_ota_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  min_auth_mode: WPA2
+    
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: !secret flowmeter_fallback_ap_ssid
+    password: !secret flowmeter_fallback_ap_password
+
+captive_portal:
+
+# ---------------------------------------------------------
+# STATUS LED (D3 / GPIO0) - Vollautomatisch
+# ---------------------------------------------------------
+status_led:
+  pin:
+    number: GPIO0
+    inverted: true
+
+# ---------------------------------------------------------
+# EFFEKT LED (D4 / GPIO2) - "Arbeitslicht"
+# ---------------------------------------------------------
+light:
+  - platform: monochromatic
+    name: "Status Activity"
+    id: light_activity
+    output: out_activity
+    internal: true
+    default_transition_length: 0.2s # Kurzes Fading für edlen Look
+    effects:
+      - strobe:
+          name: "Flash"
+          colors:
+            - state: true
+              brightness: 100%
+              duration: 100ms # Kurz und hell (Blitz)
+            - state: true
+              brightness: 0%   # Ganz aus (oder 10% für "Glimmen")
+              duration: 200ms
+
+# ---------------------------------------------------------
+# HARDWARE PINS (Outputs)
+# ---------------------------------------------------------
+output:
+  # D4 (Activity)
+  - platform: esp8266_pwm
+    pin: GPIO02
+    frequency: 1kHz
+    id: out_activity
+    inverted: true
+
+  # D6 (Unused / Off)
+  - platform: gpio
+    pin: GPIO12
+    id: unused_led_d6
+    inverted: true
+    
+
+  # D7 (Unused / Off)
+  - platform: gpio
+    pin: GPIO13
+    id: unused_led_d7
+    inverted: true
+
+# ---------------------------------------------------------
+# 1. DAS GEDÄCHTNIS (Globale Variablen)
+# ---------------------------------------------------------
+globals:
+  # Konfiguration: Wie viele Impulse sind 1 Liter?
+  # Default: 1.0 (Da dein Sensor 1 Puls/Liter macht)
+  - id: conf_pulses_per_liter
+    type: float
+    restore_value: true
+    initial_value: '1.0'
+
+  # Der Zählerstand (Gesamtmenge in Liter)
+  # Speichert sich permanent im Flash!
+  - id: total_water_liters
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+# ---------------------------------------------------------
+# 2. KONFIGURATION VIA HOME ASSISTANT
+# ---------------------------------------------------------
+number:
+  - platform: template
+    name: "Konfig: Impulse pro Liter"
+    id: setting_calibration
+    icon: "mdi:ruler"
+    unit_of_measurement: "imp/L"
+    min_value: 0.1
+    max_value: 1000.0
+    step: 0.1
+    mode: box
+    entity_category: "config"
+    # Zeigt aktuellen Wert
+    lambda: "return id(conf_pulses_per_liter);"
+    # Speichert neuen Wert
+    set_action:
+      then:
+        - globals.set:
+            id: conf_pulses_per_liter
+            value: !lambda "return x;"
+
+# Ein Reset-Knopf für HA (z.B. zum Saison-Start)
+button:
+  - platform: template
+    name: "Reset Gesamtzähler"
+    id: reset_total
+    entity_category: "config"
+    icon: "mdi:delete-restore"
+    on_press:
+      then:
+        - globals.set:
+            id: total_water_liters
+            value: '0.0'
+        # Aktualisiert sofort den Sensor in HA
+        - component.update: sensor_total_water
+
+# ---------------------------------------------------------
+# 3. SENSOREN (Die Messung)
+# ---------------------------------------------------------
+sensor:
+  # A. Durchflussrate (L/min)
+  - platform: pulse_meter
+    pin: GPIO5 # D1
+    name: "Wasser Durchflussrate"
+    id: flow_rate
+    unit_of_measurement: "L/min"
+    icon: "mdi:water-pump"
+    
+    # Timeout: Wenn 60s kein Puls kommt -> 0 L/min
+    timeout: 60s
+    
+    # Entprellung: Signale kürzer als 100ms ignorieren
+    internal_filter: 100ms
+    
+    # Berechnung: Pulse pro Minute / Impulse pro Liter
+    filters:
+      - lambda: |-
+          if (id(conf_pulses_per_liter) <= 0) return 0;
+          return x / id(conf_pulses_per_liter);
+
+    # B. Gesamtzähler Logik (Integriert im Pulse Meter)
+    total:
+      id: raw_total_pulses
+      internal: true 
+      on_value:
+        then:
+          # A. LICHT BLITZ (Manuell gesteuert für volle Kontrolle)
+          # 1. Sofort hell (100%) ohne Verzögerung
+          - light.turn_on:
+              id: light_activity
+              brightness: 100%
+              transition_length: 0s 
+          
+          # 2. Kurz warten (der Blitz)
+          - delay: 100ms
+          
+          # 3. Weich ausblenden (Fade out) - Sieht sehr edel aus!
+          - light.turn_off:
+              id: light_activity
+              transition_length: 0.5s
+
+          # B. Zähler erhöhen (wie gehabt)
+          - globals.set:
+              id: total_water_liters
+              value: !lambda "return id(total_water_liters) + (1.0 / id(conf_pulses_per_liter));"
+          - component.update: sensor_total_water
+
+  # C. Der sichtbare Gesamtzähler für HA
+  - platform: template
+    name: "Wasser Gesamtmenge"
+    id: sensor_total_water
+    unit_of_measurement: "L"
+    accuracy_decimals: 1
+    icon: "mdi:water"
+    state_class: total_increasing
+    lambda: "return id(total_water_liters);"
