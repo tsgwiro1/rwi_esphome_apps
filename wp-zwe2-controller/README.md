@@ -430,10 +430,31 @@ mit 5 s und wäre davon nicht betroffen.
   nicht hervor; es liefert nur die momentane Ansteuerung in Prozent. Ein
   `total_increasing`-Zähler analog zu `wp-solar-monitor` fehlt und wäre die
   grösste funktionale Lücke.
+* **Die Regelung hat keine Rückmeldung, ob ihre Ansteuerung überhaupt ankommt.**
+  Der Heizstab hat einen eigenen mechanischen Thermostat, der am oberen Ende des
+  Temperaturbereichs abschaltet. Ist er offen, fordert das Gerät weiter
+  Leistung an, ohne dass Leistung fliesst - belegt am 2026-07-30: Ansteuerung
+  100 %, tatsächliche Aufnahme 12.8 W statt 4500 W, gemessen an
+  `sensor.heizstab`. Der Unterschied zwischen 0 % und 100 % Ansteuerung waren in
+  diesem Zustand 6 W Eigenaufnahme der Modulelektronik.
+
+  Betroffen ist damit auch die Rückaddition der Eigenaufnahme: sie rechnet mit
+  `Ansteuerung × «Power Heater»`, also mit dem Sollwert und nicht mit einer
+  Messung. Bei offenem Thermostat überschätzt das Gerät seinen Überschuss um bis
+  zu die volle Heizstableistung. Bei 100 % bleibt das folgenlos, weil die
+  Ansteuerung ohnehin am Anschlag ist; bei Teillast fordert die Regelung zu hoch
+  und kann nicht erkennen, dass ihre Ausgabe nicht landet.
+
+  `sensor.heizstab` liegt in Home Assistant bereit, wird vom Gerät aber nicht
+  gelesen. Ihn für die Rückaddition zu verwenden und zusätzlich eine Meldung zu
+  erzeugen, wenn über längere Zeit Leistung angefordert aber keine gemessen
+  wird, wäre die naheliegende Verbesserung - das deckt zugleich einen defekten
+  Heizstab ab.
 * **Kein Hysteresefenster an der Einschaltschwelle.** Pendelt der Überschuss um
   die Grenze von «Min Heater Output», springt die Ansteuerung im 5-s-Takt
-  zwischen 0 und 20 %. Die Rückaddition der Eigenaufnahme dämpft das wirksam,
-  solange «Power Heater» stimmt - sie ist der einzige Schutz dagegen.
+  zwischen 0 und 20 %. Die Rückaddition der Eigenaufnahme dämpft das, solange
+  «Power Heater» stimmt **und** der Heizstab tatsächlich Leistung aufnimmt (siehe
+  vorigen Punkt) - sie ist der einzige Schutz dagegen.
 * **Ein ausgefallener Fühler wird nicht gemeldet.** Fällt der DS18B20 aus, ist
   seine Temperatur `nan`, damit sind beide Vergleiche falsch, und Lüfter wie
   Übertemperaturzustand bleiben auf ihrem letzten Stand stehen. Ein Watchdog,

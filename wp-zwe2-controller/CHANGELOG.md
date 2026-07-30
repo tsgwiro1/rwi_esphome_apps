@@ -130,8 +130,8 @@ Keine Fehler im Log. Zwei Hinweise ohne Auswirkung auf diese Version:
 
 ### Beim Flashen beobachtet
 
-Der Neustart hat die Speicherverriegelung fallen lassen und der Heizstab ist
-danach auf Volllast gegangen, obwohl der Speicher unmittelbar davor als geladen
+Der Neustart hat die Speicherverriegelung fallen lassen und die Regelung hat
+danach 100 % angefordert, obwohl der Speicher unmittelbar davor als geladen
 galt. Das ist **kein Effekt dieser Version**, sondern das Verhalten der
 Konfiguration bei jedem Neustart - hier zum ersten Mal belegt, deshalb
 festgehalten:
@@ -145,8 +145,14 @@ im Totband der Hysterese (`x >= 78` falsch, `x < 76` ebenfalls), es wird also
 nichts publiziert und der Default bleibt stehen. Bei 4.6 kW echter Einspeisung
 hat die Regelung daraufhin folgerichtig 100 % gefahren.
 
-Der Effekt begrenzt sich selbst: bei 78.0 °C greift die Verriegelung wieder. Was
-verloren geht, ist die Wirkung der 2-K-Hysterese - nach einem Neustart im
-Totband lädt das Gerät sofort nach, statt bis 76 °C zu warten. Als bekannter
-Punkt in der README aufgenommen, Behebung ist ein Kandidat für die nächste
-Version.
+Geflossen ist dabei nichts: die Leistungsmessung `sensor.heizstab` stand vor dem
+Flash auf 6.5-7.0 W und danach auf 12.5-13.1 W. Die 6 W Sprung sind die
+Eigenaufnahme der Modulelektronik bei ausgesteuertem DAC, keine Heizleistung -
+der mechanische Thermostat des Heizstabs war offen. S1 ist entsprechend nicht
+gestiegen, sondern von 77.5 auf 77.35 °C gefallen.
+
+Die Verriegelung greift also nicht dadurch wieder, dass der Heizstab den
+Speicher auf 78 °C bringt. Was bleibt, ist der Verlust der 2-K-Hysterese: nach
+einem Neustart im Totband fordert das Gerät sofort wieder an, statt bis 76 °C zu
+warten. Als bekannter Punkt in der README aufgenommen, Behebung ist ein Kandidat
+für die nächste Version.
