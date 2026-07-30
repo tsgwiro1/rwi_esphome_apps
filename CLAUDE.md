@@ -111,6 +111,25 @@ Melderate senken bleibt trotzdem sinnvoll: für Netzwerk- und Event-Bus-Last und
 gegen Flash-Verschleiss (jeder `ClimateCall::perform()` löst über
 `Climate::publish_state()` ein `save_state_()` ins NVS aus).
 
+## Diagnosedaten nach einem Neustart
+
+**Nach einem Reboot oder OTA brauchen die Diagnosewerte ein bis zwei Minuten,
+bis sie stimmen.** Vorher melden besonders WLAN und Heap falsche Werte. Nicht
+in dieser Zeit messen, vergleichen oder Schlüsse ziehen — erst abwarten.
+
+Der Grund liegt in den Abfragezyklen und in der Startbelegung `NAN`. Die
+Quellsensoren `2.1 WLAN Signalpegel` und `4.1 Freier Speicher` liefern ihren
+ersten Wert erst nach 60 s (`polling_component_schema("60s")`). Ein Sensor
+startet aber mit `Sensor::Sensor() : state(NAN)`, und die Ampel-Lambdas von
+`2.0 WLAN Status` und `4.0 System Gesundheit` vergleichen diesen Startwert
+direkt mit ihren Schwellen. Jeder Vergleich gegen `NAN` ist falsch, also fallen
+beide in den `else`-Zweig und melden **„🔴 Kritisch", obwohl nichts kritisch
+ist**. `2.4 Verbundener Access Point` steht aus demselben Grund kurz auf
+„⚠️ Nicht verbunden", weil die BSSID noch leer ist.
+
+Beim Beurteilen eines Geräts also zuerst `4.2 Laufzeit` ansehen: unter zwei
+Minuten sind die Diagnosewerte nicht belastbar.
+
 ## Chat-Aufteilung
 
 Ein Chat pro Gerät, plus einer für Querschnittsarbeit (`common/`, HA-seitige
