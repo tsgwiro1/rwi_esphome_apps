@@ -1,0 +1,1181 @@
+esphome:
+  name: ha-frontroom-info-display
+  friendly_name: ha-frontroom-info-display
+  project:
+    name: "tsgwiro1.ha-frontroom-info-display"
+    version: "${fw_version}"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+    advanced:
+      minimum_chip_revision: "3.1"
+
+# HIER überschreiben wir die Grenzen für den starken ESP32
+substitutions:
+  fw_version: "1.0.0"
+  diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
+  diag_min_heap_critical: "40000" # 40kb ist kritisch
+
+packages:
+  my_diagnostics: !include common/diagnostics.yaml
+
+# Enable logging
+logger:
+  logs:
+    component: ERROR
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret frontroom_api_key
+
+ota:
+  platform: esphome
+  password: !secret frontroom_ota_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: !secret frontroom_fallback_ap_ssid
+    password: !secret frontroom_fallback_ap_password
+
+captive_portal:
+
+http_request:
+   verify_ssl: false
+
+# ============================================================
+# Custom scripts for evcc actions
+#
+script:
+  # Logik: Modus auf NOW setzen
+  - id: set_mode_now
+    then:
+      - http_request.post: http://homeassistant.local:7070/api/loadpoints/1/mode/now
+
+  # Logik: Modus auf PV setzen
+  - id: set_mode_pv
+    then:
+      - http_request.post: http://homeassistant.local:7070/api/loadpoints/1/mode/pv
+
+  # Logik: Planladung senden
+  - id: send_plan_request
+    then:
+      - http_request.send:
+          method: POST
+          url: !lambda |-
+            auto ts_local = id(esptime).now().timestamp;
+            auto local_timediff = 60 * 60;
+            if (id(esptime).now().is_dst) { local_timediff += 60 * 60; }
+            auto today = id(esptime).now().hour * 60 * 60 + id(esptime).now().minute * 60 + id(esptime).now().second;
+            auto plan = id(plan_time_hour) * 60 * 60 + id(plan_time_minute) * 60;
+            auto day_adjust = 86400;
+            if (plan > today) { day_adjust = 0; }
+            auto ts = ts_local + day_adjust - today - local_timediff + plan;
+            auto t = localtime(&ts);
+            char tstr[21];
+            strftime(tstr, sizeof(tstr), "%Y-%m-%dT%H:%M:%SZ", t);
+            char soc[4];
+            snprintf(soc, sizeof(soc), "%d", id(plan_soc));
+            return ((std::string) "http://homeassistant.local:7070/api/vehicles/db:1/plan/soc/" + soc + "/" + tstr);
+
+  # Logik: Planladung löschen
+  - id: delete_plan_request
+    then:
+      - http_request.send:
+          method: DELETE
+          url: http://homeassistant.local:7070/api/vehicles/db:1/plan/soc
+          
+  # Logik: Modus off setzen
+  - id : set_mode_off
+    then:
+      - http_request.post: http://homeassistant.local:7070/api/loadpoints/1/mode/off
+      - light.turn_off: now_indiactor
+
+# ============================================================ 
+# Home Assistant related setup
+#
+globals:
+  - id: recent_touch
+    type: bool
+    restore_value: no
+    initial_value: "true"
+  - id: touch_lock
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: arr_anim
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: plan_setup_timeout
+    type: int
+    restore_value: no
+    initial_value: '10' 
+  - id: plan_setup_timeout_timer
+    type: int
+    restore_value: no
+    initial_value: '0' 
+  - id: plan_time_hour
+    type: int
+    restore_value: yes
+    initial_value: '3'
+  - id: plan_time_minute
+    type: int
+    restore_value: yes
+    initial_value: '30'
+  - id: plan_soc
+    type: int
+    restore_value: yes
+    initial_value: '65'
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Display Backlight"
+    id: backlight
+    restore_mode: ALWAYS_ON
+  - platform: monochromatic
+    name: "Charge Now Indicator"
+    output: led_now
+    internal: true
+    id: now_indiactor
+    restore_mode: ALWAYS_OFF
+  - platform: monochromatic
+    name: "Charge Plan Indicator"
+    output: led_plan
+    internal: true
+    id: plan_indiactor
+    restore_mode: ALWAYS_OFF
+
+# Define binary sensors
+binary_sensor:
+  - platform: homeassistant
+    entity_id: binary_sensor.raining
+    id: raining
+  - platform: homeassistant
+    entity_id: binary_sensor.evcc_loadpoint_charging
+    id: grigio_charging
+  - platform: homeassistant
+    entity_id: binary_sensor.evcc_loadpoint_connected
+    id: grigio_connected
+  - platform: homeassistant
+    entity_id: binary_sensor.evcc_chargeplan_enabled
+    id: evcc_chargeplan_enabled
+    on_state:
+      then:
+        - if:
+            condition:
+              - lambda: |-
+                  return x;
+            then:
+              - light.turn_on: plan_indiactor
+            else:
+              - light.turn_off: plan_indiactor
+  - platform: gpio
+    pin: GPIO35
+    id: button_charge_now
+    filters:
+      - delayed_on: 10ms
+    on_press:
+      then:
+        - if:
+            condition:
+              - lambda: |-
+                  return id(wallbox_mode).state != "NOW";
+            then:   
+              - script.execute: set_mode_now
+            else:
+              - script.execute: set_mode_pv
+  - platform: gpio
+    id: button_charge_plan
+    pin:
+      number: GPIO22
+      mode:
+        input: True
+        pullup: True
+    filters:
+      - delayed_on: 10ms
+    on_press:
+      then:
+        - if:
+            condition:
+              - binary_sensor.is_on: evcc_chargeplan_enabled
+            then:
+              - script.execute: delete_plan_request
+            else:
+              - display.page.show: plan_setup_page
+              - lambda: |-
+                  id(recent_touch) = true;
+                  id(plan_setup_timeout_timer) = id(plan_setup_timeout);
+
+  - platform: touchscreen
+    id: button_ev
+    x_min: 0
+    x_max: 320
+    y_min: 160
+    y_max: 240
+    page_id: main_page
+    on_press:
+      then:
+        - display.page.show: ev_page
+        - lambda: |-
+            id(recent_touch) = true;
+            id(touch_lock) = true;
+    on_release: 
+      then:
+        - lambda: |-
+            id(touch_lock) = false;
+  - platform: touchscreen
+    id: button_bat
+    x_min: 160
+    x_max: 320
+    y_min: 80
+    y_max: 160
+    page_id: main_page
+    on_press:
+      - display.page.show: bat_page
+      - lambda: |-
+          id(recent_touch) = true;
+  - platform: touchscreen
+    id: button_energy
+    x_min: 0
+    x_max: 160
+    y_min: 80
+    y_max: 160
+    page_id: main_page
+    on_press:
+      - display.page.show: energy_page
+      - lambda: |-
+          id(recent_touch) = true;
+  - platform: touchscreen
+    id: button_return
+    x_min: 280
+    x_max: 320
+    y_min: 0
+    y_max: 40
+    on_press:
+      - display.page.show: main_page
+  - platform: touchscreen
+    id: button_ev_off
+    x_min: 60
+    x_max: 116
+    y_min: 180
+    y_max: 236
+    page_id: ev_page
+    on_press:
+      then:
+        - if:
+            condition:
+              - lambda: |-
+                  return !id(touch_lock);
+            then:   
+              - script.execute: set_mode_off
+              - lambda: |-
+                  id(recent_touch) = true;
+  - platform: touchscreen
+    id: button_ev_pv
+    x_min: 132
+    x_max: 188
+    y_min: 180
+    y_max: 236
+    page_id: ev_page
+    on_press:
+      then:
+        - if:
+            condition:
+              - lambda: |-
+                  return !id(touch_lock);
+            then:   
+              - script.execute: set_mode_pv
+              - lambda: |-
+                  id(recent_touch) = true;
+  - platform: touchscreen
+    id: button_ev_now
+    x_min: 204
+    x_max: 260
+    y_min: 180
+    y_max: 236
+    page_id: ev_page
+    on_press:
+      then:
+        - if:
+            condition:
+              - lambda: |-
+                  return !id(touch_lock);
+            then:   
+              - script.execute: set_mode_now
+              - lambda: |-
+                  id(recent_touch) = true;
+  - platform: touchscreen
+    id: button_h_plus
+    x_min: 40
+    x_max: 100
+    y_min: 30
+    y_max: 90
+    page_id: plan_setup_page
+    on_press:
+      then:
+        - lambda: |-
+            id(recent_touch) = true;
+            id(plan_setup_timeout_timer) = id(plan_setup_timeout);
+            id(plan_time_hour) += 1;
+            if (id(plan_time_hour) > 23) {
+              id(plan_time_hour) = 0;
+            }
+        - component.update: my_display
+  - platform: touchscreen
+    id: button_h_minus
+    x_min: 40
+    x_max: 100
+    y_min: 150
+    y_max: 210
+    page_id: plan_setup_page
+    on_press:
+      then:
+        - lambda: |-
+            id(recent_touch) = true;
+            id(plan_setup_timeout_timer) = id(plan_setup_timeout);
+            id(plan_time_hour) -= 1;
+            if (id(plan_time_hour) < 0) {
+              id(plan_time_hour) = 23;
+            }
+        - component.update: my_display            
+  - platform: touchscreen
+    id: button_min_plus
+    x_min: 120
+    x_max: 180
+    y_min: 30
+    y_max: 90
+    page_id: plan_setup_page
+    on_press:
+      then:
+        - lambda: |-
+            id(recent_touch) = true;
+            id(plan_setup_timeout_timer) = id(plan_setup_timeout);
+            id(plan_time_minute) += 10;
+            if (id(plan_time_minute) > 59) {
+              id(plan_time_minute) = 0;
+            }
+        - component.update: my_display
+  - platform: touchscreen
+    id: button_min_minus
+    x_min: 120
+    x_max: 180
+    y_min: 150
+    y_max: 210
+    page_id: plan_setup_page
+    on_press:
+      then:
+        - lambda: |-
+            id(recent_touch) = true;
+            id(plan_setup_timeout_timer) = id(plan_setup_timeout);
+            id(plan_time_minute) -= 10;
+            if (id(plan_time_minute) < 0) {
+              id(plan_time_minute) = 50;
+            }
+        - component.update: my_display
+  - platform: touchscreen
+    id: button_soc_plus
+    x_min: 220
+    x_max: 280
+    y_min: 30
+    y_max: 90
+    page_id: plan_setup_page
+    on_press:
+      then:
+        - lambda: |-
+            id(recent_touch) = true;
+            id(plan_setup_timeout_timer) = id(plan_setup_timeout);
+            id(plan_soc) += 5;
+            if (id(plan_soc) > 100) {
+              id(plan_soc) = 100;
+            }
+        - component.update: my_display
+  - platform: touchscreen
+    id: button_soc_minus
+    x_min: 220
+    x_max: 280
+    y_min: 150
+    y_max: 210
+    page_id: plan_setup_page
+    on_press:
+      then:
+        - lambda: |-
+            id(recent_touch) = true;
+            id(plan_setup_timeout_timer) = id(plan_setup_timeout);
+            id(plan_soc) -= 5;
+            if (id(plan_soc) < 0) {
+              id(plan_soc) = 0;
+            }
+        - component.update: my_display
+
+# Define all the numeric sensors used
+sensor:
+  - platform: adc
+    pin: GPIO34
+    name: "Room Brightness"
+    icon: "mdi:brightness-6"
+    update_interval: 2s
+    raw: True
+    internal: true
+    accuracy_decimals: 0
+    unit_of_measurement: ""
+    entity_category: "diagnostic"
+    on_value_range:
+      - below: 3900
+        then:
+          - light.turn_on: 
+              id: backlight
+              brightness: 100%
+      - above: 3950
+        then:
+          - light.turn_on: 
+              id: backlight
+              brightness: 50%
+  - platform: homeassistant
+    entity_id: sensor.input_power
+    id: solar_input
+  - platform: homeassistant
+    entity_id: sensor.grid_active_power
+    id: solar_grid_power
+  - platform: homeassistant
+    entity_id: sensor.battery_state_of_capacity
+    id: solar_battery_soc
+  - platform: homeassistant
+    entity_id: sensor.charge_discharge_power
+    id: solar_battery_power
+  - platform: homeassistant
+    entity_id: sensor.outdoor_temperature
+    id: outside_temperature
+  - platform: homeassistant
+    entity_id: sensor.weather_station_frequency
+    id: rain_freq
+  - platform: homeassistant
+    entity_id: sensor.evcc_vehicle_soc
+    id: grigio_soc
+  - platform: homeassistant
+    entity_id: sensor.evcc_vehicle_range
+    id: grigio_range
+  - platform: homeassistant
+    entity_id: sensor.evcc_charge_power_w
+    id: wallbox_charge_power
+  - platform: homeassistant
+    entity_id: sensor.evcc_charge_current
+    id: wallbox_charge_current
+  - platform: homeassistant
+    entity_id: sensor.home_power
+    id: home_power
+  - platform: homeassistant
+    entity_id: sensor.temperature_living_room
+    id: temperature_living_room
+  - platform: homeassistant
+    entity_id: sensor.humidity_living_room
+    id: humidity_living_room
+  - platform: homeassistant
+    entity_id: sensor.evcc_vehicle_target_soc
+    id: grigio_target_soc
+  - platform: homeassistant
+    entity_id: sensor.evcc_charge_30d_solar_percentage
+    id: evcc_charge_30d_solar_percentage
+  - platform: homeassistant
+    entity_id: sensor.heizstab
+    id: heizstab_power
+  - platform: homeassistant
+    entity_id: sensor.wp_zwe2_controller_output_power
+    id: heizstab_power_percent
+  - platform: homeassistant
+    entity_id: sensor.total_wp
+    id: wp_electric_power
+  - platform: homeassistant
+    entity_id: sensor.wp_warmeleistung
+    id: wp_heat_power
+  - platform: homeassistant
+    entity_id: sensor.evcc_chargeplan_soc
+    id: evcc_charge_plan_soc
+
+# Define all the string sensors used
+text_sensor:
+  - platform: homeassistant
+    entity_id: weather.egnach #sensor.openweathermap_condition
+    id: weather_condition
+    filters:
+      - to_upper:
+  - platform: homeassistant
+    entity_id: select.evcc_mode
+    id: wallbox_mode
+    filters:
+      - to_upper:
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "NOW") {
+              id(now_indiactor).turn_on().perform();
+            } else {
+              id(now_indiactor).turn_off().perform();
+            }
+  - platform: homeassistant
+    entity_id: sensor.evcc_chargeplan_time
+    id: evcc_charge_plan_time
+
+switch:
+# Neuer Schalter für HA: Schnellladen
+  - platform: template
+    name: "EVCC Schnellladen"
+    id: switch_evcc_now
+    icon: "mdi:lightning-bolt"
+    lambda: |-
+      if (id(wallbox_mode).state == "NOW") { return true; } else { return false; }
+    turn_on_action:
+      - script.execute: set_mode_now
+    turn_off_action:
+      - script.execute: set_mode_pv
+
+  # Neuer Schalter für HA: Planladung
+  - platform: template
+    name: "EVCC Planladung"
+    id: switch_evcc_plan
+    icon: "mdi:battery-clock"
+    lambda: |-
+      return id(evcc_chargeplan_enabled).state;
+    turn_on_action:
+      - display.page.show: plan_setup_page
+      - lambda: |-
+          id(recent_touch) = true;
+          id(plan_setup_timeout_timer) = id(plan_setup_timeout);
+    turn_off_action:
+      - script.execute: delete_plan_request
+
+# Create a time sensor, this will fetch time from Home Assistant
+time:
+  - platform: homeassistant
+    id: esptime
+
+
+# ============================================================ 
+# ESPHome Display related setup
+#
+# Create a font to use, add and remove glyphs as needed. 
+font:
+  - file:
+      type: gfonts
+      family: Lato
+      weight: 400
+    id: lato10
+    size: 10
+    glyphs: "0123456789:% -ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜabcdefghijklmnopqrstuvwxyzäöü"
+  - file:
+      type: gfonts
+      family: Lato
+      weight: 400
+    id: lato14
+    size: 14
+    glyphs: "/!\"%()+=,-_.:;°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ abcdefghijklmnopqrstuvwxyzäöü"
+  - file:
+      type: gfonts
+      family: Lato
+      weight: 700
+    id: lato20
+    size: 20
+    glyphs: "/!\"%()+=,-_.:;°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ abcdefghijklmnopqrstuvwxyzäöü"
+  - file:
+      type: gfonts
+      family: Lato
+      weight: 700
+    id: lato24
+    size: 24
+    glyphs: "/!\"%()+=,-_.:;°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ abcdefghijklmnopqrstuvwxyzäöü"
+  - file:
+      type: gfonts
+      family: Lato
+      weight: 900
+    id: lato30
+    size: 30
+    glyphs: "/!\"%()+=,-_.:;°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ abcdefghijklmnopqrstuvwxyzäöü"
+  - file:
+      type: gfonts
+      family: Lato
+      weight: 900
+    id: lato50
+    size: 50
+    glyphs: ":0123456789%"
+
+# Create a Home Assistant blue color
+color:
+  - id: HA_BLUE
+    hex: 51c0f2
+  - id: RED
+    red: 100%
+    green: 0%
+    blue: 0%
+  - id: GREEN
+    red: 0%
+    green: 100%
+    blue: 0%
+  - id: BLUE
+    red: 0%
+    green: 0%
+    blue: 100%
+  - id: YELLOW
+    red: 100%
+    green: 100%
+    blue: 0%
+  - id: WHITE
+    red: 100%
+    green: 100%
+    blue: 100%
+  - id: BLACK
+    red: 0%
+    green: 0%
+    blue: 0%
+  - id: ORANGE
+    red: 100%
+    green: 50%
+    blue: 30%
+  - id: LIGHTGREEN
+    red: 0%
+    green: 100%
+    blue: 50%
+  - id: LIGHTRED
+    red: 60%
+    green: 20%
+    blue: 20%
+  - id: GRAY
+    red: 20%
+    green: 20%
+    blue: 20%
+
+# Define all the images used. Store the images in the images folder within the esphome folder (esphome/images/)
+image:
+  - file: "pic/thermometer_icon.png"
+    id: thermometer_icon
+    resize: 30x30
+    type: RGB
+  - file: "pic/sun.png"
+    id: sun_icon
+    resize: 31x31
+    type: RGB
+  - file: "pic/plug.png"
+    id: plug_icon
+    resize: 31x31
+    type: RGB
+  - file: "pic/energy.png"
+    id: energy_icon
+    resize: 40x40
+    type: RGB
+  - file: "pic/bat80.png"
+    id: b100_icon
+    resize: 70x70
+    type: RGB
+  - file: "pic/bat60.png"
+    id: b80_icon
+    resize: 70x70
+    type: RGB
+  - file: "pic/bat40.png"
+    id: b60_icon
+    resize: 70x70
+    type: RGB
+  - file: "pic/bat20.png"
+    id: b40_icon
+    resize: 70x70
+    type: RGB
+  - file: "pic/bat0.png"
+    id: b20_icon
+    resize: 70x70
+    type: RGB
+  - file: "pic/rain_ws.png"
+    id: rain_icon
+    resize: 30x30
+    type: RGB
+  - file: "pic/dry.png"
+    id: dry_icon
+    resize: 30x30
+    type: RGB
+  - file: "pic/ev.png"
+    id: ev_icon
+    resize: 40x40
+    type: RGB
+  - file: "pic/wallbox.png"
+    id: wallbox_icon
+    resize: 70x70
+    type: RGB
+  - file: "pic/arrow_back.png"
+    id: back_icon
+    resize: 40x40
+    type: RGB
+  - file: "pic/electricity-icon.png"
+    id: elect_icon
+    resize: 40x40
+    type: RGB
+  - file: "pic/battery-icon.png"
+    id: batt_icon
+    resize: 40x40
+    type: RGB
+  - file: "pic/clock.png"
+    id: clock_icon
+    resize: 37x37
+    type: RGB
+  - file: "pic/power-line.png"
+    id: powerline_icon
+    resize: 46x46
+    type: RGB
+  - file: "pic/solar-panel.png"
+    id: solarpanel_icon
+    resize: 46x46
+    type: RGB
+  - file: "pic/battery-hor.png"
+    id: batteryhor_icon
+    resize: 46x46
+    type: RGB
+  - file: "pic/air-conditioning.png"
+    id: airconditioning_icon
+    resize: 40x40
+    type: RGB
+  - file: "pic/wallbox.png"
+    id: wallbox_small_icon
+    resize: 40x40
+    type: RGB
+  - file: "pic/house.png"
+    id: house_icon
+    resize: 40x40
+    type: RGB
+  - file: "pic/water-heater.png"
+    id: waterheater_icon
+    resize: 40x40
+    type: RGB
+  - file: "pic/arrow_right.png"
+    id: arrow_r_icon
+    resize: 20x20
+    type: RGB
+  - file: "pic/arrow_left.png"
+    id: arrow_l_icon
+    resize: 20x20
+    type: RGB
+  - file: "pic/arrow_up.png"
+    id: arrow_u_icon
+    resize: 20x20
+    type: RGB
+  - file: "pic/arrow_down.png"
+    id: arrow_d_icon
+    resize: 20x20
+    type: RGB
+  - file: "pic/arrow_up.jpeg"
+    id: button_arrow_up
+    resize: 60x60
+    type: RGB
+  - file: "pic/arrow_down.jpeg"
+    id: button_arrow_down
+    resize: 60x60
+    type: RGB
+  - file: "pic/arrow_up_pressed.jpeg"
+    id: button_arrow_up_pressed
+    resize: 60x60
+    type: RGB
+  - file: "pic/arrow_down_pressed.jpeg"
+    id: button_arrow_down_pressed
+    resize: 60x60
+    type: RGB
+  - file: "pic/gate-valve.png"
+    id: valve_icon
+    resize: 24x24
+    type: RGB
+
+# Define animations
+animation:
+  - file: "pic/weather.gif"
+    id: weather_animation
+    resize: 70x70
+    type: RGB
+
+# Define the graphs for sensors that you want to show on the display
+graph:
+  - id: home_bat_graph
+    duration: 24h
+    width: 300
+    height: 100 
+    x_grid: 2h
+    y_grid: 20.0
+    max_value: 100.0
+    min_value: 0.1
+    traces:
+      - sensor: solar_battery_soc
+        color: GREEN
+        line_type: SOLID
+        continuous: true
+        line_thickness: 5
+
+# ============================================================ 
+# Hardware related setup
+#
+# Setup SPI for the display. The ESP32-2432S028R uses separate SPI buses for display and touch
+spi:
+  - id: tft
+    clk_pin: GPIO14
+    mosi_pin: GPIO13
+    miso_pin: GPIO12
+  - id: touch
+    clk_pin: GPIO25
+    mosi_pin: GPIO32
+    miso_pin: GPIO39
+
+# Setup a pin to control the backlight
+output:
+  - platform: ledc
+    pin: GPIO21
+    id: backlight_pwm
+  - platform: ledc
+    pin: GPIO17
+    id: led_now
+    inverted: true
+  - platform: ledc
+    pin: GPIO27
+    id: led_plan
+    inverted: true
+
+# Set up the xpt2046 touch platform
+touchscreen:
+  platform: xpt2046
+  id: my_touchscreen
+  spi_id: touch
+  cs_pin: GPIO33
+  interrupt_pin: GPIO36
+  update_interval: 50ms
+  threshold: 400
+#  calibration:
+#    x_min: 3860
+#    x_max: 280
+#    y_min: 3860
+#    y_max: 340
+#  transform:
+#    swap_xy: true
+#    mirror_x: false
+  calibration:
+    x_max: 3860
+    x_min: 280
+    y_max: 3860
+    y_min: 340
+  transform:
+    swap_xy: true
+    mirror_x: true
+    mirror_y: true
+  on_touch:
+    - lambda: |-
+          ESP_LOGI("cal", "x=%d, y=%d, x_raw=%d, y_raw=%0d",
+              touch.x,
+              touch.y,
+              touch.x_raw,
+              touch.y_raw
+              );
+
+# Setup the ili9xxx platform
+#
+# Update the UI state
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          if (id(plan_setup_timeout_timer)) {
+            id(plan_setup_timeout_timer)--;
+
+            if (id(plan_setup_timeout_timer) == 0) {
+              id(send_plan_request).execute();
+              id(main_page).show();
+            }
+          }
+  - interval: 2min
+    then:
+      - if:
+          condition:
+            - lambda: |-
+                return !id(recent_touch);
+          then: 
+            - display.page.show: main_page
+          else:
+            - lambda: |-
+                id(recent_touch) = false;
+
+# Display is used as 240x320 by default so we rotate it to 90°
+display:
+  - platform: ili9xxx
+    model: ili9342
+    spi_id: tft
+    cs_pin: GPIO15
+    dc_pin: GPIO2
+    color_order: rgb
+    invert_colors: false
+    id: my_display
+    update_interval: 500ms
+    color_palette: 8BIT
+    pages:
+      - id: main_page
+        lambda: |-         
+          //***********************************
+          id(weather_animation).next_frame();
+          it.image(0, 5, id(weather_animation), COLOR_ON, COLOR_OFF);
+          it.line(0,80,320,80, HA_BLUE);
+          it.image(0, 86, id(sun_icon));
+          it.image(0, 123, id(plug_icon));
+          it.line(160,85,160, 155, HA_BLUE);
+          it.line(0,160,320,160, HA_BLUE);
+          it.image(0, 165, id(wallbox_icon));
+          //***********************************
+          it.printf(90,0,id(lato24), WHITE,"%s",id(weather_condition).state.c_str());
+          it.image(85, 42, id(thermometer_icon));       
+          it.printf(112,38,id(lato20), WHITE,"%.1f °C", id(outside_temperature).state);
+          if (id(raining).has_state()) {
+            if (id(raining).state == true) {
+              it.image(200, 47,  id(rain_icon));
+              it.printf(240, 38, id(lato20), WHITE,"WET");
+              it.printf(240, 63, id(lato14), WHITE, "%.0f Hz", id(rain_freq).state);
+            } else {
+              it.image(200, 47, id(dry_icon));
+              it.printf(240,38, id(lato20), WHITE,"DRY");
+            }
+          } else {
+              //it.image(200, 47, id(dry_icon));
+              it.printf(240,38,id(lato20), WHITE,"---");
+          }
+          //** SOLAR *********************************
+          if (id(solar_input).has_state()) {
+            if (id(solar_input).state > -1000) {
+              it.printf(65, 91, id(lato20), WHITE, "%.0f W", id(solar_input).state);     
+            } else {
+              it.printf(65, 91, id(lato20), WHITE, "%.0f W", id(solar_input).state);
+            }
+            if (id(solar_grid_power).state > 0) {
+              it.printf(65, 126, id(lato20), LIGHTGREEN, "%.0f W", id(solar_grid_power).state);
+            } else if (id(solar_grid_power).state < 0) {
+              it.printf(65, 126, id(lato20), LIGHTRED, "%.0f W", abs(id(solar_grid_power).state));
+            } else {
+              it.printf(65, 126, id(lato20), WHITE, "%.0f W", id(solar_grid_power).state);
+            }
+          } else {
+            it.printf(85, 113, id(lato14), WHITE, "---");
+          }
+          //** BATTERY *******************************
+          if (id(solar_battery_soc).has_state()) {
+              if (id(solar_battery_soc).state >= 80) it.image(170, 85, id(b100_icon));
+              else if (id(solar_battery_soc).state >= 60) it.image(170, 85, id(b80_icon));
+              else if (id(solar_battery_soc).state >= 40) it.image(170, 85, id(b60_icon));
+              else if (id(solar_battery_soc).state >= 20) it.image(170, 85, id(b40_icon));
+              else it.image(170, 85, id(b20_icon));
+              it.printf(230, 94, id(lato20), WHITE, "%5.0f %%", id(solar_battery_soc).state);
+              if (id(solar_battery_power).state > 0) {
+                it.printf(230, 126, id(lato20), LIGHTGREEN, "%5.0f W", id(solar_battery_power).state);
+              } else if (id(solar_battery_power).state < 0) {
+                it.printf(230, 126, id(lato20), LIGHTRED, "%5.0f W", abs(id(solar_battery_power).state));
+              } else {
+                it.printf(230, 126, id(lato20), WHITE, "%5.0f W", id(solar_battery_power).state);
+              }
+          } else {
+            it.printf(230, 113, id(lato14), WHITE, "---");
+          }
+          //** EV CHARGER ***************************
+          if (id(grigio_connected).has_state()) {
+            if (id(grigio_connected).state == true) {
+              if (id(grigio_charging).state == true) {
+                it.printf(90, 170, id(lato30), WHITE, "CHARGING");
+                it.printf(90, 210, id(lato20), WHITE, "%.0f W / %.0f %% (%.0f km)", id(wallbox_charge_power).state, id(grigio_soc).state, id(grigio_range).state);
+              } else {
+                if (id(grigio_soc).state >= id(grigio_target_soc).state) {
+                  it.printf(90, 185, id(lato30), WHITE, "DONE  -  %.0f %%", id(grigio_soc).state);
+                } else {
+                  if (id(evcc_chargeplan_enabled).state) {
+                    it.printf(195, 172, id(lato24), WHITE, BLACK,TextAlign::TOP_CENTER, "READY");
+                    it.printf(195, 204, id(lato20), WHITE, BLACK,TextAlign::TOP_CENTER, "Charge plan %s %.0f %%", id(evcc_charge_plan_time).state.c_str(), id(evcc_charge_plan_soc).state);
+                  } else {
+                    it.printf(160, 180, id(lato30), WHITE, BLACK,TextAlign::TOP_CENTER, "READY");
+                    it.image(260, 180, id(ev_icon));
+                  }
+                }
+              }
+            } else {
+              it.printf(160,180,id(lato20), WHITE, BLACK,TextAlign::TOP_CENTER, "nothing");
+              it.printf(160,202,id(lato20), WHITE, BLACK,TextAlign::TOP_CENTER, "connected");
+              it.image(270, 179, id(sun_icon));
+              it.printf(285,212,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0f%%", id(evcc_charge_30d_solar_percentage).state);
+            }   
+          } else {
+            it.printf(85, 193, id(lato14), WHITE, "---");
+          }
+          //***********************************
+      - id: ev_page
+        lambda: |-
+          it.image(0, 0, id(ev_icon));
+          it.image(280, 0, id(back_icon));
+          it.image(280, 189, id(sun_icon));
+          it.printf(295,222,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0f%%", id(evcc_charge_30d_solar_percentage).state);
+          if (id(evcc_chargeplan_enabled).state) {
+            it.image(10, 180, id(clock_icon));
+            it.printf(28,220,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%s", id(evcc_charge_plan_time).state.c_str());
+            it.printf(28,163,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0f%%", id(evcc_charge_plan_soc).state);
+            if (id(grigio_connected).state && !id(grigio_charging).state) {
+              it.printf(160,130,id(lato20),WHITE, BLACK,TextAlign::TOP_CENTER, "Plan active");  
+              //it.printf(160,152,id(lato20),WHITE, BLACK,TextAlign::TOP_CENTER, "charge to %.0f % tomorrow at %s", id(evcc_charge_plan_soc).state, id(evcc_charge_plan_time).state.c_str());  
+            }
+          }
+          if (id(grigio_connected).state) {
+            if (id(grigio_charging).state) {
+              it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charging");
+            } else {
+              if (id(grigio_soc).state >= id(grigio_target_soc).state) {
+                it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charge done");
+              } else {
+                it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charger ready");
+              }
+            }
+            // **** SoC ****
+            it.printf(2,79,id(lato20), WHITE, BLACK, TextAlign::TOP_LEFT, "SoC");
+            it.printf(50,102,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "0%%"); it.printf(300,102,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "100%%");
+            auto ch = 2.5 * id(grigio_soc).state;
+            it.filled_rectangle(50,80,ch,20,GREEN); it.filled_rectangle(50+ch,80,250-ch,20,HA_BLUE);
+            it.printf(160,78,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "%.0f %% (%.0f km)", id(grigio_soc).state, id(grigio_range).state);
+            // **** Power ****
+            if (id(grigio_charging).state) {
+              it.printf(2,139,id(lato20), WHITE, BLACK, TextAlign::TOP_LEFT, "Pow");
+              it.printf(50,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "0kW"); it.printf(300,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "11kW");
+              ch =  min (250.0, 0.023 * id(wallbox_charge_power).state);
+              it.filled_rectangle(50,140,ch,20,LIGHTRED); it.filled_rectangle(50+ch,140,250-ch,20,HA_BLUE);
+              it.printf(160,138,id(lato20),WHITE, BLACK, TextAlign::BOTTOM_CENTER, "%.0f W (%.0f A)", id(wallbox_charge_power).state, id(wallbox_charge_current).state);
+            }
+            // **** Mode ****
+            if (id(wallbox_mode).state == "OFF") {
+              it.filled_rectangle(60,180,56,56,GRAY); it.printf(88,196,id(lato20), WHITE, BLACK, TextAlign::TOP_CENTER, "OFF");
+            } else {
+              it.rectangle(60,180,56,56,GRAY); it.printf(88,196,id(lato20), GRAY, BLACK, TextAlign::TOP_CENTER, "OFF");
+            }
+            if (id(wallbox_mode).state == "PV") {
+              it.filled_rectangle(132,180,56,56,GRAY); it.printf(160,196,id(lato20), WHITE, BLACK, TextAlign::TOP_CENTER, "PV");
+            } else {
+              it.rectangle(132,180,56,56,GRAY); it.printf(160,196,id(lato20), GRAY, BLACK, TextAlign::TOP_CENTER, "PV");
+            }
+            if (id(wallbox_mode).state == "NOW") {
+              it.filled_rectangle(204,180,56,56,GRAY); it.printf(232,196,id(lato20), WHITE, BLACK, TextAlign::TOP_CENTER, "NOW");
+            } else {
+              it.rectangle(204,180,56,56,GRAY); it.printf(232,196,id(lato20), GRAY, BLACK, TextAlign::TOP_CENTER, "NOW");
+            }
+          } else {
+            it.printf(160, 118, id(lato30), WHITE, BLACK, TextAlign::BOTTOM_CENTER, "Nothing");
+            it.printf(160, 122, id(lato30), WHITE, BLACK, TextAlign::TOP_CENTER, "connected to wallbox");
+          }
+      - id: plan_setup_page
+        lambda: |-
+          it.image(0, 0, id(clock_icon));
+          it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charge Plan");
+          it.printf(70,96,id(lato50), WHITE, BLACK, TextAlign::TOP_CENTER, "%02d", id(plan_time_hour));
+          it.printf(110,96,id(lato50), WHITE, BLACK, TextAlign::TOP_CENTER, ":");
+          it.printf(150,96,id(lato50), WHITE, BLACK, TextAlign::TOP_CENTER, "%02d", id(plan_time_minute));
+          it.printf(250,96,id(lato50), WHITE, BLACK, TextAlign::TOP_CENTER, "%d%%", id(plan_soc));
+          id(button_h_plus).state    ? it.image(40, 40, id(button_arrow_up_pressed))     : it.image(40, 40, id(button_arrow_up)); 
+          id(button_min_plus).state  ? it.image(120, 40, id(button_arrow_up_pressed))    : it.image(120, 40, id(button_arrow_up)); 
+          id(button_soc_plus).state  ? it.image(220, 40, id(button_arrow_up_pressed))    : it.image(220, 40, id(button_arrow_up)); 
+          id(button_h_minus).state   ? it.image(40, 160, id(button_arrow_down_pressed))  : it.image(40, 160, id(button_arrow_down)); 
+          id(button_min_minus).state ? it.image(120, 160, id(button_arrow_down_pressed)) : it.image(120, 160, id(button_arrow_down)); 
+          id(button_soc_minus).state ? it.image(220, 160, id(button_arrow_down_pressed)) : it.image(220, 160, id(button_arrow_down)); 
+      - id: bat_page
+        lambda: |-
+          it.image(0, 0, id(energy_icon));
+          it.image(280, 0, id(back_icon));
+          it.image(20, 70, id(batt_icon));
+          it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Home Battery");
+          it.printf(80,72,id(lato24), WHITE, BLACK, TextAlign::TOP_LEFT, "%5.0f %%", id(solar_battery_soc).state);
+          it.image(170, 70, id(elect_icon));
+          if (id(solar_battery_power).state > 0) {
+            it.printf(223, 72, id(lato24), LIGHTGREEN, "%.0f W", id(solar_battery_power).state);
+          } else if (id(solar_battery_power).state < 0) {
+            it.printf(223, 72, id(lato24), LIGHTRED, "%.0f W", abs(id(solar_battery_power).state));
+          } else {
+            it.printf(223, 72, id(lato24), WHITE, "%.0f W", id(solar_battery_power).state);
+          }
+          it.graph(10, 130, id(home_bat_graph));
+      - id: energy_page
+        lambda: |-
+          it.image(0, 0, id(energy_icon));
+          it.image(280, 0, id(back_icon));
+          it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Energy");
+          // **** Electrical Power ****
+          auto p_I_Solar = id(solar_input).state;
+          auto p_I_Bat = abs(min((float)0.0, id(solar_battery_power).state));
+          auto p_I_Grid = abs(min((float)0.0, id(solar_grid_power).state));
+          auto p_I_Total = p_I_Solar + p_I_Grid + p_I_Bat;
+          auto p_O_Grid = max((float)0.0, id(solar_grid_power).state);
+          auto p_O_Bat = max((float)0.0, id(solar_battery_power).state);
+          auto p_O_EV = id(wallbox_charge_power).state;
+          auto p_O_Heater = id(heizstab_power).state;
+          auto p_O_WP = id(wp_electric_power).state;
+          auto p_O_House = p_I_Total - p_O_Grid - p_O_Bat - p_O_EV - p_O_Heater - p_O_WP;
+          // **** Aux Power and Values ****
+          auto p_WP_Heat = id(wp_heat_power).state;
+          auto p_percent_heater = id(heizstab_power_percent).state;
+          auto soc_Battery = id(solar_battery_soc).state;
+          auto soc_EV = id(grigio_soc).state;
+          // **** Energy Flow ****
+          if (id(arr_anim) > 5) {
+            id(arr_anim) = 0;
+          }
+          // ** Energy flow to commen consumers **
+          it.image(105 + id(arr_anim) * 4,130, id(arrow_r_icon));
+          it.image(129 + id(arr_anim) * 4,130, id(arrow_r_icon));
+          it.image(153 + id(arr_anim) * 4,130, id(arrow_r_icon));
+          it.image(177 + id(arr_anim) * 4,130, id(arrow_r_icon));
+          // ** Energy flow to / from grid **
+          if (id(solar_grid_power).state > 0) {
+            if (id(arr_anim) < 3) it.image(46 - id(arr_anim) * 4,130, id(arrow_l_icon));  // ** push energy to the grid **
+            it.image(70 - id(arr_anim) * 4,130, id(arrow_l_icon));  // ** push energy to the grid **
+            it.image(94 - id(arr_anim) * 4,130, id(arrow_l_icon));  // ** push energy to the grid **
+          } else if (id(solar_grid_power).state < 0) {
+            if (id(arr_anim) > 3) it.image(22 + id(arr_anim) * 4,130, id(arrow_r_icon));  // ** get energy from grid **
+            it.image(46 + id(arr_anim) * 4,130, id(arrow_r_icon));  // ** get energy from grid **
+            it.image(70 + id(arr_anim) * 4,130, id(arrow_r_icon));  // ** get energy from grid **
+            if (id(arr_anim) < 3) it.image(94 + id(arr_anim) * 4,130, id(arrow_r_icon));  // ** get energy from grid **
+          }
+          // ** Energy flow from solar **
+          if (id(solar_input).state > 0) {
+            if (id(arr_anim) > 0) it.image(103,76 + id(arr_anim) * 4, id(arrow_d_icon));
+            it.image(103,100 + id(arr_anim) * 4, id(arrow_d_icon));
+            if (id(arr_anim) < 2) it.image(103,124 + id(arr_anim) * 4, id(arrow_d_icon));
+            //it.image(148,148 + id(arr_anim) * 4, id(arrow_d_icon));
+          }
+          // ** Energy flow to / from battery **
+          if (id(solar_battery_power).state > 0) {
+            if (id(arr_anim) > 3) it.image(103,117 + id(arr_anim) * 4, id(arrow_d_icon)); // ** charge battery **
+            it.image(103,141 + id(arr_anim) * 4, id(arrow_d_icon)); // ** charge battery **
+            it.image(103,165 + id(arr_anim) * 4, id(arrow_d_icon)); // ** charge battery **
+            //it.image(103,189 + id(arr_anim) * 4, id(arrow_d_icon)); // ** charge battery **
+          } else if (id(solar_battery_power).state < 0) {
+            //it.image(103,117 - id(arr_anim) * 4, id(arrow_u_icon)); // ** discharge battery **
+            if (id(arr_anim) < 3) it.image(103,141 - id(arr_anim) * 4, id(arrow_u_icon)); // ** discharge battery **
+            it.image(103,165 - id(arr_anim) * 4, id(arrow_u_icon)); // ** discharge battery **
+            if (id(arr_anim) > 0) it.image(103,189 - id(arr_anim) * 4, id(arrow_u_icon)); // ** discharge battery **
+          }
+          it.image(101,128, id(valve_icon));
+          it.image(193,128, id(valve_icon));
+          id(arr_anim) += 1;
+          // **** Energy Distribution ****
+          auto c = WHITE;
+          it.image(10,115, id(powerline_icon));
+          c = id(solar_grid_power).state > 0 ? LIGHTGREEN : LIGHTRED;
+          it.printf(33,164,id(lato14), c, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_I_Grid + p_O_Grid);
+          it.image(92,50, id(solarpanel_icon));
+          if (p_I_Solar > 0) it.printf(85,65,id(lato14), WHITE, BLACK, TextAlign::TOP_RIGHT, "%.0f W", p_I_Solar);
+          it.image(190,65, id(wallbox_small_icon));
+          if (soc_EV > 0) it.printf(210,63,id(lato14), WHITE, BLACK, TextAlign::BOTTOM_CENTER, "%.0f %%", soc_EV);
+          if (p_O_EV > 0) it.printf(210,107,id(lato14), WHITE, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_O_EV);
+          it.image(265,85, id(airconditioning_icon));
+          it.printf(285,89,id(lato14), YELLOW, BLACK, TextAlign::BOTTOM_CENTER, "%.0f W", p_WP_Heat);
+          it.printf(285,122,id(lato14), WHITE, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_O_WP);
+          it.image(265,147, id(house_icon));
+          it.printf(285,189,id(lato14), WHITE, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_O_House);
+          it.image(186,174, id(waterheater_icon));
+          it.printf(206,173,id(lato14), WHITE, BLACK, TextAlign::BOTTOM_CENTER, "%.0f %%", p_percent_heater);
+          it.printf(206,214,id(lato14), WHITE, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_O_Heater);
+          it.image(90,189, id(batteryhor_icon));
+          it.printf(85,196,id(lato14), WHITE, BLACK, TextAlign::TOP_RIGHT, "%.0f %%", soc_Battery);
+          c = id(solar_battery_power).state > 0 ? LIGHTGREEN : LIGHTRED;
+          if (p_I_Bat + p_O_Bat > 0) it.printf(113,220,id(lato14), c, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_I_Bat + p_O_Bat);
