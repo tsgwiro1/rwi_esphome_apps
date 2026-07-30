@@ -1,0 +1,328 @@
+esphome:
+  name: wp-speicher-monitor
+  friendly_name: wp-speicher-monitor
+  project:
+    name: "tsgwiro1.wp-speicher-monitor"
+    version: "${fw_version}"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf 
+    advanced:
+      minimum_chip_revision: "3.0"
+
+# HIER überschreiben wir die Grenzen für den starken ESP32
+substitutions:
+  fw_version: "1.0.0"
+  diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
+  diag_min_heap_critical: "40000" # 40kb ist kritisch
+
+packages:
+  my_diagnostics: !include common/diagnostics.yaml
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret speichermonitor_api_key
+
+ota:
+  platform: esphome
+  password: !secret speichermonitor_ota_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: !secret speichermonitor_fallback_ap_ssid
+    password: !secret speichermonitor_fallback_ap_password
+
+web_server:
+  port: 80
+  ota: false
+  version: 3
+
+captive_portal:
+
+one_wire:
+  - platform: gpio
+    pin: GPIO25
+
+sensor:
+  - platform: adc
+    pin: GPIO34
+    name: "Ambient Brightness"
+    icon: "mdi:brightness-6"
+    raw: true
+    internal: true
+    accuracy_decimals: 0
+    unit_of_measurement: ""
+    update_interval: 2s
+    entity_category: "diagnostic"
+    on_value_range:
+      - below: 3900
+        then:
+          - output.turn_on: backlight_pin
+      - above: 3950
+        then:
+          - output.turn_off: backlight_pin
+
+  - platform: dht
+    pin: GPIO5
+    temperature:
+      name: "Boiler Room Temperature"
+      id: ambt
+      filters:
+        - sliding_window_moving_average:
+            window_size: 6
+            send_every: 6
+    humidity:
+      name: "Boiler Room Humidity"
+      id: ambh
+      filters:
+        - sliding_window_moving_average:
+            window_size: 6
+            send_every: 6
+    update_interval: 10s
+          
+  - platform: dallas_temp
+    address: 0x150000001a1c4028
+    name: "S1"
+    id: s1
+    resolution: 10
+    update_interval: 10s
+    on_value:
+      then:
+        - lambda: id(calc_color)->execute(x,"S1"); id(s1_color)[0] = id(s_color)[0]; id(s1_color)[1] = id(s_color)[1]; id(s1_color)[2] = id(s_color)[2]; id(s_temps)[0] = x;
+    filters:
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 10
+          
+  - platform: dallas_temp
+    address: 0x4c00000017901028
+    name: "S2"
+    id: s2
+    resolution: 10
+    update_interval: 10s
+    on_value:
+      then:
+        - lambda: id(calc_color)->execute(x,"S2"); id(s2_color)[0] = id(s_color)[0]; id(s2_color)[1] = id(s_color)[1]; id(s2_color)[2] = id(s_color)[2]; id(s_temps)[1] = x;
+    filters:
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 10
+
+  - platform: dallas_temp
+    address: 0x0c00000017988a28
+    name: "S3"
+    id: s3
+    resolution: 10
+    update_interval: 10s
+    on_value:
+      then:
+        - lambda: id(calc_color)->execute(x,"S3"); id(s3_color)[0] = id(s_color)[0]; id(s3_color)[1] = id(s_color)[1]; id(s3_color)[2] = id(s_color)[2]; id(s_temps)[2] = x;
+    filters:
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 10
+
+  - platform: dallas_temp
+    address: 0x9700000018f3f128
+    name: "S4"
+    id: s4
+    resolution: 10
+    update_interval: 10s
+    on_value:
+      then:
+        - lambda: id(calc_color)->execute(x,"S4"); id(s4_color)[0] = id(s_color)[0]; id(s4_color)[1] = id(s_color)[1]; id(s4_color)[2] = id(s_color)[2]; id(s_temps)[3] = x;
+    filters:
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 10
+
+  - platform: template
+    name: Layer Position
+    unit_of_measurement: "%"
+    icon: "mdi:layers"
+    update_interval: 10s
+    lambda: !lambda |-
+      float diff = 0.0;
+      float last_diff = 0.0;
+      int schichtLevel = 0;
+      for (int i = 0; i < 3; i++) {
+        diff = abs(id(s_temps)[i] - id(s_temps)[i + 1]);
+        if (diff > 8.0 && diff > last_diff) {
+          schichtLevel = 25 + i * 25;
+        }
+        last_diff = max(last_diff, diff);
+      }
+      id(s_diff) = last_diff;
+      id(s_schicht) = schichtLevel;
+      return schichtLevel;
+
+  - platform: template
+    name: Highest Temp Difference
+    unit_of_measurement: "°C"
+    icon: "mdi:thermometer"
+    update_interval: 10s
+    device_class: "temperature"
+    lambda: !lambda |-
+      return id(s_diff);
+
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  scan: true
+
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO23
+  miso_pin: GPIO19
+  id: bus_spi
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+
+script:
+  - id: calc_color
+    parameters:
+      val: float
+      txt: string
+    then:
+      - lambda: |-
+          int r = 0;
+          int g = 0;
+          int b = 0;
+          if (val < 23.0) { r = 0; }
+          if (val >= 23.0 && val <= 39.0) { r = (val - 23.0) * 255.0 / (39.0 - 23.0); }
+          if (val > 39.0) { r = 255; }
+
+          if (val < 15.0) { g = 76; } // (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+          if (val >= 15.0 && val < 23.0) { g =(val - 15.0) * (0.0 - 76.0) / (23.0 - 15.0) + 76.0; }
+          if (val >= 23.0 && val < 65.0) { g = 0; }
+          if (val >= 65.0 && val <= 80.0) { g = (val - 65.0) * 153.0 / (80.0 - 65.0); }
+          if (val > 80.0) { g = 153; }
+
+          if (val < 15.0) { b = 153; }
+          if (val >= 15.0 && val < 23.0) { b = (val - 15.0) * 255.0 / (23.0 - 15.0); }
+          if (val >= 23.0 && val < 39.0) { b = 255; }
+          if (val >= 39.0 && val <= 65.0) { b = (val - 39.0) * (0.0 - 255.0) / (65.0 - 39.0) + 255.0; }
+          if (val > 65.0) { b = 0; } 
+
+          id(s_color)[0] = r; id(s_color)[1] = g; id(s_color)[2] = b; 
+          ESP_LOGD("Color Script -->", "%s T=%4.1f R=%d G=%d B=%d", txt, val, r, g, b);
+
+globals:
+   - id: s_color
+     type: int[3]
+   - id: s1_color
+     type: int[3]
+   - id: s2_color
+     type: int[3]
+   - id: s3_color
+     type: int[3]
+   - id: s4_color
+     type: int[3]
+   - id: s_temps
+     type: float[4]
+   - id: s_diff
+     type: float
+   - id: s_schicht
+     type: int
+     initial_value: '0'
+
+image:
+  - file: "pic/wlan.png"
+    id: wlan_icon
+    type: GRAYSCALE
+    resize: 32x32
+  - file: "pic/hygrometer.png"
+    id: hygro_icon
+    type: GRAYSCALE
+    resize: 32x32
+  - file: "pic/thermometer.png"
+    id: temp_icon
+    type: GRAYSCALE
+    resize: 32x32
+  - file: "pic/arrow.png"
+    id: arrow_icon
+    type: GRAYSCALE
+    resize: 22x22
+
+font:
+  - file: "gfonts://Open Sans@medium"
+    id: robo32
+    size: 32
+  - file: "gfonts://Open Sans@medium"
+    id: robo20
+    size: 20
+  - file: "gfonts://Open Sans@medium"
+    id: robo12
+    size: 12
+
+color:
+  - id: black
+    red: 0%
+    green: 0%
+    blue: 0%
+  - id: red
+    red: 100%
+    green: 0%
+    blue: 0%
+  - id: blue
+    red: 0%
+    green: 0%
+    blue: 100%
+
+output:
+  - id: backlight_pin
+    platform: gpio
+    pin: GPIO32
+
+display:
+  - platform: ili9xxx
+    model: TFT 2.4
+    spi_id: bus_spi 
+    cs_pin: 14
+    dc_pin: 27
+    reset_pin: 33
+    data_rate: 20MHz
+    rotation: 180
+    invert_colors: false
+    color_palette: 8BIT
+
+    lambda: |-
+      it.fill(Color::WHITE);
+      it.print(23, 37, id(robo32), id(black), TextAlign::BOTTOM_LEFT, "SPEICHER");
+      it.line(0, 34, 240, 34, id(black));
+      it.line(195, 0, 195, 34, id(black));
+      if (id(raw_wifi_signal).state > -70) {it.image(201, 0, id(wlan_icon));}
+      it.image(5, 45, id(temp_icon));
+      it.printf(42, 45, id(robo20), id(black), TextAlign::TOP_LEFT, "%4.1f°C", id(ambt).state);
+      it.image(135, 45, id(hygro_icon));
+      it.printf(165, 45, id(robo20), id(black), TextAlign::TOP_LEFT, "%4.0f%%", id(ambh).state);
+      int y = (id(s_schicht) - 25) / 25 * 44 + 135;
+      if (y > 110 && y < 290) {
+        it.image(1, y, id(arrow_icon));
+      }
+      it.filled_rectangle(20, 110, 90, 180, id(black));
+      it.filled_rectangle(23, 113, 84, 44, Color(id(s1_color)[0], id(s1_color)[1], id(s1_color)[2]));
+      it.filled_rectangle(23, 157, 84, 43, Color(id(s2_color)[0], id(s2_color)[1], id(s2_color)[2]));
+      it.filled_rectangle(23, 200, 84, 44, Color(id(s3_color)[0], id(s3_color)[1], id(s3_color)[2]));
+      it.filled_rectangle(23, 244, 84, 44, Color(id(s4_color)[0], id(s4_color)[1], id(s4_color)[2]));
+      it.printf(125, 105, id(robo32), id(black), TextAlign::TOP_LEFT, "%4.1f°C", id(s1).state);
+      it.printf(125, 149, id(robo32), id(black), TextAlign::TOP_LEFT, "%4.1f°C", id(s2).state);
+      it.printf(125, 193, id(robo32), id(black), TextAlign::TOP_LEFT, "%4.1f°C", id(s3).state);
+      it.printf(125, 237, id(robo32), id(black), TextAlign::TOP_LEFT, "%4.1f°C", id(s4).state);
+      it.line(0, 301, 240, 301, id(black));
+      it.strftime(120, 305, id(robo12), id(black), TextAlign::TOP_CENTER, "%d.%m.%Y %H:%M", id(homeassistant_time).now());
+      
+
+
