@@ -1,11 +1,11 @@
 # ha-mini-display - Rotierender Statusmonitor auf dem TTGO T-Display
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Ein TTGO T-Display (ESP32 mit 1.14"-Farbdisplay) als kleiner Statusmonitor auf
-dem Schreibtisch. Das Gerät holt sich vierzehn Entitäten aus Home Assistant und
+dem Schreibtisch. Das Gerät holt sich zwölf Entitäten aus Home Assistant und
 blättert sie im 5-Sekunden-Takt über fünf Seiten: Fahrzeug, Wallbox, PV-Leistung,
 Hausbatterie und Wetter. Die beiden Taster des Boards erlauben Blättern von Hand,
 Anhalten der Rotation und Ausschalten der Beleuchtung.
@@ -71,11 +71,16 @@ Die Batterieleistung ist grün bei Ladung und rot bei Entladung, dort als
 Absolutwert - das Vorzeichen steckt also in der Farbe, nicht in der Zahl.
 
 Vier der fünf Seiten prüfen ihre Hauptquelle mit `has_state()` und zeigen vor dem
-ersten Wert «LOADING...». Die Wetterseite tut das für den Regenstatus, nicht aber
-für die Aussentemperatur (siehe Abschnitt 6).
+ersten Wert «LOADING...». Die Wetterseite prüft Regenstatus und Aussentemperatur
+einzeln und zeigt letztere bis zum ersten Wert als `--.- °C`.
 
-Zwei weitere Seiten sind im Code auskommentiert und damit inaktiv: eine Datums-
-und Uhrzeitanzeige sowie ein 4-Stunden-Graph der Sonneneinstrahlung.
+Eine weitere Seite ist im Code auskommentiert und damit inaktiv: eine Datums- und
+Uhrzeitanzeige.
+
+Die Wetterseite deckt alle fünfzehn Zustände ab, die `weather.egnach` liefern
+kann. Vier davon werden zweizeilig gesetzt, weil der Text sonst nicht auf die
+Breite passt: «PARTLY / CLOUDY», «SNOWY / RAIN», «CLEAR / NIGHT» und
+«LIGHTNING / RAINY».
 
 ### Rotation und Bedienung
 
@@ -154,7 +159,7 @@ Gerät den Bereichspräfix `attic_`, also etwa
 
 ### Vom Gerät konsumiert
 
-Vierzehn Entitäten, alle als `platform: homeassistant`:
+Zwölf Entitäten, alle als `platform: homeassistant`:
 
 | Entität | Verwendung |
 | :--- | :--- |
@@ -170,8 +175,6 @@ Vierzehn Entitäten, alle als `platform: homeassistant`:
 | `sensor.outdoor_temperature` | Seite 5, Aussentemperatur |
 | `binary_sensor.raining` | Seite 5, WET/DRY |
 | `sensor.weather_station_frequency` | Seite 5, Sensorfrequenz bei Nässe |
-| `sensor.egnach_sun_radiant` | nur im Graph der auskommentierten Seite |
-| `sensor.grid_active_power` | **unbenutzt** (siehe Abschnitt 6) |
 
 Dazu `time.homeassistant` als Zeitquelle - im aktiven Code ohne Funktion, weil
 nur die auskommentierte Uhrzeitseite sie liest.
@@ -210,8 +213,8 @@ nicht.
 ## 5. Datenlast gegenüber Home Assistant
 
 Die Richtung ist hier umgekehrt zu den übrigen Projekten: das Gerät ist
-überwiegend Abonnent, nicht Melder. Es liest vierzehn Entitäten und schreibt
-selbst fast nichts.
+überwiegend Abonnent, nicht Melder. Es liest zwölf Entitäten und schreibt selbst
+fast nichts.
 
 Eigene Zeilen entstehen nur durch die drei Taster-Binärsensoren - je Betätigung
 zwei Zustandswechsel, also einige Zeilen pro Tag - sowie durch das Licht
@@ -240,38 +243,27 @@ Entitäten.
   den Konflikt nicht. Sauber wäre **eine** Instanz - der `ledc`-Ausgang mit dem
   monochromatischen Licht - und der Verzicht auf `backlight_pin` und
   GPIO-Schalter.
-* **Drei Wetterzustände treffen nie zu.** Die Wetterseite vergleicht den
-  gross geschriebenen Zustandstext gegen eine Liste von Konstanten, und drei
-  davon können nicht matchen:
-
-  | In der YAML | Zustand in Home Assistant | Folge |
-  | :--- | :--- | :--- |
-  | `LINGTNING` | `lightning` | Tippfehler, Gewitter bleibt ohne Text |
-  | `SNOWY-RAIN` | `snowy-rainy` | Schneeregen bleibt ohne Text |
-  | *(fehlt)* | `clear-night` | klare Nacht bleibt ohne Text |
-
-  In allen drei Fällen zeigt die Seite Animation, Temperatur und Regenstatus,
-  aber keinen Zustandstext. Der Fall `clear-night` tritt jede klare Nacht ein,
-  ist also der häufigste der drei.
-* **Die Aussentemperatur wird ohne `has_state()`-Prüfung ausgegeben.** Anders als
-  die vier übrigen Seiten fängt die Wetterseite den Startzustand nicht ab: in den
-  ersten Sekunden nach einem Reboot steht dort `nan °C`, bis Home Assistant den
-  ersten Wert geliefert hat.
-* **`sensor.grid_active_power` wird abonniert, aber nie angezeigt.** Der Sensor
-  `solar_grid_power` ist definiert und kommt in keinem Seiten-Lambda vor. Er
-  kostet eine Subscription und etwas RAM, ohne etwas zu leisten.
-* **Der Graph der Sonneneinstrahlung läuft ins Leere.** Die
-  `graph`-Komponente `sun_radiant_egnach_graph` ist aktiv und hält einen
-  4-Stunden-Puffer über 220 Punkte, ihre Seite ist aber auskommentiert. Es wird
-  also gesammelt und nie gezeichnet. Dasselbe gilt für den Schriftschnitt
-  `latoblackheading1`, der nur von der auskommentierten Uhrzeitseite gebraucht
-  wird und sonst nur Flash belegt.
+* **Nebenwerte auf einer Seite hängen an der `has_state()`-Prüfung des
+  Hauptwerts.** Jede Seite prüft ihre Leitgrösse, die übrigen Werte derselben
+  Seite aber nicht einzeln: die Sensorfrequenz auf der Wetterseite hängt an
+  `binary_sensor.raining`, Restreichweite und Ladeleistung hängen am
+  Verbindungsstatus der Wallbox. Kommt eine dieser Nebengrössen später als ihre
+  Leitgrösse, steht für einen Moment `nan` auf dem Display. In der Praxis stammen
+  die Werte je Seite aus derselben Integration und treffen zusammen ein, weshalb
+  das bisher nicht aufgefallen ist. Die Aussentemperatur, die als einzige gar
+  keine Prüfung hatte, ist seit V1.0.1 abgefangen.
+* **Die auskommentierte Uhrzeitseite bleibt Ballast.** Sie steht samt der
+  Zeitquelle `esptime` und dem nur dort benutzten Schriftschnitt
+  `latoblackheading1` in der YAML, ohne aktiv zu sein - anders als der frühere
+  Einstrahlungsgraph, der mit V1.0.1 entfernt wurde. Sie liesse sich durch
+  Entkommentieren sofort wieder aktivieren; solange das nicht entschieden ist,
+  belegt sie nur Flash.
 * **Die Fallunterscheidung auf Seite 3 ist wirkungslos.** Der Vergleich
   `id(solar_input).state > -1000` wählt zwischen zwei Schriftschnitten, gibt aber
   in beiden Zweigen denselben Text mit demselben Format aus. Da
   `sensor.input_power` die Eingangsleistung des Wechselrichters ist und nicht
   negativ wird, greift ohnehin immer der erste Zweig.
-* **Ohne Home Assistant zeigt das Gerät nichts.** Alle vierzehn Quellen sind
+* **Ohne Home Assistant zeigt das Gerät nichts.** Alle zwölf Quellen sind
   `platform: homeassistant`. Ist HA nicht erreichbar, behält ESPHome die letzten
   bekannten Werte, und die Anzeige friert auf dem Stand des Verbindungsabbruchs
   ein - für den Betrachter nicht von einer stehenden Anlage zu unterscheiden. Nach

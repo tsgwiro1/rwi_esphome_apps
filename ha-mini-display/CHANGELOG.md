@@ -2,6 +2,80 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.0.1] - 2026-07-30
+
+Korrigiert die vier Punkte, die bei der Erstaufnahme gefunden und in V1.0.0
+bewusst noch nicht angefasst wurden. Alles Anzeige- und Aufräumarbeit, keine
+Änderung an Struktur oder Bedienung.
+
+### Behoben
+
+* **Drei Wetterzustände wurden nie erkannt.** Die Wetterseite verglich den
+  Zustandstext gegen Konstanten, die so nie ankommen konnten:
+
+  | vorher | nachher | betroffener Zustand |
+  | :--- | :--- | :--- |
+  | `LINGTNING` | `LIGHTNING` | Gewitter |
+  | `SNOWY-RAIN` | `SNOWY-RAINY` | Schneeregen |
+  | *(nicht abgefragt)* | `CLEAR-NIGHT` | klare Nacht |
+
+  In allen drei Fällen blieb die Zustandszeile leer, während Animation,
+  Temperatur und Regenstatus normal erschienen. `CLEAR-NIGHT` ist neu als
+  zweizeilige Ausgabe «CLEAR / NIGHT» ergänzt und war der häufigste der drei
+  Fälle - er trat jede klare Nacht ein. Die Ausgabe für Schneeregen bleibt
+  unverändert «SNOWY / RAIN», nur der Vergleich stimmt jetzt.
+* **`nan °C` nach dem Start.** Die Aussentemperatur war die einzige Grösse auf
+  den fünf Seiten, die ohne `has_state()`-Prüfung ausgegeben wurde. In den ersten
+  Sekunden nach einem Reboot stand deshalb `nan °C` auf der Wetterseite. Neu
+  zeigt sie bis zum ersten Wert `--.- °C`.
+
+### Entfernt
+
+* **`sensor.grid_active_power`** wurde abonniert und in keinem Seiten-Lambda
+  verwendet. Die Subscription ist entfallen.
+* **Der Graph der Sonneneinstrahlung** (`sun_radiant_egnach_graph`, 4-h-Puffer
+  über 220 Punkte) hielt Daten für eine auskommentierte Seite. Graph, die
+  zugehörige Quelle `sensor.egnach_sun_radiant` und der auskommentierte
+  Seitenblock sind entfernt - damit bleibt keine Leiche zurück, die aussieht, als
+  liesse sie sich durch Entkommentieren wiederbeleben.
+
+Das Gerät abonniert damit zwölf statt vierzehn Home-Assistant-Entitäten. Der
+Build wird um 1608 Bytes Flash und 296 Bytes RAM kleiner (28.1 % statt 28.3 %
+RAM).
+
+### Nicht geändert
+
+Die auskommentierte Uhrzeitseite bleibt samt Zeitquelle `esptime` und dem nur
+dort benutzten Schriftschnitt `latoblackheading1` stehen. Anders als beim Graphen
+ist sie eine vollständige, sofort wieder aktivierbare Seite - sie zu löschen wäre
+eine Entscheidung über die Anzeige, nicht eine Korrektur.
+
+Ebenfalls unverändert: die wirkungslose Fallunterscheidung auf Seite 3, die
+Dreifachbelegung von GPIO4 und die nicht neustartfeste Rotation. Sie stehen in
+der README unter «Bekannte Punkte».
+
+### Geflashter Stand
+
+Per OTA eingespielt und geprüft am 2026-07-30 um 15:47 (192.168.0.129).
+Konfig-Hash `0x0abc867e`, `project` meldet `tsgwiro1.ha-mini-display` 1.0.1,
+ESPHome 2026.7.3, `common/diagnostics.yaml` 1.4.0. Die zwölf verbleibenden
+Home-Assistant-Quellen wurden mit ihren erwarteten Entity-IDs abonniert - der Log
+zählt genau zwölf `Entity ID:`-Zeilen, `sensor.grid_active_power` und
+`sensor.egnach_sun_radiant` erscheinen nicht mehr. Freier Heap 182 kB, also rund
+1.3 kB mehr als unter V1.0.0, WLAN −50 dBm, Access Point 🏠 DG, System Gesundheit
+🟢 Stabil, WLAN Status 🟢 Exzellent.
+
+Keine Fehler im Log. Zwei Hinweise ohne Bezug zu dieser Version: der bekannte
+Bootloader-Hinweis sowie einmalig `api took a long time for an operation (51 ms),
+max is 50 ms` rund zwei Minuten nach dem Start - eine Überschreitung um 1 ms, die
+bei diesem Gerät durch das sekündliche Neuzeichnen des Displays neben der
+API-Verarbeitung zu erwarten ist und keine Folge hat.
+
+Die korrigierten Wetterzustände liessen sich nicht am Gerät beobachten - HA
+meldete während des Flashs `sunny`. Geprüft ist damit, dass die Seite unverändert
+zeichnet und der Code kompiliert, nicht das Erscheinen der drei Texte. `sunny`
+wurde vorher wie nachher korrekt als «SUNNY» ausgegeben.
+
 ## [1.0.0] - 2026-07-30
 
 ### Erstrelease
