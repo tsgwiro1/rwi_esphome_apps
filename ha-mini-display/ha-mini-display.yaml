@@ -1,0 +1,488 @@
+esphome:
+  name: ha-mini-display
+  friendly_name: ha-mini-display
+  project:
+    name: "tsgwiro1.ha-mini-display"
+    version: "${fw_version}"
+
+# Definiert das Board
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+    advanced:
+      minimum_chip_revision: "3.0"
+
+# HIER überschreiben wir die Grenzen für den starken ESP32
+substitutions:
+  fw_version: "1.0.0"
+  diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
+  diag_min_heap_critical: "40000" # 40kb ist kritisch
+
+packages:
+  my_diagnostics: !include common/diagnostics.yaml
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret minidisplay_api_key
+
+ota:
+  platform: esphome
+  password: !secret minidisplay_ota_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: !secret minidisplay_fallback_ap_ssid
+    password: !secret minidisplay_fallback_ap_password
+
+captive_portal:
+    
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO19
+
+# Define the rotate variable. This indicates if the pages should be rotated or not
+globals:
+  - id: rotate
+    type: bool
+    initial_value: "true"
+
+# Define time sensor
+time:
+  - platform: homeassistant
+    id: esptime
+
+# Define binary sensors
+binary_sensor:
+  - platform: gpio          # Short Press button 0
+    pin:
+      number: GPIO0
+      inverted: true
+      allow_other_uses: true
+      mode:
+        input: true
+        pullup: true
+    name: "Short Press Button 0"
+    id: short_press_button_0
+    on_click:
+      min_length: 1ms
+      max_length: 1000ms
+      then:
+        - display.page.show_previous: my_display
+        - component.update: my_display 
+  - platform: gpio         # Long Press button 0
+    pin:
+      number: GPIO0
+      inverted: true
+      allow_other_uses: true
+    id: button_2
+    on_click:
+      min_length: 1001ms
+      max_length: 5000ms
+      then:
+        - switch.toggle: backlight
+  - platform: gpio          # Short Press button 1
+    pin:
+      number: GPIO35
+      inverted: true
+      allow_other_uses: true
+    name: "Short Press Button 1"
+    id: short_press_button_1
+    on_click:
+      min_length: 1ms
+      max_length: 1000ms
+      then:
+        - display.page.show_next: my_display
+        - component.update: my_display
+  - platform: gpio          # Long Press button 1
+    pin:
+      number: GPIO35
+      inverted: true
+      allow_other_uses: true
+    name: "Long Press Button 1"
+    id: long_press_button_1
+    on_click:
+      min_length: 1001ms
+      max_length: 5000ms
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return id(rotate);
+            then:
+              globals.set:
+                id: rotate
+                value: "false" 
+            else:
+              globals.set:
+                id: rotate
+                value: "true"
+  - platform: homeassistant
+    entity_id: binary_sensor.raining
+    id: raining
+  - platform: homeassistant
+    entity_id: binary_sensor.evcc_loadpoint_charging
+    id: grigio_charging
+  - platform: homeassistant
+    entity_id: binary_sensor.evcc_loadpoint_connected
+    id: grigio_connected
+
+
+# Allow dimmable control of the backlight (pin GPIO4) - Currently not working
+output:
+  - platform: ledc
+    pin: 
+      number: GPIO4
+      allow_other_uses: true
+    id: gpio4
+
+light:
+  - platform: monochromatic
+    output: gpio4
+    name: "Backlight"
+
+switch:
+  - platform: gpio
+    pin: 
+      number: GPIO4
+      allow_other_uses: true
+    id: backlight
+    internal: true
+
+# Define all the numeric sensors used
+sensor:
+  - platform: homeassistant
+    entity_id: sensor.input_power
+    id: solar_input
+  - platform: homeassistant
+    entity_id: sensor.grid_active_power
+    id: solar_grid_power
+  - platform: homeassistant
+    entity_id: sensor.battery_state_of_capacity
+    id: solar_battery_soc
+  - platform: homeassistant
+    entity_id: sensor.charge_discharge_power
+    id: solar_battery_power
+  - platform: homeassistant
+    entity_id: sensor.egnach_sun_radiant
+    id: sun_radiant_egnach
+  - platform: homeassistant
+    entity_id: sensor.outdoor_temperature
+    id: outside_temperature
+  - platform: homeassistant
+    entity_id: sensor.weather_station_frequency
+    id: rain_freq
+  - platform: homeassistant
+    entity_id: sensor.evcc_vehicle_soc
+    id: grigio_soc
+  - platform: homeassistant
+    entity_id: sensor.evcc_vehicle_range
+    id: grigio_range
+  - platform: homeassistant
+    entity_id: sensor.evcc_charge_power_w
+    id: wallbox_charge_power
+
+# Define all the string sensors used
+text_sensor:
+  - platform: homeassistant
+    entity_id: weather.egnach #sensor.openweathermap_condition
+    id: weather_condition
+    filters:
+      - to_upper:
+
+# Define fonts. Use either Google fonts or stored fonts. Stored fonts are stored in esphome/fonts/
+font:
+  - file:
+      type: gfonts
+      family: Lato
+      weight: 400
+    id: lato
+    size: 20
+  - file:
+      type: gfonts
+      family: Lato
+      weight: 700
+    id: latobold
+    size: 24
+  - file:
+      type: gfonts
+      family: Lato
+      weight: 900
+    id: latoblack
+    size: 30
+  - file:
+      type: gfonts
+      family: Lato
+      weight: 900
+    id: latoblackheading1
+    size: 50
+
+# Define colors
+color:
+  - id: RED
+    red: 100%
+    green: 0%
+    blue: 0%
+  - id: GREEN
+    red: 0%
+    green: 100%
+    blue: 0%
+  - id: BLUE
+    red: 0%
+    green: 0%
+    blue: 100%
+  - id: YELLOW
+    red: 100%
+    green: 100%
+    blue: 0%
+  - id: WHITE
+    red: 100%
+    green: 100%
+    blue: 100%
+  - id: ORANGE
+    red: 100%
+    green: 67%
+    blue: 20%
+  - id: LIGHTGREEN
+    red: 0%
+    green: 100%
+    blue: 50%
+  - id: LIGHTRED
+    red: 100%
+    green: 27%
+    blue: 0%
+
+# Define all the images used. Store the images in the images folder within the esphome folder (esphome/images/)
+image:
+  - file: "pic/thermometer_icon.png"
+    id: thermometer_icon
+    resize: 30x30
+    type: RGB
+  - file: "pic/solarpanel-icon.png"
+    id: solarpanel_icon
+    resize: 80x80
+    type: RGB
+  - file: "pic/b100.png"
+    id: b100_icon
+    resize: 80x80
+    type: RGB
+  - file: "pic/b80.png"
+    id: b80_icon
+    resize: 80x80
+    type: RGB
+  - file: "pic/b60.png"
+    id: b60_icon
+    resize: 80x80
+    type: RGB
+  - file: "pic/b40.png"
+    id: b40_icon
+    resize: 80x80
+    type: RGB
+  - file: "pic/b20.png"
+    id: b20_icon
+    resize: 80x80
+    type: RGB
+  - file: "pic/rain_ws.png"
+    id: rain_icon
+    resize: 30x30
+    type: RGB
+  - file: "pic/dry.png"
+    id: dry_icon
+    resize: 30x30
+    type: RGB
+  - file: "pic/tesla.png"
+    id: tesla_icon
+    resize: 80x80
+    type: RGB
+  - file: "pic/wallbox.png"
+    id: wallbox_icon
+    resize: 80x80
+    type: RGB
+
+# Define animations
+animation:
+  - file: "pic/weather.gif"
+    id: weather_animation
+    resize: 80x80
+    type: RGB
+
+# Define the graphs for sensors that you want to show on the display
+graph:
+  - id: sun_radiant_egnach_graph
+    duration: 4h
+    width: 220
+    height: 90 
+    x_grid: 1h
+    traces:
+      - sensor: sun_radiant_egnach
+        color: ORANGE
+        line_type: SOLID
+        line_thickness: 5
+
+
+# Set up the display. This is the main part of the code
+display:
+  - platform: st7789v
+    model: TTGO_TDISPLAY_135x240
+    backlight_pin: 
+      number: GPIO4
+      allow_other_uses: true
+    cs_pin: GPIO5
+    dc_pin: GPIO16
+    reset_pin: GPIO23
+    rotation: 270°
+    update_interval: 1s
+    id: my_display
+    pages:                # Define the pages 
+#      - id: showtime
+#        lambda: |-
+#          it.strftime(45, 20, id(latoblack), "%d-%m-%Y", id(esptime).now());
+#          it.strftime(25, 55, id(latoblackheading1), "%H:%M:%S", id(esptime).now());
+      - id: showtesla
+        lambda: |-
+          it.printf(0,0,id(latoblack), WHITE, "GRIGIO");
+          it.image(0, 40, id(tesla_icon));
+          if (id(grigio_connected).has_state() && id(grigio_soc).has_state()) {
+            if (id(grigio_connected).state == true) {
+              if (id(grigio_soc).state >= 60) it.printf(95, 40, id(latoblack), GREEN, "%5.0f %%", id(grigio_soc).state);
+              else if (id(grigio_soc).state >= 40) it.printf(95, 40, id(latoblack), LIGHTGREEN, "%5.0f %%", id(grigio_soc).state);
+              else if (id(grigio_soc).state >= 20) it.printf(95, 40, id(latoblack), ORANGE, "%5.0f %%", id(grigio_soc).state);
+              else it.printf(95, 40, id(latoblack), LIGHTRED, "%5.0f %%", id(grigio_soc).state);
+              it.printf(95, 80, id(latoblack), WHITE, "%5.0f km", id(grigio_range).state);
+            } else {
+              it.printf(100,60,id(latobold), WHITE,"NOT");
+              it.printf(80,90,id(latobold), WHITE,"CONNECTED");              
+            } 
+          } else {
+            it.printf(95, 65, id(lato), WHITE, "LOADING...");
+          }            
+      - id: showcharger
+        lambda: |-
+          it.printf(0,0,id(latoblack), WHITE, "WALLBOX");
+          it.image(0, 40, id(wallbox_icon));
+          if (id(grigio_connected).has_state()) {
+            if (id(grigio_connected).state == true) {
+              if (id(grigio_charging).state == true) {
+                it.printf(95, 45, id(latobold), WHITE, "CHARGING");
+                it.printf(95, 80, id(latoblack), WHITE, "%.0f W", id(wallbox_charge_power).state);
+              } else {
+                it.printf(110, 60, id(latobold), WHITE, "READY");
+              }
+            } else {
+              it.printf(100,60,id(latobold), WHITE,"NOT");
+              it.printf(80,90,id(latobold), WHITE,"CONNECTED");
+            }   
+          } else {
+            it.printf(95, 65, id(lato), WHITE, "LOADING...");
+          }
+      - id: shownettopower
+        lambda: |-
+          it.printf(0,0,id(latoblack), WHITE, "SOLAR POWER");
+          it.image(0, 40, id(solarpanel_icon));
+          if (id(solar_input).has_state()) {
+            if (id(solar_input).state > -1000) {
+              it.printf(95, 60, id(latoblack), WHITE, "%.0f W", id(solar_input).state);     
+            } else {
+              it.printf(95, 60, id(latobold), WHITE, "%.0f W", id(solar_input).state);
+            }    
+          } else {
+            it.printf(95, 65, id(lato), WHITE, "LOADING...");
+          }
+      - id: showbattery
+        lambda: |-
+          it.printf(0,0,id(latoblack), WHITE, "BATTERY");
+          if (id(solar_battery_soc).has_state()) {
+              if (id(solar_battery_soc).state >= 80) it.image(0, 40, id(b100_icon));
+              else if (id(solar_battery_soc).state >= 60) it.image(0, 40, id(b80_icon));
+              else if (id(solar_battery_soc).state >= 40) it.image(0, 40, id(b60_icon));
+              else if (id(solar_battery_soc).state >= 20) it.image(0, 40, id(b40_icon));
+              else it.image(0, 40, id(b20_icon));
+              it.printf(95, 40, id(latoblack), WHITE, "%5.0f %%", id(solar_battery_soc).state);
+              if (id(solar_battery_power).state > 0) {
+                it.printf(95, 80, id(latoblack), LIGHTGREEN, "%5.0f W", id(solar_battery_power).state);
+              } else if (id(solar_battery_power).state < 0) {
+                it.printf(95, 80, id(latoblack), LIGHTRED, "%5.0f W", abs(id(solar_battery_power).state));
+              } else {
+                it.printf(95, 80, id(latoblack), WHITE, "%5.0f W", id(solar_battery_power).state);
+              }
+          } else {
+            it.printf(95, 65, id(lato), WHITE, "LOADING...");
+          }         
+#      - id: show_sun_radiant_egnach_graph
+#        lambda: |-
+#          if (id(sun_radiant_egnach).has_state()) {        
+#            it.printf(0,0,id(latoblack), WHITE, "%.0f W/m2", id(sun_radiant_egnach).state);
+#            it.graph(10, 40, id(sun_radiant_egnach_graph));   
+#          } else {
+#            it.printf(0,0,id(latoblack), WHITE, "W/m2");
+#            it.printf(80, 65, id(lato), WHITE, "LOADING...");
+#          }
+      - id: show_weather
+        lambda: |-
+          id(weather_animation).next_frame();
+          it.image(0, 0, id(weather_animation), COLOR_ON, COLOR_OFF);
+          if (id(weather_condition).state == "CLOUDY" ||
+              id(weather_condition).state == "RAINY" ||
+              id(weather_condition).state == "FOG" ||
+              id(weather_condition).state == "HAIL" ||
+              id(weather_condition).state == "SNOWY" ||
+              id(weather_condition).state == "SUNNY" ||
+              id(weather_condition).state == "WINDY" ) {
+            it.printf(110,0,id(latoblack), WHITE,"%s",id(weather_condition).state.c_str()); 
+          }
+          if (id(weather_condition).state == "LINGTNING" ||
+              id(weather_condition).state == "POURING" ) {
+            it.printf(110,0,id(latobold), WHITE,"%s",id(weather_condition).state.c_str()); 
+          }
+          if (id(weather_condition).state == "PARTLYCLOUDY") {
+            it.printf(110,0,id(latoblack), WHITE,"PARTLY"); 
+            it.printf(110,35,id(latoblack), WHITE,"CLOUDY"); 
+          }
+          if (id(weather_condition).state == "SNOWY-RAIN") {
+            it.printf(110,0,id(latoblack), WHITE,"SNOWY"); 
+            it.printf(110,35,id(latoblack), WHITE,"RAIN"); 
+          }
+          if (id(weather_condition).state == "LIGHTNING-RAINY") {
+            it.printf(110,0,id(latobold), WHITE,"LIGHTNING"); 
+            it.printf(110,35,id(latobold), WHITE,"RAINY"); 
+          }
+          if (id(weather_condition).state == "WINDY-VARIANT") {
+            it.printf(110,0,id(latoblack), WHITE,"WINDY");
+          }
+          if (id(weather_condition).state == "EXCEPTIONAL") {
+            it.printf(110,0,id(latobold), WHITE,"EXCEPTIONAL");
+          }
+          it.image(0, 100, id(thermometer_icon));       
+          it.printf(35,100,id(latobold), WHITE,"%.1f °C", id(outside_temperature).state);
+          if (id(raining).has_state()) {
+            if (id(raining).state == true) {
+              it.image(120, 100, id(rain_icon));
+              it.printf(155, 88,id(latobold), WHITE,"WET");
+              it.printf(155, 112, id(lato), WHITE, "%.0f Hz", id(rain_freq).state);
+            } else {
+              it.image(120, 104, id(dry_icon));
+              it.printf(160,100,id(latobold), WHITE,"DRY");
+            }
+          } else {
+              it.image(120, 104, id(dry_icon));
+              it.printf(160,100,id(latobold), WHITE,"---");
+          }
+
+# Define the cycle interval of the pages.
+interval:
+  - interval: 5s
+    then:
+      if:
+        condition:
+          lambda: 'return id(rotate);'
+        then:
+          - display.page.show_next: my_display
+          - component.update: my_display 
