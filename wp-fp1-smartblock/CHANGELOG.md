@@ -2,7 +2,15 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert. Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/) und diese Versionierung folgt dem [Semantic Versioning](https://semver.org/lang/de/).
 
-> ⚠️ **Bekanntes Problem – ESPHome-Version:** Mit **ESPHome ≥ 2026.6.0** bleibt das ST7735S-Display komplett schwarz (Regression im `mipi_spi`-Treiber, Upstream-Issue [esphome#17050](https://github.com/esphome/esphome/issues/17050)). Verifiziert: selbst ein Minimal-Build (rotation 0, Offset 0/0, Vollbild-Fill) zeigt nichts; `pad_*`/`transform` helfen nicht. Dieses Gerät daher auf **ESPHome 2026.5.3** halten (in Fleet pinnen), bis der Bug upstream behoben ist.
+## [1.0.3] - 2026-08-01
+
+### Behoben
+- **Schwarzes Display ab ESPHome 2026.6.0:** Ursache waren **zwei** gleichzeitig geänderte Defaults im `mipi_spi`-Treiber, auf die sich unsere Konfiguration stillschweigend verlassen hatte. Beide sind jetzt explizit gesetzt, die Anzeige funktioniert wieder – verifiziert am Gerät mit ESPHome 2026.7.2.
+- **SPI-Modus (`spi_mode: MODE0`):** Der CS-Pin liegt per Jumper fest auf GND, in der YAML gibt es also kein `cs_pin`. Bis 2026.5.3 wählte ESPHome in diesem Fall MODE0, seit 2026.6.0 MODE3 (`mipi_spi/display.py`: „Mode3 for octal bus or single bus with no cs pin"). Mit falscher Clock-Polarität empfängt der ST7735S nur Bitmüll und bleibt dunkel. ESPHome warnt davor bei jedem Lauf – die Meldung wurde bislang übersehen.
+- **Offsets (`pad_width: 26`, `pad_height: 1`):** Das ESPHome-Modell `ST7735` meldet 128×160, der verbaute ST7735S hat aber 132×162 GRAM. Ohne explizite Pads rechnet der Treiber `pad = native − width − offset`, also 22 statt 26 und **−1** statt 1. Seit [#16722](https://github.com/esphome/esphome/pull/16722) (in 2026.6.0) findet die Rotation zur Laufzeit statt und benutzt bei `rotation: 180` die Pad-Werte als Offsets – aus −1 wurde als `uint16_t` 65535, das Adressfenster lag ausserhalb des Panels. Mit 26/1 ergibt sich native 132×162 und ein symmetrisches Fenster (26|80|26 und 1|160|1).
+
+### Geändert
+- **Kein Versions-Pin mehr nötig:** Der Hinweis, das Gerät auf ESPHome 2026.5.3 zu halten, entfällt. Der Verweis auf [esphome#17050](https://github.com/esphome/esphome/issues/17050) war eine Fehlzuordnung – jenes Issue betrifft ein ST7789V mit überschriebenen Offsets, ein ähnliches Symptom bei anderer Ursache. Es lag kein Upstream-Bug vor, sondern eine unvollständige Konfiguration auf unserer Seite; die ab 2026.7.x neu eingebaute Prüfung („Invalid offsets") hat den Fehler schliesslich sichtbar gemacht, statt ihn still zu einem schwarzen Bild werden zu lassen.
 
 ---
 

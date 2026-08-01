@@ -1,5 +1,5 @@
 substitutions:
-  fw_version: "1.0.2"
+  fw_version: "1.0.3"
   # ESP32-C6 
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"        # Mindestens 80 KB freien RAM erwarten wir im Normalbetrieb
@@ -421,9 +421,13 @@ font:
       - "\U000F1402"  # mdi:pump
 
 display:
-  # ACHTUNG: Nur mit ESPHome <= 2026.5.x bauen/flashen!
-  # Auf 2026.6.x bleibt das Display schwarz (mipi_spi-Regression, esphome#17050).
-  # Dort NICHT mit pad_*/transform "reparieren" – wurde verifiziert, hilft nicht.
+  # Der ST7735S hat 132x162 GRAM, das ESPHome-Modell "ST7735" meldet aber nur
+  # 128x160. Ohne pad_* rechnet der Treiber pad = native - width - offset, also
+  # 22 statt 26 und -1 statt 1. Bei rotation: 180 nimmt er die pad-Werte als
+  # Offsets (get_offset_*_ in mipi_spi.h) – aus -1 wird uint16_t 65535, das
+  # Adressfenster liegt ausserhalb des Panels und das Display bleibt schwarz.
+  # pad_width/pad_height explizit setzen ergibt native 132x162 und damit
+  # symmetrische Fenster (26|80|26 und 1|160|1).
   - platform: mipi_spi
     model: ST7735
     dc_pin: GPIO21
@@ -433,6 +437,13 @@ display:
       height: 160
       offset_width: 26
       offset_height: 1
+      pad_width: 26
+      pad_height: 1
+    # CS liegt fest auf Masse, es gibt also kein cs_pin. Seit 2026.6 waehlt
+    # ESPHome in diesem Fall MODE3 statt wie bisher MODE0 (display.py, "Mode3
+    # for octal bus or single bus with no cs pin") – falsche Clock-Polaritaet,
+    # das Panel bekommt Bitmuell. Modus darum explizit festnageln.
+    spi_mode: MODE0
     invert_colors: false
     color_order: bgr
     rotation: 180

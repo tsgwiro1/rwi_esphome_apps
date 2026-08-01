@@ -1,6 +1,6 @@
 # wp-fp1-smartblock - Intelligente Heizkreispumpensteuerung
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.3-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -93,6 +93,8 @@ Das Projekt basiert auf dem kompakten Seeed Studio XIAO ESP32-C6 Modul und einem
 | **Antennen-Auswahl** | — | `GPIO14` | Antennenumschaltung (LOW = interne Keramikantenne) |
 
 **Hinweis zum CS-Pin:** Der CS-Pin des Displays liegt per Jumper (JP1) fest auf GND und wird daher in der Konfiguration weggelassen (bei `mipi_spi` optional). Dadurch bleiben D4/D5 (I2C) vollständig frei.
+
+> ⚠️ **Fehlendes `cs_pin` hat eine Nebenwirkung:** Seit ESPHome 2026.6.0 wählt `mipi_spi` in genau diesem Fall automatisch **MODE3** statt MODE0. Mit der falschen Clock-Polarität bleibt das Display schwarz. Deshalb steht `spi_mode: MODE0` explizit in der YAML — nicht entfernen. Ebenso festgenagelt sind `pad_width: 26` / `pad_height: 1`, weil der verbaute ST7735S 132×162 GRAM hat, das ESPHome-Modell `ST7735` aber von 128×160 ausgeht und die Pads bei `rotation: 180` als Offsets verwendet werden. Details in [CHANGELOG 1.0.3](./CHANGELOG.md).
 
 **Hinweis zur Antenne:** Beim Boot (`on_boot`, Priorität 800) wird der RF-Switch über `GPIO3` aktiviert und mit `GPIO14` fest die **interne Keramikantenne** ausgewählt. So ist der Funkpfad unabhängig vom Auslieferungszustand des Moduls eindeutig definiert; eine externe U.FL-Antenne wird nicht verwendet.
 
