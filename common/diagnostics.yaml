@@ -1,5 +1,5 @@
 # Datei: common/diagnostics.yaml
-# Version: 1.4.0
+# Version: 1.4.1
 # Kategorie 1.x ist für lokale Projekt-Sensoren reserviert.
 #
 # Die vier interpretierenden Text-Sensoren (2.0, 2.4, 4.0, 5.1) melden nur noch
@@ -28,7 +28,7 @@ substitutions:
   bssid_eg: !secret mac_bssid_eg
   bssid_dg: !secret mac_bssid_dg
   # Version der Diagnostics
-  version: "1.4.0"
+  version: "1.4.1"
 
 sensor:
   # === KATEGORIE 2: WLAN & Konnektivität ===
@@ -48,6 +48,11 @@ sensor:
     name: "2.2 WLAN Signalqualität"
     entity_category: diagnostic
     unit_of_measurement: "%"
+    # Der copy-Sensor erbt sonst device_class: signal_strength von der Quelle
+    # (wifi_signal). Home Assistant lässt zu signal_strength nur dBm und dB zu
+    # und warnt bei jedem Start über die Einheit %. Leer setzen unterbindet
+    # das Erben — inherit_property_from überspringt gesetzte Eigenschaften.
+    device_class: ""
     icon: "mdi:wifi-arrow-up-down"
     filters:
       - lambda: |-

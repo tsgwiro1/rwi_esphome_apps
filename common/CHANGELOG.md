@@ -4,6 +4,24 @@ Alle wichtigen Änderungen an diesem gemeinsamen Diagnose-Paket werden in dieser
 
 ---
 
+## [1.4.1] - 2026-08-10
+
+### Behoben
+- **`2.2 WLAN Signalqualität` erzeugt in Home Assistant keine Warnung mehr.** Der Sensor setzt jetzt ausdrücklich `device_class: ""`.
+
+  Ursache: `2.2` ist ein `copy`-Sensor, und dessen `FINAL_VALIDATE_SCHEMA` enthält `inherit_property_from(CONF_DEVICE_CLASS, CONF_SOURCE_ID)` — er erbt die `device_class` von der Quelle. Quelle ist `raw_wifi_signal` der Plattform `wifi_signal`, die `device_class=DEVICE_CLASS_SIGNAL_STRENGTH` fest vorgibt. Die Konfiguration überschrieb zwar `unit_of_measurement` auf `%`, die `device_class` aber nicht. Home Assistant lässt zu `signal_strength` nur `dBm` und `dB` zu und protokollierte deshalb bei jedem Start pro Gerät eine Warnung:
+
+  > `Entity sensor.<gerät>_2_2_wlan_signalqualitat … is using native unit of measurement '%' which is not a valid unit for the device class ('signal_strength'); expected one of ['dBm', 'dB']`
+
+  Das blosse Weglassen von `device_class` half nicht — die Eigenschaft stand gar nicht in der Datei, sie wurde geerbt. Nötig war das ausdrückliche Setzen auf den Leerwert; `DEVICE_CLASS_EMPTY = ""` ist in ESPHomes `DEVICE_CLASSES` enthalten, und `inherit_property_from` erbt nicht, wenn die Eigenschaft bereits gesetzt ist.
+
+  Nachgewiesen an `ha-irrigation` als Testgerät: Nach dem Flashen fehlt `device_class` in den Entitätsattributen, `unit_of_measurement: "%"` und `state_class: measurement` bleiben erhalten (die Langzeitstatistik läuft also ungebrochen weiter), und der Wert stimmt weiterhin exakt mit der Umrechnung aus `2.1` überein. Beim anschliessenden Home-Assistant-Neustart erschienen statt sieben nur noch sechs Warnungen — die des Testgeräts blieb aus.
+
+### Nicht geändert
+- `2.1 WLAN Signalpegel` behält `device_class: signal_strength` mit `dBm`. Dort ist die Kombination korrekt.
+
+---
+
 ## [1.4.0] - 2026-07-30
 
 ### Behoben

@@ -1,6 +1,6 @@
 # 🩺 Common Diagnostics (ESPHome Package)
 
-![Version](https://img.shields.io/badge/version-1.4.0-blue)
+![Version](https://img.shields.io/badge/version-1.4.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -57,7 +57,7 @@ Alle Entitäten sind mit einem Nummern-Prefix versehen, das die Sortierung auf d
 ### 2.x – WLAN & Konnektivität
 * **2.0 WLAN Status:** Ampel-Bewertung (🟢 Exzellent / 🟡 Okay / 🔴 Kritisch) anhand konfigurierbarer RSSI-Schwellen. Direkt nach dem Start steht der Sensor auf **⚪ Startet**, bis die erste Messung vorliegt.
 * **2.1 WLAN Signalpegel:** Die RSSI-Signalstärke in dBm, geglättet über 3 Messungen (`sliding_window_moving_average`).
-* **2.2 WLAN Signalqualität:** Der RSSI-Wert umgerechnet in Prozent (0–100 %) für eine intuitivere Darstellung in Dashboards und Automationen.
+* **2.2 WLAN Signalqualität:** Der RSSI-Wert umgerechnet in Prozent (0–100 %) für eine intuitivere Darstellung in Dashboards und Automationen. Bewusst **ohne** `device_class`: Der `copy`-Sensor würde sonst `signal_strength` von `2.1` erben, wozu Home Assistant nur `dBm` und `dB` akzeptiert — und bei `%` bei jedem Start warnen.
 * **2.3 Verbundene SSID:** Zeigt an, mit welchem WLAN das Gerät verbunden ist.
 * **2.4 Verbundener Access Point:** Löst bekannte AP-MACs (BSSIDs) auf einen benutzerfreundlichen Namen auf (z. B. "🏠 EG"). Unbekannte APs werden mit ihrer MAC-Adresse angezeigt.
 
