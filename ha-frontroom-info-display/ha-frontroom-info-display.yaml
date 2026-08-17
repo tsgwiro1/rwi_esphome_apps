@@ -14,7 +14,7 @@ esp32:
 
 # HIER überschreiben wir die Grenzen für den starken ESP32
 substitutions:
-  fw_version: "1.0.0"
+  fw_version: "1.1.0"
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
   diag_min_heap_critical: "40000" # 40kb ist kritisch
 
@@ -1168,14 +1168,17 @@ display:
           if (soc_EV > 0) it.printf(210,63,id(lato14), WHITE, BLACK, TextAlign::BOTTOM_CENTER, "%.0f %%", soc_EV);
           if (p_O_EV > 0) it.printf(210,107,id(lato14), WHITE, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_O_EV);
           it.image(265,85, id(airconditioning_icon));
-          it.printf(285,89,id(lato14), YELLOW, BLACK, TextAlign::BOTTOM_CENTER, "%.0f W", p_WP_Heat);
-          it.printf(285,122,id(lato14), WHITE, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_O_WP);
-          it.image(265,147, id(house_icon));
-          it.printf(285,189,id(lato14), WHITE, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_O_House);
+          it.printf(285,83,id(lato14), YELLOW, BLACK, TextAlign::BOTTOM_CENTER, "%.0f W", p_WP_Heat);
+          it.printf(285,127,id(lato14), WHITE, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_O_WP);
+          it.image(265,157, id(house_icon));
+          it.printf(285,199,id(lato14), WHITE, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_O_House);
           it.image(186,174, id(waterheater_icon));
           it.printf(206,173,id(lato14), WHITE, BLACK, TextAlign::BOTTOM_CENTER, "%.0f %%", p_percent_heater);
           it.printf(206,214,id(lato14), WHITE, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_O_Heater);
-          it.image(90,189, id(batteryhor_icon));
-          it.printf(85,196,id(lato14), WHITE, BLACK, TextAlign::TOP_RIGHT, "%.0f %%", soc_Battery);
+          // x=98 statt 90: rueckt den Pol der Batterie auf x 113 und damit unter
+          // die Pfeilspalte. Der Ladeblitz rechts im Symbol verschiebt dessen
+          // optische Mitte nach rechts, der Pol sitzt entsprechend links davon.
+          it.image(98,189, id(batteryhor_icon));
+          it.printf(85,190,id(lato14), WHITE, BLACK, TextAlign::TOP_RIGHT, "%.0f %%", soc_Battery);
           c = id(solar_battery_power).state > 0 ? LIGHTGREEN : LIGHTRED;
-          if (p_I_Bat + p_O_Bat > 0) it.printf(113,220,id(lato14), c, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_I_Bat + p_O_Bat);
+          if (p_I_Bat + p_O_Bat > 0) it.printf(85,210,id(lato14), c, BLACK, TextAlign::TOP_RIGHT, "%.0f W", p_I_Bat + p_O_Bat);

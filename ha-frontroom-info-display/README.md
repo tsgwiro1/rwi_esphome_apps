@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -10,6 +10,11 @@ Hauses ohne Handy und ohne App zeigt: Wetter, PV-Erzeugung, Netzbezug bzw.
 Touchscreen und zwei Hardware-Taster lässt sich der Lademodus des Autos direkt
 umschalten und ein Ladeplan setzen - die Anfragen gehen per REST an evcc, nicht
 über eine Home-Assistant-Automation.
+
+![ha-frontroom-info-display](images/geraet-schraeg.jpg)
+
+Gehäuse, Aufbau und die nötigen Umbauten am Board stehen in
+[HARDWARE.md](HARDWARE.md), das 3D-Modell liegt unter [`3D/`](3D/).
 
 ---
 
@@ -70,6 +75,12 @@ verzichten.
 Das Projekt läuft auf einem ESP32-2432S028R (verbreitet als «Cheap Yellow
 Display») unter dem ESP-IDF-Framework, `board: esp32dev`, mit
 `minimum_chip_revision: "3.1"`.
+
+> **Das Board muss umgebaut werden.** Zwei der vier Signale für die Taster
+> liegen am unveränderten CYD nicht auf einem Stecker. Die nötigen Eingriffe —
+> LDR-Mod, Entfernen der RGB-LED, Auftrennen und Neuverdrahten des
+> Tasteranschlusses — samt Speisung, Kabelbelegung und Fotos stehen in
+> [HARDWARE.md](HARDWARE.md).
 
 Die Baugruppe nutzt **zwei getrennte SPI-Busse** - Display und Touchcontroller
 teilen sich auf diesem Board keinen Bus:
@@ -289,12 +300,38 @@ möglich.
 
 ## 6. Assets, Secrets & Inbetriebnahme
 
-**Die Bilddateien sind nicht Teil dieses Repositorys.** Die YAML referenziert
-rund 35 Symbole, Tasten-Grafiken und ein Wetter-GIF aus einem Ordner `pic/`
-relativ zur Konfiguration. Diese Dateien liegen ausschliesslich in
-`~/esphome/pic/`. Die hier versionierte Kopie dokumentiert also die
-Konfiguration, ist aber **ohne diesen Ordner nicht baubar**. Wer sie baut, muss
-`pic/` bereitstellen oder die `image:`- und `animation:`-Blöcke anpassen.
+**Die Bilddateien liegen seit V1.1.0 im Ordner `pic/` neben dieser Datei** — 32
+Symbole und ein Wetter-GIF, zusammen 144 KB. Die Konfiguration ist damit ohne
+weiteres Zutun baubar; ESPHome löst die Pfade `pic/…` relativ zur YAML auf.
+
+Alle Symbole stammen aus [Material Design Icons](https://pictogrammers.com/library/mdi/)
+und stehen unter Apache 2.0. Sie wurden aus den SVG-Vorlagen als PNG in der
+jeweils benötigten Grösse gerendert und eingefärbt; das Wetter-GIF ist aus
+`white-balance-sunny`, `cloud` und den Tropfen von `weather-pouring`
+zusammengesetzt.
+
+> **Zur Vorgeschichte:** Bis V1.0.0 lagen die Bilder ausschliesslich in
+> `~/esphome/pic/` und waren nicht Teil des Repositorys. Es handelte sich um
+> über die Jahre zusammengetragene Dateien unterschiedlicher Herkunft, deren
+> Lizenz sich nicht mehr rekonstruieren liess — und eine MIT-Lizenz kann nur
+> Rechte einräumen, die man selbst hält. Der Austausch gegen einen Satz mit
+> bekannter Lizenz hat dieses Problem beseitigt und die Konfiguration nebenbei
+> erstmals vollständig gemacht.
+
+**Hinweis zur lokalen Arbeitsumgebung:** In `~/esphome/` ist `pic/` ein
+gemeinsamer Ordner für *alle* Geräte. Fünf Dateien — `dry.png`, `rain_ws.png`,
+`thermometer_icon.png`, `wallbox.png` und `weather.gif` — werden auch von
+`ha-mini-display` verwendet. Wer sie dort ersetzt, ändert damit auch dessen
+Anzeige. Im Repository hat jedes Projekt seinen eigenen Ordner, dort besteht
+diese Kopplung nicht.
+
+**Zur Bildgrösse:** `resize:` passt eine Vorlage unter Wahrung ihres
+Seitenverhältnisses in den angegebenen Kasten ein — eine hochkant-Vorlage füllt
+ihn also nicht aus. ESPHome legt das Ergebnis unkomprimiert als
+`Breite × Höhe × 3` Bytes im Flash ab. Beim Ersetzen einer Vorlage lohnt daher
+der Blick auf beides: auf den Platzbedarf und darauf, dass `it.image(x, y, …)`
+die **linke obere Ecke** setzt — ein breiteres Bild verschiebt das sichtbare
+Symbol nach rechts und kann Beschriftungen überdecken.
 
 Die Schriften werden über `gfonts` (Lato in fünf Schnitten und sechs Grössen)
 zur Buildzeit heruntergeladen und brauchen keine lokalen Dateien. Die
