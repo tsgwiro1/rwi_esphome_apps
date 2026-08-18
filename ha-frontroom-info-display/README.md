@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.2.1-blue)
+![Version](https://img.shields.io/badge/version-1.3.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -62,9 +62,12 @@ verzichten.
 * **Schreibender Zugriff nur auf evcc.** Lademodus und Ladeplan werden per HTTP
   direkt an die evcc-REST-API geschickt. Home Assistant ist an diesem Pfad
   nicht beteiligt und erfährt die Änderung erst über die evcc-Integration.
-* **Zwei Wege für dieselbe Funktion.** Schnellladen und Planladung sind sowohl
-  als Hardware-Taster mit Status-LED als auch als Template-Schalter in Home
-  Assistant ausgeführt. Beide lösen dieselben Skripte aus.
+* **Drei Wege zum Lademodus.** Hardware-Taster «Schnellladen» mit Status-LED,
+  Template-Schalter in Home Assistant und die drei Flächen auf `ev_page` lösen
+  dieselben Skripte aus. Die Taster und der HA-Schalter kennen nur `NOW` und
+  `PV`, die Touchflächen zusätzlich `OFF` — und sie sind nur wirksam, wenn ein
+  Fahrzeug angesteckt ist. Der **Ladeplan** hat zwei Wege: Hardware-Taster
+  «Ladeplan» und Template-Schalter.
 * **Lokale Helligkeitsregelung.** Ein LDR am ADC steuert die
   Hintergrundbeleuchtung in zwei Stufen, unabhängig von Home Assistant.
 
@@ -103,10 +106,8 @@ teilen sich auf diesem Board keinen Bus:
 | **LED «Charge Now»** | `GPIO17` | LEDC, **invertiert** |
 | **LED «Charge Plan»** | `GPIO27` | LEDC, **invertiert** |
 
-**Touch-Kalibrierung:** `x: 280…3860`, `y: 340…3860` mit `swap_xy: true`,
-`mirror_x: true`, `mirror_y: true`. Der `on_touch`-Handler loggt bei jeder
-Berührung Roh- und umgerechnete Koordinaten (`ESP_LOGI("cal", …)`) - praktisch
-beim Ausrichten neuer Berührungsflächen, im Dauerbetrieb reine Log-Last.
+**Touch-Kalibrierung:** sieben Werte im Substitutionsblock. Wie man sie für ein
+anderes Panel ermittelt, steht in [HARDWARE.md](HARDWARE.md), Abschnitt 8.
 
 **Hinweis zu GPIO35:** Der Pin ist beim ESP32 reiner Eingang ohne internen
 Pull-Up. Der Taster «Schnellladen» braucht daher einen externen Pull-Widerstand
@@ -230,16 +231,16 @@ das Haus, der dadurch auch negativ werden kann.
 
 ## 4. evcc-Anbindung
 
-Alle schreibenden Aufrufe gehen per `http_request` an die evcc-Instanz auf
-`http://homeassistant.local:7070`. Fünf Skripte decken die Funktionen ab:
+Alle schreibenden Aufrufe gehen per `http_request` an `${evcc_url}`. Fünf
+Skripte decken die Funktionen ab:
 
 | Skript | Aufruf |
 | :--- | :--- |
-| `set_mode_now` | `POST /api/loadpoints/1/mode/now` |
-| `set_mode_pv` | `POST /api/loadpoints/1/mode/pv` |
-| `set_mode_off` | `POST /api/loadpoints/1/mode/off` (löscht zusätzlich die NOW-LED) |
-| `send_plan_request` | `POST /api/vehicles/db:1/plan/soc/<soc>/<zeitstempel>` |
-| `delete_plan_request` | `DELETE /api/vehicles/db:1/plan/soc` |
+| `set_mode_now` | `POST /api/loadpoints/${evcc_loadpoint}/mode/now` |
+| `set_mode_pv` | `POST /api/loadpoints/${evcc_loadpoint}/mode/pv` |
+| `set_mode_off` | `POST /api/loadpoints/${evcc_loadpoint}/mode/off` (löscht zusätzlich die NOW-LED) |
+| `send_plan_request` | `POST /api/vehicles/${evcc_vehicle}/plan/soc/<soc>/<zeitstempel>` |
+| `delete_plan_request` | `DELETE /api/vehicles/${evcc_vehicle}/plan/soc` |
 
 **Zeitstempel des Ladeplans:** Aus Stunde, Minute und der aktuellen Zeit von
 Home Assistant wird im Lambda ein ISO-8601-Zeitstempel gebildet. Liegt die
@@ -282,25 +283,19 @@ beiden Status-LEDs - sie sind als `internal: true` deklariert.
 
 ### Vom Gerät konsumiert
 
-Das Display abonniert 24 Entitäten aus Home Assistant.
+Das Display abonniert 24 Entitäten aus Home Assistant. Seit V1.3.0 steht kein
+Entitätsname mehr im Code — jeder hängt an einer Substitution am Kopf der YAML.
+Die Vorgabewerte stehen in Abschnitt 6.
 
-**Binärsensoren:** `binary_sensor.raining`,
-`binary_sensor.evcc_loadpoint_charging`, `binary_sensor.evcc_loadpoint_connected`,
-`binary_sensor.evcc_chargeplan_enabled`.
-
-**Textsensoren:** `weather.egnach`, `select.evcc_mode`,
-`sensor.evcc_chargeplan_time`.
-
-**Zahlensensoren:**
-
-| Bereich | Entitäten |
+| Bereich | Substitutionen |
 | :--- | :--- |
-| PV & Netz | `sensor.input_power`, `sensor.grid_active_power` |
-| Hausbatterie | `sensor.battery_state_of_capacity`, `sensor.charge_discharge_power` |
-| Wetter | `sensor.outdoor_temperature`, `sensor.weather_station_frequency` |
-| Fahrzeug | `sensor.evcc_vehicle_soc`, `sensor.evcc_vehicle_range`, `sensor.evcc_vehicle_target_soc` |
-| Wallbox | `sensor.evcc_charge_power_w`, `sensor.evcc_charge_current`, `sensor.evcc_charge_30d_solar_percentage`, `sensor.evcc_chargeplan_soc` |
-| Wärmepumpe & Heizstab | `sensor.total_wp`, `sensor.wp_warmeleistung`, `sensor.heizstab`, `sensor.wp_zwe2_controller_output_power` |
+| PV & Netz | `ent_pv_power`, `ent_grid_power` |
+| Hausbatterie | `ent_battery_soc`, `ent_battery_power` |
+| Wetter | `ent_weather`, `ent_outdoor_temperature`, `ent_rain`, `ent_rain_frequency` |
+| Fahrzeug | `ent_vehicle_soc`, `ent_vehicle_range`, `ent_vehicle_target_soc` |
+| Wallbox & evcc | `ent_evcc_mode`, `ent_evcc_connected`, `ent_evcc_charging`, `ent_evcc_charge_power`, `ent_evcc_charge_current`, `ent_evcc_solar_share_30d` |
+| Ladeplan | `ent_plan_enabled`, `ent_plan_soc`, `ent_plan_time` |
+| Wärmepumpe & Heizstab | `ent_heatpump_power_electric`, `ent_heatpump_power_heat`, `ent_heater_power`, `ent_heater_percent` |
 
 Ein `time`-Sensor der Plattform `homeassistant` liefert die Zeitbasis für den
 Ladeplan. Ohne HA-Verbindung ist damit auch das Setzen eines Plans nicht
@@ -308,7 +303,85 @@ möglich.
 
 ---
 
-## 6. Assets, Secrets & Inbetriebnahme
+## 6. Konfiguration, Assets & Inbetriebnahme
+
+### Der Substitutionsblock
+
+Alles, was in einer anderen Installation abweicht, steht am **Kopf der YAML**.
+Darunter ist kein Entitätsname, keine Adresse und kein Anlagenwert mehr fest
+verdrahtet.
+
+**Gerät**
+
+| Substitution | Vorgabe | Bedeutung |
+| :--- | :--- | :--- |
+| `device_name` | `ha-frontroom-info-display` | `name` und `friendly_name`, zugleich der mDNS-Name |
+| `project_name` | `tsgwiro1.ha-frontroom-info-display` | `project:`-Block |
+| `fw_version` | `1.3.0` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
+
+**evcc**
+
+| Substitution | Vorgabe | Bedeutung |
+| :--- | :--- | :--- |
+| `evcc_url` | `http://homeassistant.local:7070` | Basisadresse der evcc-REST-Schnittstelle |
+| `evcc_loadpoint` | `1` | Nummer des Ladepunkts |
+| `evcc_vehicle` | `db:1` | Fahrzeug-ID für den SoC-Ladeplan |
+
+**Entitäten aus Home Assistant** — die Vorgaben sind die Namen der Anlage des
+Autors und werden in jeder anderen Installation abweichen:
+
+| Substitution | Vorgabe |
+| :--- | :--- |
+| `ent_pv_power` | `sensor.input_power` |
+| `ent_grid_power` | `sensor.grid_active_power` |
+| `ent_battery_soc` | `sensor.battery_state_of_capacity` |
+| `ent_battery_power` | `sensor.charge_discharge_power` |
+| `ent_heatpump_power_electric` | `sensor.total_wp` |
+| `ent_heatpump_power_heat` | `sensor.wp_warmeleistung` |
+| `ent_heater_power` | `sensor.heizstab` |
+| `ent_heater_percent` | `sensor.wp_zwe2_controller_output_power` |
+| `ent_weather` | `weather.egnach` |
+| `ent_outdoor_temperature` | `sensor.outdoor_temperature` |
+| `ent_rain` | `binary_sensor.raining` |
+| `ent_rain_frequency` | `sensor.weather_station_frequency` |
+| `ent_evcc_mode` | `select.evcc_mode` |
+| `ent_evcc_connected` | `binary_sensor.evcc_loadpoint_connected` |
+| `ent_evcc_charging` | `binary_sensor.evcc_loadpoint_charging` |
+| `ent_evcc_charge_power` | `sensor.evcc_charge_power_w` |
+| `ent_evcc_charge_current` | `sensor.evcc_charge_current` |
+| `ent_evcc_solar_share_30d` | `sensor.evcc_charge_30d_solar_percentage` |
+| `ent_vehicle_soc` | `sensor.evcc_vehicle_soc` |
+| `ent_vehicle_range` | `sensor.evcc_vehicle_range` |
+| `ent_vehicle_target_soc` | `sensor.evcc_vehicle_target_soc` |
+| `ent_plan_enabled` | `binary_sensor.evcc_chargeplan_enabled` |
+| `ent_plan_soc` | `sensor.evcc_chargeplan_soc` |
+| `ent_plan_time` | `sensor.evcc_chargeplan_time` |
+
+**Anlage**
+
+| Substitution | Vorgabe | Bedeutung |
+| :--- | :--- | :--- |
+| `wallbox_max_power` | `11000` | W, Skalenende des Leistungsbalkens auf `ev_page`; steuert Beschriftung *und* Balkenlänge |
+| `ldr_bright_below` / `ldr_dim_above` | `3900` / `3950` | LDR-Rohwerte der beiden Helligkeitsschwellen |
+| `touch_x_min` … `touch_mirror_y` | siehe HARDWARE.md | Touch-Kalibrierung, sieben Werte |
+
+**Verhalten**
+
+| Substitution | Vorgabe | Bedeutung |
+| :--- | :--- | :--- |
+| `plan_default_hour` / `_minute` / `_soc` | `3` / `30` / `65` | Startwerte der Ladeplan-Seite vor der ersten Eingabe |
+| `plan_send_timeout` | `10` | Sekunden ohne Berührung, dann wird der Plan gesendet |
+| `page_return_timeout` | `2min` | Rücksprung auf die Übersicht |
+| `diag_min_heap_ok` / `_critical` | `80000` / `40000` | Schwellen des Diagnose-Pakets |
+
+> **Zugangsdaten gehören nicht in den Substitutionsblock**, sondern in
+> `~/esphome/secrets.yaml`: API-Key, OTA-Passwort und die Zugangsdaten des
+> Fallback-AP. Welche Schlüssel gebraucht werden, steht unter «Benötigte
+> Secrets». Substituieren liessen sich ihre Namen ohnehin nicht — ESPHome löst
+> `!secret` beim Laden auf, der Substitutionsdurchlauf kommt erst danach.
+
+### Assets
+
 
 **Die Bilddateien liegen seit V1.1.0 im Ordner `pic/` neben dieser Datei** — 32
 Symbole und ein Wetter-GIF, zusammen 144 KB. Die Konfiguration ist damit ohne
@@ -319,21 +392,6 @@ und stehen unter Apache 2.0. Sie wurden aus den SVG-Vorlagen als PNG in der
 jeweils benötigten Grösse gerendert und eingefärbt; das Wetter-GIF ist aus
 `white-balance-sunny`, `cloud` und den Tropfen von `weather-pouring`
 zusammengesetzt.
-
-> **Zur Vorgeschichte:** Bis V1.0.0 lagen die Bilder ausschliesslich in
-> `~/esphome/pic/` und waren nicht Teil des Repositorys. Es handelte sich um
-> über die Jahre zusammengetragene Dateien unterschiedlicher Herkunft, deren
-> Lizenz sich nicht mehr rekonstruieren liess — und eine MIT-Lizenz kann nur
-> Rechte einräumen, die man selbst hält. Der Austausch gegen einen Satz mit
-> bekannter Lizenz hat dieses Problem beseitigt und die Konfiguration nebenbei
-> erstmals vollständig gemacht.
-
-**Hinweis zur lokalen Arbeitsumgebung:** In `~/esphome/` ist `pic/` ein
-gemeinsamer Ordner für *alle* Geräte. Fünf Dateien — `dry.png`, `rain_ws.png`,
-`thermometer_icon.png`, `wallbox.png` und `weather.gif` — werden auch von
-`ha-mini-display` verwendet. Wer sie dort ersetzt, ändert damit auch dessen
-Anzeige. Im Repository hat jedes Projekt seinen eigenen Ordner, dort besteht
-diese Kopplung nicht.
 
 **Zur Bildgrösse:** `resize:` passt eine Vorlage unter Wahrung ihres
 Seitenverhältnisses in den angegebenen Kasten ein — eine hochkant-Vorlage füllt
@@ -353,10 +411,11 @@ zur Buildzeit heruntergeladen und brauchen keine lokalen Dateien. Die
 `wifi_ssid` / `wifi_password`. Das eingebundene Diagnose-Paket benötigt
 zusätzlich `mac_bssid_ug`, `mac_bssid_eg` und `mac_bssid_dg`.
 
-**Kein Webserver:** Anders als die übrigen Projekte in diesem Repository hat
-dieses Gerät keinen `web_server`. Bei einem HA-Ausfall bleibt nur der Blick
-aufs Display selbst; der Captive Portal des Fallback-AP ist die einzige
-Netzwerkschnittstelle.
+**Webserver:** `port: 80`, `version: 3`, `ota: false` — wie in den übrigen
+Projekten des Repositorys. Erreichbar unter `http://<ip>/`, auch wenn Home
+Assistant ausgefallen ist. Die Bedienoberfläche lädt ihr JavaScript von
+`oi.esphome.io` und braucht dafür Internet; die REST-Schnittstelle darunter
+antwortet auch ohne.
 
 `power_save_mode: none` ist gesetzt, damit die abonnierten Werte ohne
 Verzögerung ankommen - das kostet dauerhaft WLAN-Sendeleistung, bei einem
@@ -377,12 +436,11 @@ zweites Exemplar erfahrungsgemäss hängen bleibt.
    `frontroom_fallback_ap_password`, `wifi_ssid`, `wifi_password` sowie für das
    Diagnose-Paket `mac_bssid_ug`, `mac_bssid_eg` und `mac_bssid_dg`.
 
-3. **Entitäts-IDs anpassen.** Das Gerät importiert 28 Entitäten aus Home
-   Assistant, jede mit fest verdrahteter `entity_id` (`sensor.input_power`,
-   `select.evcc_mode`, `weather.egnach` …). In einer anderen Installation
-   heissen die anders. Die vollständige Liste steht in Abschnitt 5; ein
-   falscher Name fällt nicht beim Kompilieren auf, sondern erst als `---` auf
-   dem Display.
+3. **Substitutionsblock ausfüllen.** Die 24 Entitätsnamen, die evcc-Adresse
+   und die Anlagenwerte stehen am Kopf der YAML, siehe oben. Ein falscher
+   Entitätsname fällt **nicht** beim Kompilieren auf — das Display zeigt an der
+   betroffenen Stelle stumm `---`. Kontrolle nach dem ersten Start: Log
+   mitlesen und zählen, ob 24 verschiedene `Got state`-Meldungen kommen.
 
 4. **Erstflash über USB.** OTA setzt eine bereits laufende ESPHome-Firmware
    voraus:
@@ -402,10 +460,8 @@ zweites Exemplar erfahrungsgemäss hängen bleibt.
    [HARDWARE.md](HARDWARE.md), Abschnitt 8. Bei einem anderen Panelexemplar ist
    das der Regelfall, nicht die Ausnahme.
 
-7. **evcc-Anbindung prüfen.** Adresse, Loadpoint-Nummer und Fahrzeug-ID stehen
-   direkt in den Skripten der YAML (`homeassistant.local:7070`, Loadpoint `1`,
-   Fahrzeug `db:1`) und müssen zur eigenen Installation passen. Siehe
-   Abschnitt 4.
+7. **evcc-Anbindung prüfen.** `evcc_url`, `evcc_loadpoint` und `evcc_vehicle`
+   müssen zur eigenen Installation passen. Siehe Abschnitt 4.
 
 8. **Ein bis zwei Minuten warten**, bevor die Diagnosewerte beurteilt werden.
    WLAN- und Heap-Sensoren liefern ihren ersten Wert erst nach 60 s; bis dahin
@@ -429,13 +485,6 @@ Abonnent im Haus.
 * **Neuzeichnen ist lokal.** Die 500-ms-Aktualisierung des Displays läuft
   vollständig auf dem ESP32 und löst keinerlei Verkehr aus.
 
-> **Zur Einordnung:** Eine ESPHome-Meldung ist nicht automatisch eine
-> Datenbankzeile. Home Assistant schreibt nur, wenn sich Status oder Attribute
-> tatsächlich ändern; identische Wiederholungen feuern `STATE_REPORTED` und
-> werden vom Recorder verworfen. Wer hier optimieren will, sollte die
-> tatsächlichen Zeilenzahlen je Entität aus der Recorder-Historie messen, statt
-> aus Melderaten zu schliessen.
-
 **Flash-Verschleiss:** `preferences.flash_write_interval` ist nicht gesetzt,
 gilt also mit dem Vorgabewert von einer Minute. Neustartfest sind nur die drei
 Ladeplan-Werte, und die ändern sich ausschliesslich auf Tastendruck - eine
@@ -449,22 +498,3 @@ Dauerbelastung des NVS entsteht daraus nicht.
   läuft bei jedem Seitenaufbau weiter, unabhängig von
   `id(weather_condition)`. Das GIF zeigt also nicht die aktuelle Wetterlage -
   die steht nur im Text daneben.
-* **Zeitzone im Ladeplan-Lambda fest verdrahtet.** Der Basisversatz von einer
-  Stunde gegenüber UTC steht als Konstante im Code, die Sommerzeit kommt über
-  `is_dst` hinzu. Ausserhalb Mitteleuropas ist der gesendete Zeitstempel falsch,
-  und eine künftige Änderung der Sommerzeitregelung müsste hier nachgezogen
-  werden. Saubere Lösung wäre ein `time`-Sensor mit gesetzter `timezone` und
-  `mktime`, statt der Handrechnung.
-* **Keine Rückmeldung bei fehlgeschlagenen evcc-Aufrufen.** Weder Display noch
-  Home Assistant zeigen an, dass eine Modusumschaltung oder ein Ladeplan nicht
-  angekommen ist (siehe Abschnitt 4).
-* **Ladeplan ohne Abbrechen.** Die Eingabeseite sendet nach zehn Sekunden ohne
-  Berührung immer. Es gibt keinen Weg, die Seite bewusst zu verlassen, ohne
-  einen Plan zu setzen. Seit V1.1.1 ist wenigstens die Rückkehrfläche dort
-  inaktiv - vorher wechselte sie die Seite, während der Timer weiterlief und
-  den Plan trotzdem abschickte.
-* **`logger` unterdrückt Komponentenwarnungen** (`component: ERROR`). Das
-  blendet unter anderem die Warnungen über zu lange Lambda-Laufzeiten aus - bei
-  fünf Seiten mit umfangreichen Zeichenroutinen genau die Meldung, die man
-  sehen möchte, wenn die Anzeige träge wird.
-* **Kein `web_server`** als Notfallzugang, siehe Abschnitt 6.

@@ -178,7 +178,7 @@ Beide Eingänge haben zusätzlich `delayed_on: 10ms` als Entprellung.
 
 ## 6. Abgleich mit der Firmware
 
-Aus der Geräte-YAML, Stand V1.1.0:
+Aus der Geräte-YAML, Stand V1.3.0:
 
 | Signal | GPIO | ID in der YAML | Besonderheit |
 | :--- | :---: | :--- | :--- |
@@ -240,12 +240,9 @@ An der Wand montiert, mit dem Symbolsatz ab V1.1.0.
 
 Die Übersicht zeigt Wetterlage, Aussentemperatur und den Regensensor mit seiner
 Rohfrequenz, darunter PV-Ertrag und Netzbezug links, Ladezustand und Leistung
-der Hausbatterie rechts, unten der Zustand der Wallbox.
-
-Gut zu sehen ist hier auch ein bekannter Punkt: Das Wettersymbol links zeigt
-Sonne hinter einer Regenwolke, während daneben `LIGHTNING-RAINY` steht. Die
-Animation ist reine Dekoration und folgt der gemeldeten Wetterlage nicht — siehe
-Abschnitt 8 der [README](README.md).
+der Hausbatterie rechts, unten der Zustand der Wallbox. Dass das Wettersymbol
+nicht zur Textmeldung daneben passt, ist bekannt — siehe Abschnitt 8 der
+[README](README.md).
 
 ![Ladeplan-Seite](images/geraet-ladeplan.jpg)
 
@@ -264,19 +261,17 @@ Touchflächen nicht mehr dorthin, wo das Display sie zeichnet.
 
 Stand der Firmware:
 
+Die sieben Werte stehen seit V1.3.0 im Substitutionsblock am Kopf der YAML:
+
 ```yaml
-touchscreen:
-  platform: xpt2046
-  ...
-  calibration:
-    x_max: 3860
-    x_min: 280
-    y_max: 3860
-    y_min: 340
-  transform:
-    swap_xy: true
-    mirror_x: true
-    mirror_y: true
+substitutions:
+  touch_x_min: "280"
+  touch_x_max: "3860"
+  touch_y_min: "340"
+  touch_y_max: "3860"
+  touch_swap_xy: "true"
+  touch_mirror_x: "true"
+  touch_mirror_y: "true"
 ```
 
 `calibration:` ordnet die Rohwerte den Bildschirmkanten zu. `transform:` bildet
@@ -310,33 +305,19 @@ gedreht betrieben, daher `swap_xy` und die beiden Spiegelungen.
    Rohwert bei kleiner Bildschirmkoordinate — was den beiden `mirror_*: true`
    entspricht.
 
-4. Die kleinsten und grössten `x_raw` und `y_raw` in `calibration:` eintragen.
-5. Stimmt danach die Richtung nicht, greift `transform:` — `swap_xy` vertauscht
-   die Achsen, `mirror_x` und `mirror_y` kehren sie um.
+4. Die kleinsten und grössten `x_raw` und `y_raw` als `touch_x_min` … 
+   `touch_y_max` eintragen.
+5. Stimmt danach die Richtung nicht, greifen `touch_swap_xy` (vertauscht die
+   Achsen) sowie `touch_mirror_x` und `touch_mirror_y` (kehren sie um).
 6. Neu flashen und die Flächen prüfen. Wo sie liegen, steht in der YAML: jeder
    `platform: touchscreen`-Eintrag trägt sein Rechteck als `x_min`, `x_max`,
    `y_min`, `y_max`, teils mit `page_id` auf eine Seite beschränkt.
 7. Den Schalter wieder ausschalten.
 
-Der Schalter ist bewusst nicht persistent: nach einem Neustart steht er wieder
-auf *aus*. Damit bleibt das Gerät im Normalbetrieb still, und der Ablauf oben
-ist trotzdem ohne Codeänderung und ohne Neuflashen möglich.
+Der Schalter ist nicht persistent, nach einem Neustart steht er wieder auf
+*aus*.
 
-### Warum die Komponente stummgeschaltet ist
-
-Der `xpt2046` meldet von sich aus bei **jedem Abtastvorgang** eine Zeile
-`Touchscreen Update [x_raw, y_raw], z = …` auf Stufe `DEBUG`. Bei
-`update_interval: 50ms` sind das rund 20 Zeilen pro Sekunde, solange ein Finger
-aufliegt — im Log ist die eigentliche Information darin nicht mehr zu finden.
-Deshalb steht in der YAML:
-
-```yaml
-logger:
-  logs:
-    xpt2046: INFO
-```
-
-Das `on_touch`-Lambda hängt dagegen am Trigger `first_touch_` und feuert genau
-**einmal pro Berührung**. Für die Kalibrierung ist das die bessere Quelle: vier
-Ecken antippen ergibt vier Zeilen, jede mit Bildschirm- *und* Rohkoordinate.
-Wer den Rohdatenstrom trotzdem sehen will, setzt die Zeile auf `DEBUG`.
+Der `xpt2046` selbst ist über `logger: logs: xpt2046: INFO` stummgeschaltet. Er
+würde sonst bei jedem Abtastvorgang eine Zeile mit den Rohkoordinaten schreiben
+— rund 20 pro Sekunde, solange ein Finger aufliegt — und die Zeilen oben darin
+begraben. Wer den Rohdatenstrom braucht, setzt ihn auf `DEBUG`.

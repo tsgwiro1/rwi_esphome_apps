@@ -1,8 +1,86 @@
+# ============================================================
+# Konfiguration
+#
+# Alles, was bei einem Nachbau oder in einer anderen Installation angepasst
+# werden muss, steht hier. Weiter unten ist kein Entitaetsname, keine Adresse
+# und kein Anlagenwert mehr fest verdrahtet.
+#
+# Zugangsdaten gehoeren NICHT hierher, sondern nach ~/esphome/secrets.yaml und
+# werden per !secret geholt: API-Key, OTA-Passwort und Fallback-AP.
+#
+substitutions:
+
+# ---- Geraet ------------------------------------------------
+  device_name: "ha-frontroom-info-display"
+  project_name: "tsgwiro1.ha-frontroom-info-display"
+  fw_version: "1.3.0"
+
+# ---- evcc: Steuerung ueber REST ----------------------------
+  evcc_url: "http://homeassistant.local:7070"
+  evcc_loadpoint: "1"
+  evcc_vehicle: "db:1"
+
+# ---- Entitaeten: PV-Anlage und Hausbatterie ----------------
+  ent_pv_power: sensor.input_power
+  ent_grid_power: sensor.grid_active_power
+  ent_battery_soc: sensor.battery_state_of_capacity
+  ent_battery_power: sensor.charge_discharge_power
+
+# ---- Entitaeten: Waermeerzeugung ---------------------------
+  ent_heatpump_power_electric: sensor.total_wp
+  ent_heatpump_power_heat: sensor.wp_warmeleistung
+  ent_heater_power: sensor.heizstab
+  ent_heater_percent: sensor.wp_zwe2_controller_output_power
+
+# ---- Entitaeten: Wetter und Aussenwerte --------------------
+  ent_weather: weather.egnach     # alternativ z.B. sensor.openweathermap_condition
+  ent_outdoor_temperature: sensor.outdoor_temperature
+  ent_rain: binary_sensor.raining
+  ent_rain_frequency: sensor.weather_station_frequency
+
+# ---- Entitaeten: evcc, Wallbox und Fahrzeug ----------------
+  ent_evcc_mode: select.evcc_mode
+  ent_evcc_connected: binary_sensor.evcc_loadpoint_connected
+  ent_evcc_charging: binary_sensor.evcc_loadpoint_charging
+  ent_evcc_charge_power: sensor.evcc_charge_power_w
+  ent_evcc_charge_current: sensor.evcc_charge_current
+  ent_evcc_solar_share_30d: sensor.evcc_charge_30d_solar_percentage
+  ent_vehicle_soc: sensor.evcc_vehicle_soc
+  ent_vehicle_range: sensor.evcc_vehicle_range
+  ent_vehicle_target_soc: sensor.evcc_vehicle_target_soc
+  ent_plan_enabled: binary_sensor.evcc_chargeplan_enabled
+  ent_plan_soc: sensor.evcc_chargeplan_soc
+  ent_plan_time: sensor.evcc_chargeplan_time
+
+# ---- Anlage ------------------------------------------------
+  wallbox_max_power: "11000"      # W, Skalenende des Leistungsbalkens
+  ldr_bright_below: "3900"        # LDR-Rohwert, darunter volle Helligkeit
+  ldr_dim_above: "3950"           # LDR-Rohwert, darueber halbe Helligkeit
+  touch_x_min: "280"              # Touch-Kalibrierung, siehe HARDWARE.md Abschnitt 8
+  touch_x_max: "3860"
+  touch_y_min: "340"
+  touch_y_max: "3860"
+  touch_swap_xy: "true"
+  touch_mirror_x: "true"
+  touch_mirror_y: "true"
+
+# ---- Verhalten ---------------------------------------------
+  plan_default_hour: "3"          # Vorgabewerte der Ladeplan-Seite
+  plan_default_minute: "30"
+  plan_default_soc: "65"
+  plan_send_timeout: "10"         # s ohne Beruehrung, dann wird gesendet
+  page_return_timeout: "2min"     # Ruecksprung auf die Uebersicht
+
+# ---- Diagnose-Paket ----------------------------------------
+  diag_min_heap_ok: "80000"       # 80 kB ist gut fuer den ESP32
+  diag_min_heap_critical: "40000" # 40 kB ist kritisch
+
+# ============================================================
 esphome:
-  name: ha-frontroom-info-display
-  friendly_name: ha-frontroom-info-display
+  name: ${device_name}
+  friendly_name: ${device_name}
   project:
-    name: "tsgwiro1.ha-frontroom-info-display"
+    name: "${project_name}"
     version: "${fw_version}"
 
 esp32:
@@ -11,12 +89,6 @@ esp32:
     type: esp-idf
     advanced:
       minimum_chip_revision: "3.1"
-
-# HIER überschreiben wir die Grenzen für den starken ESP32
-substitutions:
-  fw_version: "1.2.1"
-  diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
-  diag_min_heap_critical: "40000" # 40kb ist kritisch
 
 packages:
   my_diagnostics: !include common/diagnostics.yaml
@@ -53,6 +125,11 @@ wifi:
 
 captive_portal:
 
+web_server:
+  port: 80
+  ota: false
+  version: 3
+
 http_request:
    verify_ssl: false
 
@@ -63,12 +140,12 @@ script:
   # Logik: Modus auf NOW setzen
   - id: set_mode_now
     then:
-      - http_request.post: http://homeassistant.local:7070/api/loadpoints/1/mode/now
+      - http_request.post: ${evcc_url}/api/loadpoints/${evcc_loadpoint}/mode/now
 
   # Logik: Modus auf PV setzen
   - id: set_mode_pv
     then:
-      - http_request.post: http://homeassistant.local:7070/api/loadpoints/1/mode/pv
+      - http_request.post: ${evcc_url}/api/loadpoints/${evcc_loadpoint}/mode/pv
 
   # Logik: Planladung senden
   - id: send_plan_request
@@ -89,19 +166,19 @@ script:
             strftime(tstr, sizeof(tstr), "%Y-%m-%dT%H:%M:%SZ", t);
             char soc[4];
             snprintf(soc, sizeof(soc), "%d", id(plan_soc));
-            return ((std::string) "http://homeassistant.local:7070/api/vehicles/db:1/plan/soc/" + soc + "/" + tstr);
+            return ((std::string) "${evcc_url}/api/vehicles/${evcc_vehicle}/plan/soc/" + soc + "/" + tstr);
 
   # Logik: Planladung löschen
   - id: delete_plan_request
     then:
       - http_request.send:
           method: DELETE
-          url: http://homeassistant.local:7070/api/vehicles/db:1/plan/soc
+          url: ${evcc_url}/api/vehicles/${evcc_vehicle}/plan/soc
           
   # Logik: Modus off setzen
   - id : set_mode_off
     then:
-      - http_request.post: http://homeassistant.local:7070/api/loadpoints/1/mode/off
+      - http_request.post: ${evcc_url}/api/loadpoints/${evcc_loadpoint}/mode/off
       - light.turn_off: now_indicator
 
 # ============================================================ 
@@ -123,7 +200,7 @@ globals:
   - id: plan_setup_timeout
     type: int
     restore_value: no
-    initial_value: '10' 
+    initial_value: '${plan_send_timeout}'
   - id: plan_setup_timeout_timer
     type: int
     restore_value: no
@@ -131,15 +208,15 @@ globals:
   - id: plan_time_hour
     type: int
     restore_value: yes
-    initial_value: '3'
+    initial_value: '${plan_default_hour}'
   - id: plan_time_minute
     type: int
     restore_value: yes
-    initial_value: '30'
+    initial_value: '${plan_default_minute}'
   - id: plan_soc
     type: int
     restore_value: yes
-    initial_value: '65'
+    initial_value: '${plan_default_soc}'
 
 light:
   - platform: monochromatic
@@ -163,16 +240,16 @@ light:
 # Define binary sensors
 binary_sensor:
   - platform: homeassistant
-    entity_id: binary_sensor.raining
+    entity_id: ${ent_rain}
     id: raining
   - platform: homeassistant
-    entity_id: binary_sensor.evcc_loadpoint_charging
+    entity_id: ${ent_evcc_charging}
     id: vehicle_charging
   - platform: homeassistant
-    entity_id: binary_sensor.evcc_loadpoint_connected
+    entity_id: ${ent_evcc_connected}
     id: vehicle_connected
   - platform: homeassistant
-    entity_id: binary_sensor.evcc_chargeplan_enabled
+    entity_id: ${ent_plan_enabled}
     id: evcc_chargeplan_enabled
     on_state:
       then:
@@ -458,77 +535,77 @@ sensor:
     unit_of_measurement: ""
     entity_category: "diagnostic"
     on_value_range:
-      - below: 3900
+      - below: ${ldr_bright_below}
         then:
           - light.turn_on: 
               id: backlight
               brightness: 100%
-      - above: 3950
+      - above: ${ldr_dim_above}
         then:
           - light.turn_on: 
               id: backlight
               brightness: 50%
   - platform: homeassistant
-    entity_id: sensor.input_power
+    entity_id: ${ent_pv_power}
     id: pv_power
   - platform: homeassistant
-    entity_id: sensor.grid_active_power
+    entity_id: ${ent_grid_power}
     id: grid_power
   - platform: homeassistant
-    entity_id: sensor.battery_state_of_capacity
+    entity_id: ${ent_battery_soc}
     id: battery_soc
   - platform: homeassistant
-    entity_id: sensor.charge_discharge_power
+    entity_id: ${ent_battery_power}
     id: battery_power
   - platform: homeassistant
-    entity_id: sensor.outdoor_temperature
+    entity_id: ${ent_outdoor_temperature}
     id: outside_temperature
   - platform: homeassistant
-    entity_id: sensor.weather_station_frequency
+    entity_id: ${ent_rain_frequency}
     id: rain_freq
   - platform: homeassistant
-    entity_id: sensor.evcc_vehicle_soc
+    entity_id: ${ent_vehicle_soc}
     id: vehicle_soc
   - platform: homeassistant
-    entity_id: sensor.evcc_vehicle_range
+    entity_id: ${ent_vehicle_range}
     id: vehicle_range
   - platform: homeassistant
-    entity_id: sensor.evcc_charge_power_w
+    entity_id: ${ent_evcc_charge_power}
     id: wallbox_charge_power
   - platform: homeassistant
-    entity_id: sensor.evcc_charge_current
+    entity_id: ${ent_evcc_charge_current}
     id: wallbox_charge_current
   - platform: homeassistant
-    entity_id: sensor.evcc_vehicle_target_soc
+    entity_id: ${ent_vehicle_target_soc}
     id: vehicle_target_soc
   - platform: homeassistant
-    entity_id: sensor.evcc_charge_30d_solar_percentage
+    entity_id: ${ent_evcc_solar_share_30d}
     id: evcc_charge_30d_solar_percentage
   - platform: homeassistant
-    entity_id: sensor.heizstab
+    entity_id: ${ent_heater_power}
     id: heater_power
   - platform: homeassistant
-    entity_id: sensor.wp_zwe2_controller_output_power
+    entity_id: ${ent_heater_percent}
     id: heater_percent
   - platform: homeassistant
-    entity_id: sensor.total_wp
+    entity_id: ${ent_heatpump_power_electric}
     id: heatpump_power_electric
   - platform: homeassistant
-    entity_id: sensor.wp_warmeleistung
+    entity_id: ${ent_heatpump_power_heat}
     id: heatpump_power_heat
   - platform: homeassistant
-    entity_id: sensor.evcc_chargeplan_soc
+    entity_id: ${ent_plan_soc}
     id: evcc_charge_plan_soc
 
 # Define all the string sensors used
 text_sensor:
   - platform: homeassistant
-    entity_id: weather.egnach #sensor.openweathermap_condition
+    entity_id: ${ent_weather}
     id: weather_condition
     filters:
       - to_upper:
   - platform: homeassistant
-    entity_id: select.evcc_mode
+    entity_id: ${ent_evcc_mode}
     id: wallbox_mode
     filters:
       - to_upper:
@@ -541,7 +618,7 @@ text_sensor:
               id(now_indicator).turn_off().perform();
             }
   - platform: homeassistant
-    entity_id: sensor.evcc_chargeplan_time
+    entity_id: ${ent_plan_time}
     id: evcc_charge_plan_time
 
 switch:
@@ -878,14 +955,14 @@ touchscreen:
   update_interval: 50ms
   threshold: 400
   calibration:
-    x_max: 3860
-    x_min: 280
-    y_max: 3860
-    y_min: 340
+    x_max: ${touch_x_max}
+    x_min: ${touch_x_min}
+    y_max: ${touch_y_max}
+    y_min: ${touch_y_min}
   transform:
-    swap_xy: true
-    mirror_x: true
-    mirror_y: true
+    swap_xy: ${touch_swap_xy}
+    mirror_x: ${touch_mirror_x}
+    mirror_y: ${touch_mirror_y}
   # Gibt bei jeder Beruehrung Bildschirm- und Rohkoordinaten aus. Die
   # Rohwerte sind panelabhaengig und werden beim Nachbau gebraucht, um
   # calibration: zu fuellen - siehe HARDWARE.md, Abschnitt 8. Im Normalbetrieb
@@ -910,7 +987,7 @@ interval:
               id(main_page).show();
             }
           }
-  - interval: 2min
+  - interval: ${page_return_timeout}
     then:
       - if:
           condition:
@@ -1093,8 +1170,8 @@ display:
             // **** Power ****
             if (id(vehicle_charging).state && id(wallbox_charge_power).has_state()) {
               it.printf(2,139,id(lato20), WHITE, BLACK, TextAlign::TOP_LEFT, "Pow");
-              it.printf(50,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "0kW"); it.printf(300,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "11kW");
-              ch =  min (250.0, 0.023 * id(wallbox_charge_power).state);
+              it.printf(50,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "0kW"); it.printf(300,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0fkW", ${wallbox_max_power} / 1000.0);
+              ch = min(250.0, 250.0 / ${wallbox_max_power} * id(wallbox_charge_power).state);
               it.filled_rectangle(50,140,ch,20,LIGHTRED); it.filled_rectangle(50+ch,140,250-ch,20,HA_BLUE);
               if (id(wallbox_charge_current).has_state()) {
                 it.printf(160,138,id(lato20),WHITE, BLACK, TextAlign::BOTTOM_CENTER, "%.0f W (%.0f A)", id(wallbox_charge_power).state, id(wallbox_charge_current).state);

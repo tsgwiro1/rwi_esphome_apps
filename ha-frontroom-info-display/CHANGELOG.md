@@ -2,6 +2,83 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.3.0] - 2026-08-18
+
+### Hinzugefügt
+
+* **Substitutionsblock am Kopf der YAML, 47 Einträge in sechs Gruppen.** Alles,
+  was in einer anderen Installation abweicht, steht jetzt an einer Stelle
+  zuoberst; darunter ist kein Entitätsname, keine Adresse und kein Anlagenwert
+  mehr fest verdrahtet.
+
+  | Gruppe | Inhalt |
+  | :--- | :--- |
+  | Gerät | `device_name`, `project_name`, `fw_version` |
+  | evcc | `evcc_url`, `evcc_loadpoint`, `evcc_vehicle` |
+  | Entitäten | 24 Namen, nach Bereich gruppiert |
+  | Anlage | Wallbox-Maximum, zwei LDR-Schwellen, sieben Touch-Kalibrierwerte |
+  | Verhalten | Ladeplan-Vorgaben, zwei Zeitlimiten |
+  | Diagnose | die beiden Heap-Grenzen wie bisher |
+
+  Die evcc-Adresse stand fünfmal im Code, jeweils mit Ladepunkt und Fahrzeug-ID
+  darin — darunter einmal in einem Lambda. Das geht, weil der
+  Substitutionsdurchlauf `core.Lambda` ausdrücklich mitbehandelt.
+
+  Zugangsdaten bleiben draussen und gehören ins `secrets.yaml`; ihre Namen
+  liessen sich ohnehin nicht substituieren, weil ESPHome `!secret` beim Laden
+  auflöst.
+
+* **Webserver ergänzt** (`port: 80`, `version: 3`, `ota: false`), wie in den
+  übrigen Projekten des Repositorys. Das Gerät ist damit auch dann erreichbar,
+  wenn Home Assistant ausgefallen ist. Kostet 14 KB Flash, weil die
+  Bedienoberfläche von `oi.esphome.io` nachgeladen wird; die REST-Schnittstelle
+  darunter antwortet auch ohne Internet.
+
+### Geändert
+
+* **Magic Number der Wallbox-Skala aufgelöst.** Beschriftung (`"11kW"`) und
+  Umrechnungsfaktor (`0.023`) standen zwei Zeilen auseinander und waren als
+  zusammengehörig nicht erkennbar. Beide hängen jetzt an `wallbox_max_power`:
+  die Beschriftung an `${wallbox_max_power} / 1000.0`, die Balkenlänge an
+  `250.0 / ${wallbox_max_power}`.
+
+  Damit ist nebenbei ein kleiner Fehler weg: `0.023 × 11000 = 253` wurde auf
+  250 gekappt, der Balken war also schon bei 10 870 W voll. Jetzt trifft er
+  exakt beim eingestellten Maximum an.
+
+### Prüfung
+
+Der Vergleich der mit `esphome config` aufgelösten Konfiguration vor und nach
+dem Umbau enthält ausser dem Substitutionsblock, der Versionsnummer und den
+zwei Wallbox-Zeilen keinen Unterschied — alle 47 Werte lösen sich zeichengleich
+auf. Am Gerät gegengeprüft: der Startdump nennt genau die 24 erwarteten
+Entitäten.
+
+### Dokumentation
+
+* **Abschnitt 6 der README heisst jetzt «Konfiguration, Assets &
+  Inbetriebnahme»** und führt jede Substitution mit Vorgabewert und Bedeutung
+  auf, dazu den Hinweis zu den `!secret`-Schlüsseln.
+* **Abschnitt 5** listet statt der Entitätsnamen die Substitutionen, nach
+  Bereich gruppiert — die Vorgaben stehen nur noch an einer Stelle.
+* **HARDWARE.md Abschnitt 8** zeigt die Kalibrierung als Substitutionen; die
+  Abgleichtabelle in Abschnitt 6 ist auf den aktuellen Stand datiert.
+* **Drei veraltete Stellen in der README korrigiert**, die V1.2.0 und V1.3.0
+  hinterlassen hatten: der Kalibrierlogger galt noch als dauerhaft aktiv, die
+  Kalibrierwerte standen als dritte Kopie im Klartext, und die evcc-Tabelle
+  nannte Adresse, Ladepunkt und Fahrzeug-ID statt der Substitutionen.
+* **Abschnitt 1** nennt jetzt drei Wege zum Lademodus statt zwei — die
+  Touchflächen auf `ev_page` fehlten. Sie kennen zusätzlich `OFF`, und sie sind
+  nur bei angestecktem Fahrzeug wirksam. Der Ladeplan hat weiterhin zwei Wege.
+* **Abschnitt 8 «Bekannte Punkte» geleert** bis auf die Wetteranimation. Die
+  übrigen Einträge sind Aufgaben, keine Betriebshinweise, und werden angegangen
+  statt dokumentiert.
+* **Zwei Absätze ohne Bezug zum Betrieb entfernt:** die Herkunftsgeschichte der
+  alten Symbole und die allgemeine Erläuterung zum Recorder-Verhalten von Home
+  Assistant.
+
+---
+
 ## [1.2.1] - 2026-08-18
 
 ### Entfernt
