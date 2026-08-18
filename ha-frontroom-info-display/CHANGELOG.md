@@ -2,6 +2,83 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.2.0] - 2026-08-18
+
+### Hinzugefügt
+
+* **Schalter «Touch Kalibrierlog».** Das `on_touch`-Lambda gibt bei jeder
+  Berührung Bildschirm- und Rohkoordinaten aus. Die Rohwerte des `xpt2046`
+  fallen von Panel zu Panel anders aus und werden gebraucht, um `calibration:`
+  für ein neues Board zu füllen — bisher lief diese Ausgabe unbedingt mit.
+  Jetzt hängt sie an einem Schalter der Kategorie *Konfiguration*, der nach
+  jedem Neustart auf *aus* steht. Damit bleibt das Gerät im Normalbetrieb
+  still, und die Kalibrierung ist trotzdem ohne Codeänderung und ohne
+  Neuflashen möglich.
+
+* **Logausgabe des `xpt2046` auf `INFO` gesetzt.** Die Komponente meldet bei
+  jedem Abtastvorgang eine Zeile mit den Rohkoordinaten auf `DEBUG` — bei 50 ms
+  Abtastung rund 20 pro Sekunde, solange ein Finger aufliegt. Das
+  `on_touch`-Lambda liefert dieselbe Information einmal pro Berührung und nur
+  auf Wunsch; der Rohdatenstrom daneben macht das Log unlesbar.
+
+### Behoben
+
+* **Die drei Modusflächen der Wallbox-Seite waren auch ohne Fahrzeug aktiv.**
+  Sie werden nur im Zweig «verbunden» gezeichnet; zeigt die Seite `Nothing
+  connected to wallbox`, lag darunter trotzdem eine wirksame Fläche und ein
+  Tipper ins Leere schaltete den evcc-Modus um. Sie prüfen jetzt zusätzlich den
+  Anschlusszustand — derselbe Fehlertyp wie bei der Rückkehr-Fläche in V1.1.1.
+
+* **Die sechs Pfeilflächen der Ladeplan-Seite lagen 10 px zu hoch.** Gezeichnet
+  werden 60 × 60 grosse Bilder bei `y = 40` und `y = 160`, die Flächen standen
+  auf `y = 30…90` und `y = 150…210`. Oberhalb jeder Taste war damit ein
+  unsichtbarer Streifen wirksam, während die unteren 10 px der sichtbaren Taste
+  nicht reagierten. Flächen und Bilder decken sich jetzt.
+
+  Aufgefallen beim Abgleich aller Berührungsflächen gegen die Zeichenlogik der
+  fünf Seiten. Die übrigen sechs Flächen sind in Ordnung: die drei Kacheln der
+  Übersicht liegen über Elementen, die immer gezeichnet werden, und die
+  Rückkehr-Fläche ist seit V1.1.1 an das Zurück-Symbol gebunden.
+
+### Entfernt
+
+* **Auskommentierter Kalibrierblock** beim Touchscreen — eine ältere Variante
+  desselben `calibration:`/`transform:` mit vertauschtem `x_min`/`x_max`,
+  ersetzt durch die aktive Fassung darunter.
+
+* **Vier auskommentierte Zeichenbefehle** in den Display-Lambdas: ein
+  `dry_icon` im Zweig ohne Regenmeldung, eine zweite Zeile zum Ladeplan auf der
+  Wallbox-Seite und drei Pfeilvarianten im Energieflussbild.
+
+* **Ein `if`/`else` mit zwei identischen Zweigen.** Die Abfrage
+  `solar_input > -1000` führte in beiden Fällen dieselbe Zeile aus.
+
+* **Nie verwendete Umlaut-Glyphen** aus allen fünf Schriftgrössen. Auf dem
+  Display erscheint kein deutscher Text — die Beschriftungen sind englisch, die
+  aus Home Assistant übernommenen Zustände ebenfalls.
+
+* **Ein toter Kommentarkopf** (`# Setup the ili9xxx platform`) über dem
+  `interval:`-Block.
+
+### Geändert
+
+* **Tippfehler in zwei IDs behoben:** `now_indiactor` → `now_indicator`,
+  `plan_indiactor` → `plan_indicator`. Beide Lichter sind `internal: true`, in
+  Home Assistant ändert sich dadurch nichts.
+
+### Dokumentation
+
+* **`HARDWARE.md` Abschnitt 8 «Touch kalibrieren» neu.** Was `calibration:` und
+  `transform:` bedeuten, und der Ablauf für ein neues Panel in sieben
+  Schritten.
+
+* **Inbetriebnahme-Anleitung in Abschnitt 6 der README.** Acht Schritte vom
+  Hardwareumbau bis zur ersten Diagnose, mit den drei Stellen, an denen ein
+  Nachbau erfahrungsgemäss hängen bleibt: die Umbauten am Board, die fest
+  verdrahteten Entitäts-IDs und die Touch-Kalibrierung.
+
+---
+
 ## [1.1.1] - 2026-08-18
 
 ### Behoben

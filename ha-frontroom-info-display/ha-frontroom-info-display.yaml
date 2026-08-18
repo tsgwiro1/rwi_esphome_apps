@@ -14,7 +14,7 @@ esp32:
 
 # HIER überschreiben wir die Grenzen für den starken ESP32
 substitutions:
-  fw_version: "1.1.1"
+  fw_version: "1.2.0"
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
   diag_min_heap_critical: "40000" # 40kb ist kritisch
 
@@ -25,6 +25,12 @@ packages:
 logger:
   logs:
     component: ERROR
+    # Die Komponente meldet bei jedem Abtastvorgang "Touchscreen Update
+    # [x_raw, y_raw]" auf DEBUG - bei 50 ms Abtastung rund 20 Zeilen je
+    # Sekunde, solange ein Finger aufliegt. Die Rohwerte liefert das
+    # on_touch-Lambda sauberer: eine Zeile je Beruehrung, und nur wenn der
+    # Schalter touch_cal_log eingeschaltet ist.
+    xpt2046: INFO
 
 # Enable Home Assistant API
 api:
@@ -96,7 +102,7 @@ script:
   - id : set_mode_off
     then:
       - http_request.post: http://homeassistant.local:7070/api/loadpoints/1/mode/off
-      - light.turn_off: now_indiactor
+      - light.turn_off: now_indicator
 
 # ============================================================ 
 # Home Assistant related setup
@@ -145,13 +151,13 @@ light:
     name: "Charge Now Indicator"
     output: led_now
     internal: true
-    id: now_indiactor
+    id: now_indicator
     restore_mode: ALWAYS_OFF
   - platform: monochromatic
     name: "Charge Plan Indicator"
     output: led_plan
     internal: true
-    id: plan_indiactor
+    id: plan_indicator
     restore_mode: ALWAYS_OFF
 
 # Define binary sensors
@@ -175,9 +181,9 @@ binary_sensor:
               - lambda: |-
                   return x;
             then:
-              - light.turn_on: plan_indiactor
+              - light.turn_on: plan_indicator
             else:
-              - light.turn_off: plan_indiactor
+              - light.turn_off: plan_indicator
   - platform: gpio
     pin: GPIO35
     id: button_charge_now
@@ -277,6 +283,10 @@ binary_sensor:
               - display.page.show: main_page
   - platform: touchscreen
     id: button_ev_off
+    # Die drei Modusfelder werden auf ev_page nur im Zweig "verbunden"
+    # gezeichnet. Ohne diese Bedingung bliebe die Flaeche aktiv, waehrend die
+    # Seite "Nothing connected to wallbox" zeigt - ein Tipper ins Leere wuerde
+    # den evcc-Modus umschalten.
     x_min: 60
     x_max: 116
     y_min: 180
@@ -287,8 +297,10 @@ binary_sensor:
         - if:
             condition:
               - lambda: |-
-                  return !id(touch_lock);
-            then:   
+                  return !id(touch_lock) &&
+                         id(grigio_connected).has_state() &&
+                         id(grigio_connected).state;
+            then:
               - script.execute: set_mode_off
               - lambda: |-
                   id(recent_touch) = true;
@@ -304,8 +316,10 @@ binary_sensor:
         - if:
             condition:
               - lambda: |-
-                  return !id(touch_lock);
-            then:   
+                  return !id(touch_lock) &&
+                         id(grigio_connected).has_state() &&
+                         id(grigio_connected).state;
+            then:
               - script.execute: set_mode_pv
               - lambda: |-
                   id(recent_touch) = true;
@@ -321,8 +335,10 @@ binary_sensor:
         - if:
             condition:
               - lambda: |-
-                  return !id(touch_lock);
-            then:   
+                  return !id(touch_lock) &&
+                         id(grigio_connected).has_state() &&
+                         id(grigio_connected).state;
+            then:
               - script.execute: set_mode_now
               - lambda: |-
                   id(recent_touch) = true;
@@ -330,8 +346,8 @@ binary_sensor:
     id: button_h_plus
     x_min: 40
     x_max: 100
-    y_min: 30
-    y_max: 90
+    y_min: 40
+    y_max: 100
     page_id: plan_setup_page
     on_press:
       then:
@@ -347,8 +363,8 @@ binary_sensor:
     id: button_h_minus
     x_min: 40
     x_max: 100
-    y_min: 150
-    y_max: 210
+    y_min: 160
+    y_max: 220
     page_id: plan_setup_page
     on_press:
       then:
@@ -364,8 +380,8 @@ binary_sensor:
     id: button_min_plus
     x_min: 120
     x_max: 180
-    y_min: 30
-    y_max: 90
+    y_min: 40
+    y_max: 100
     page_id: plan_setup_page
     on_press:
       then:
@@ -381,8 +397,8 @@ binary_sensor:
     id: button_min_minus
     x_min: 120
     x_max: 180
-    y_min: 150
-    y_max: 210
+    y_min: 160
+    y_max: 220
     page_id: plan_setup_page
     on_press:
       then:
@@ -398,8 +414,8 @@ binary_sensor:
     id: button_soc_plus
     x_min: 220
     x_max: 280
-    y_min: 30
-    y_max: 90
+    y_min: 40
+    y_max: 100
     page_id: plan_setup_page
     on_press:
       then:
@@ -415,8 +431,8 @@ binary_sensor:
     id: button_soc_minus
     x_min: 220
     x_max: 280
-    y_min: 150
-    y_max: 210
+    y_min: 160
+    y_max: 220
     page_id: plan_setup_page
     on_press:
       then:
@@ -529,9 +545,9 @@ text_sensor:
       then:
         - lambda: |-
             if (x == "NOW") {
-              id(now_indiactor).turn_on().perform();
+              id(now_indicator).turn_on().perform();
             } else {
-              id(now_indiactor).turn_off().perform();
+              id(now_indicator).turn_off().perform();
             }
   - platform: homeassistant
     entity_id: sensor.evcc_chargeplan_time
@@ -565,6 +581,16 @@ switch:
     turn_off_action:
       - script.execute: delete_plan_request
 
+  # Schaltet das Kalibrierlog des Touchscreens frei. Nach einem Neustart
+  # immer aus, damit im Normalbetrieb nichts mitgeschrieben wird.
+  - platform: template
+    name: "Touch Kalibrierlog"
+    id: touch_cal_log
+    icon: "mdi:crosshairs-gps"
+    entity_category: config
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+
 # Create a time sensor, this will fetch time from Home Assistant
 time:
   - platform: homeassistant
@@ -582,35 +608,35 @@ font:
       weight: 400
     id: lato10
     size: 10
-    glyphs: "0123456789:% -ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜabcdefghijklmnopqrstuvwxyzäöü"
+    glyphs: "0123456789:% -ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
   - file:
       type: gfonts
       family: Lato
       weight: 400
     id: lato14
     size: 14
-    glyphs: "/!\"%()+=,-_.:;°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ abcdefghijklmnopqrstuvwxyzäöü"
+    glyphs: "/!\"%()+=,-_.:;°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz"
   - file:
       type: gfonts
       family: Lato
       weight: 700
     id: lato20
     size: 20
-    glyphs: "/!\"%()+=,-_.:;°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ abcdefghijklmnopqrstuvwxyzäöü"
+    glyphs: "/!\"%()+=,-_.:;°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz"
   - file:
       type: gfonts
       family: Lato
       weight: 700
     id: lato24
     size: 24
-    glyphs: "/!\"%()+=,-_.:;°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ abcdefghijklmnopqrstuvwxyzäöü"
+    glyphs: "/!\"%()+=,-_.:;°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz"
   - file:
       type: gfonts
       family: Lato
       weight: 900
     id: lato30
     size: 30
-    glyphs: "/!\"%()+=,-_.:;°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ abcdefghijklmnopqrstuvwxyzäöü"
+    glyphs: "/!\"%()+=,-_.:;°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz"
   - file:
       type: gfonts
       family: Lato
@@ -860,14 +886,6 @@ touchscreen:
   interrupt_pin: GPIO36
   update_interval: 50ms
   threshold: 400
-#  calibration:
-#    x_min: 3860
-#    x_max: 280
-#    y_min: 3860
-#    y_max: 340
-#  transform:
-#    swap_xy: true
-#    mirror_x: false
   calibration:
     x_max: 3860
     x_min: 280
@@ -877,17 +895,17 @@ touchscreen:
     swap_xy: true
     mirror_x: true
     mirror_y: true
+  # Gibt bei jeder Beruehrung Bildschirm- und Rohkoordinaten aus. Die
+  # Rohwerte sind panelabhaengig und werden beim Nachbau gebraucht, um
+  # calibration: zu fuellen - siehe HARDWARE.md, Abschnitt 8. Im Normalbetrieb
+  # aus, einzuschalten ueber den Schalter touch_cal_log in Home Assistant.
   on_touch:
     - lambda: |-
-          ESP_LOGI("cal", "x=%d, y=%d, x_raw=%d, y_raw=%0d",
-              touch.x,
-              touch.y,
-              touch.x_raw,
-              touch.y_raw
-              );
+        if (id(touch_cal_log).state) {
+          ESP_LOGI("cal", "x=%d, y=%d, x_raw=%d, y_raw=%d",
+                   touch.x, touch.y, touch.x_raw, touch.y_raw);
+        }
 
-# Setup the ili9xxx platform
-#
 # Update the UI state
 interval:
   - interval: 1s
@@ -957,16 +975,11 @@ display:
               it.printf(240,38, id(lato20), WHITE,"DRY");
             }
           } else {
-              //it.image(200, 47, id(dry_icon));
               it.printf(240,38,id(lato20), WHITE,"---");
           }
           //** SOLAR *********************************
           if (id(solar_input).has_state()) {
-            if (id(solar_input).state > -1000) {
-              it.printf(65, 91, id(lato20), WHITE, "%.0f W", id(solar_input).state);     
-            } else {
-              it.printf(65, 91, id(lato20), WHITE, "%.0f W", id(solar_input).state);
-            }
+            it.printf(65, 91, id(lato20), WHITE, "%.0f W", id(solar_input).state);
             if (!id(solar_grid_power).has_state()) {
               it.printf(65, 126, id(lato20), WHITE, "---");
             } else if (id(solar_grid_power).state > 0) {
@@ -1051,8 +1064,7 @@ display:
               it.printf(28,163,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0f%%", id(evcc_charge_plan_soc).state);
             }
             if (id(grigio_connected).state && !id(grigio_charging).state) {
-              it.printf(160,130,id(lato20),WHITE, BLACK,TextAlign::TOP_CENTER, "Plan active");  
-              //it.printf(160,152,id(lato20),WHITE, BLACK,TextAlign::TOP_CENTER, "charge to %.0f % tomorrow at %s", id(evcc_charge_plan_soc).state, id(evcc_charge_plan_time).state.c_str());  
+              it.printf(160,130,id(lato20),WHITE, BLACK,TextAlign::TOP_CENTER, "Plan active");
             }
           }
           if (!id(grigio_connected).has_state()) {
@@ -1217,16 +1229,13 @@ display:
             if (id(arr_anim) > 0) it.image(103,76 + id(arr_anim) * 4, id(arrow_d_icon));
             it.image(103,100 + id(arr_anim) * 4, id(arrow_d_icon));
             if (id(arr_anim) < 2) it.image(103,124 + id(arr_anim) * 4, id(arrow_d_icon));
-            //it.image(148,148 + id(arr_anim) * 4, id(arrow_d_icon));
           }
           // ** Energy flow to / from battery **
           if (id(solar_battery_power).state > 0) {
             if (id(arr_anim) > 3) it.image(103,117 + id(arr_anim) * 4, id(arrow_d_icon)); // ** charge battery **
             it.image(103,141 + id(arr_anim) * 4, id(arrow_d_icon)); // ** charge battery **
             it.image(103,165 + id(arr_anim) * 4, id(arrow_d_icon)); // ** charge battery **
-            //it.image(103,189 + id(arr_anim) * 4, id(arrow_d_icon)); // ** charge battery **
           } else if (id(solar_battery_power).state < 0) {
-            //it.image(103,117 - id(arr_anim) * 4, id(arrow_u_icon)); // ** discharge battery **
             if (id(arr_anim) < 3) it.image(103,141 - id(arr_anim) * 4, id(arrow_u_icon)); // ** discharge battery **
             it.image(103,165 - id(arr_anim) * 4, id(arrow_u_icon)); // ** discharge battery **
             if (id(arr_anim) > 0) it.image(103,189 - id(arr_anim) * 4, id(arrow_u_icon)); // ** discharge battery **

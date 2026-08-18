@@ -252,3 +252,91 @@ Abschnitt 8 der [README](README.md).
 Die Eingabeseite für den Ladeplan: oben und unten je drei Flächen zum Verstellen
 von Uhrzeit und Ziel-Ladestand. Die Beschreibung aller fünf Seiten steht in
 Abschnitt 3 der [README](README.md).
+
+---
+
+## 8. Touch kalibrieren
+
+Der resistive Touch am `xpt2046` liefert Rohwerte aus einem ADC, und die fallen
+von Panel zu Panel etwas anders aus. Beim Nachbau mit einem anderen Board
+können die Werte aus diesem Repository danebenliegen — dann treffen die
+Touchflächen nicht mehr dorthin, wo das Display sie zeichnet.
+
+Stand der Firmware:
+
+```yaml
+touchscreen:
+  platform: xpt2046
+  ...
+  calibration:
+    x_max: 3860
+    x_min: 280
+    y_max: 3860
+    y_min: 340
+  transform:
+    swap_xy: true
+    mirror_x: true
+    mirror_y: true
+```
+
+`calibration:` ordnet die Rohwerte den Bildschirmkanten zu. `transform:` bildet
+die Einbaulage ab: das Panel ist als 240 × 320 aufgebaut und wird hier um 90°
+gedreht betrieben, daher `swap_xy` und die beiden Spiegelungen.
+
+### Vorgehen
+
+1. In Home Assistant den Schalter **Touch Kalibrierlog** einschalten
+   (`switch.living_room_ha_frontroom_info_display_touch_kalibrierlog`,
+   Kategorie *Konfiguration*). Ohne ihn schreibt das Gerät nichts mit.
+2. Log mitlesen:
+
+   ```sh
+   PLATFORMIO_CORE_DIR="$HOME/.platformio_esphome" \
+     ~/.local/bin/esphome logs ha-frontroom-info-display.yaml --device <ip>
+   ```
+
+3. Die vier Ecken des Displays antippen. Das `on_touch`-Lambda meldet je
+   Berührung eine Zeile:
+
+   ```
+   [I][cal:…]: x=33,  y=33,  x_raw=3486, y_raw=3370   ← oben links
+   [I][cal:…]: x=301, y=18,  x_raw=490,  y_raw=3590   ← oben rechts
+   [I][cal:…]: x=307, y=206, x_raw=420,  y_raw=836    ← unten rechts
+   [I][cal:…]: x=30,  y=218, x_raw=3514, y_raw=660    ← unten links
+   ```
+
+   Die Zahl hinter `cal:` ist die Zeilennummer im erzeugten C++ und wandert mit
+   jeder Änderung an der YAML. Beide Achsen laufen hier invers — grosser
+   Rohwert bei kleiner Bildschirmkoordinate — was den beiden `mirror_*: true`
+   entspricht.
+
+4. Die kleinsten und grössten `x_raw` und `y_raw` in `calibration:` eintragen.
+5. Stimmt danach die Richtung nicht, greift `transform:` — `swap_xy` vertauscht
+   die Achsen, `mirror_x` und `mirror_y` kehren sie um.
+6. Neu flashen und die Flächen prüfen. Wo sie liegen, steht in der YAML: jeder
+   `platform: touchscreen`-Eintrag trägt sein Rechteck als `x_min`, `x_max`,
+   `y_min`, `y_max`, teils mit `page_id` auf eine Seite beschränkt.
+7. Den Schalter wieder ausschalten.
+
+Der Schalter ist bewusst nicht persistent: nach einem Neustart steht er wieder
+auf *aus*. Damit bleibt das Gerät im Normalbetrieb still, und der Ablauf oben
+ist trotzdem ohne Codeänderung und ohne Neuflashen möglich.
+
+### Warum die Komponente stummgeschaltet ist
+
+Der `xpt2046` meldet von sich aus bei **jedem Abtastvorgang** eine Zeile
+`Touchscreen Update [x_raw, y_raw], z = …` auf Stufe `DEBUG`. Bei
+`update_interval: 50ms` sind das rund 20 Zeilen pro Sekunde, solange ein Finger
+aufliegt — im Log ist die eigentliche Information darin nicht mehr zu finden.
+Deshalb steht in der YAML:
+
+```yaml
+logger:
+  logs:
+    xpt2046: INFO
+```
+
+Das `on_touch`-Lambda hängt dagegen am Trigger `first_touch_` und feuert genau
+**einmal pro Berührung**. Für die Kalibrierung ist das die bessere Quelle: vier
+Ecken antippen ergibt vier Zeilen, jede mit Bildschirm- *und* Rohkoordinate.
+Wer den Rohdatenstrom trotzdem sehen will, setzt die Zeile auf `DEBUG`.

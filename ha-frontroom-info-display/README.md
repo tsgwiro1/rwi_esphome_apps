@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.1.1-blue)
+![Version](https://img.shields.io/badge/version-1.2.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -146,7 +146,12 @@ Vier Zonen, durch Linien in HA-Blau getrennt:
 | `0…320` / `160…240` | `ev_page` |
 | `0…160` / `80…160` | `energy_page` |
 | `160…320` / `80…160` | `bat_page` |
-| `280…320` / `0…40` | `main_page` (seitenübergreifend) |
+| `280…320` / `0…40` | `main_page` — nur auf `ev_page`, `bat_page` und `energy_page`, wo das Zurück-Symbol gezeichnet wird |
+
+> **Grundsatz:** Eine Berührungsfläche ist nur dann aktiv, wenn das zugehörige
+> Bedienelement in diesem Moment auch dargestellt wird. Wo die Seitenbindung
+> über `page_id` dafür nicht ausreicht, steht die Bedingung als `if` in der
+> `on_press`-Automatisierung.
 
 ### `ev_page` - Wallbox-Detail
 
@@ -162,7 +167,9 @@ aktive Modus ist gefüllt dargestellt:
 | `204…260` / `180…236` | Modus `NOW` |
 
 Ein aktiver Ladeplan wird links unten mit Uhrzeit und Ziel-SoC eingeblendet. Ist
-nichts angesteckt, zeigt die Seite nur `Nothing connected to wallbox`.
+nichts angesteckt, zeigt die Seite nur `Nothing connected to wallbox` — die drei
+Modusflächen sind dann **inaktiv**, ebenso solange noch keine Meldung zum
+Anschlusszustand vorliegt.
 
 **Touch-Sperre:** Der Sprung von der Übersicht auf `ev_page` erfolgt über eine
 Fläche, die den Modusflächen der Zielseite räumlich überlappt. Damit dieselbe
@@ -173,7 +180,13 @@ Modusflächen prüfen dieses Flag.
 ### `plan_setup_page` - Ladeplan setzen
 
 Drei Wertepaare mit Auf-/Ab-Flächen, jeweils als gedrückt/ungedrückt gezeichnete
-Bilder:
+Bilder von 60 × 60 px. Die Flächen liegen deckungsgleich darauf:
+
+| Fläche (x / y) | Wert |
+| :--- | :--- |
+| `40…100` / `40…100` bzw. `160…220` | Stunde, auf / ab |
+| `120…180` / `40…100` bzw. `160…220` | Minute, auf / ab |
+| `220…280` / `40…100` bzw. `160…220` | Ziel-SoC, auf / ab |
 
 | Wert | Schrittweite | Umlauf / Grenzen |
 | :--- | :---: | :--- |
@@ -252,6 +265,7 @@ aufgerufen wird.
 | **Display Backlight** | `light` (monochromatic) | Helligkeit der Hintergrundbeleuchtung, `restore_mode: ALWAYS_ON` |
 | **EVCC Schnellladen** | `switch` (template) | EIN spiegelt evcc-Modus `NOW`; Einschalten setzt `NOW`, Ausschalten `PV` |
 | **EVCC Planladung** | `switch` (template) | EIN spiegelt einen aktiven Ladeplan; Einschalten öffnet die Eingabeseite am Display, Ausschalten löscht den Plan |
+| **Touch Kalibrierlog** | `switch` (template, Kategorie *Konfiguration*) | Gibt bei jeder Berührung Bildschirm- und Rohkoordinaten ins Log aus. Für die Kalibrierung eines neuen Panels, siehe [HARDWARE.md](HARDWARE.md), Abschnitt 8. Nach einem Neustart immer aus |
 
 Dazu die Diagnose-Entitäten der Kategorien 2.x bis 6.x aus
 `common/diagnostics.yaml`. Die Heap-Grenzen sind für den ESP32 auf 80 kB (gut)
@@ -351,6 +365,55 @@ Netzwerkschnittstelle.
 `power_save_mode: none` ist gesetzt, damit die abonnierten Werte ohne
 Verzögerung ankommen - das kostet dauerhaft WLAN-Sendeleistung, bei einem
 netzgespeisten Wandgerät unkritisch.
+
+### Inbetriebnahme eines neuen Geräts
+
+Die Reihenfolge für einen Nachbau. Die Punkte 1, 3 und 6 sind die, an denen ein
+zweites Exemplar erfahrungsgemäss hängen bleibt.
+
+1. **Hardware herrichten.** Ohne die drei Umbauten am CYD läuft die
+   Konfiguration nicht — zwei der vier Tastersignale liegen am unveränderten
+   Board auf keinem Stecker. Ablauf und Fotos in
+   [HARDWARE.md](HARDWARE.md), Abschnitte 2 bis 5.
+
+2. **Secrets anlegen** in `~/esphome/secrets.yaml`: `frontroom_api_key`,
+   `frontroom_ota_key`, `frontroom_fallback_ap_ssid`,
+   `frontroom_fallback_ap_password`, `wifi_ssid`, `wifi_password` sowie für das
+   Diagnose-Paket `mac_bssid_ug`, `mac_bssid_eg` und `mac_bssid_dg`.
+
+3. **Entitäts-IDs anpassen.** Das Gerät importiert 28 Entitäten aus Home
+   Assistant, jede mit fest verdrahteter `entity_id` (`sensor.input_power`,
+   `select.evcc_mode`, `weather.egnach` …). In einer anderen Installation
+   heissen die anders. Die vollständige Liste steht in Abschnitt 5; ein
+   falscher Name fällt nicht beim Kompilieren auf, sondern erst als `---` auf
+   dem Display.
+
+4. **Erstflash über USB.** OTA setzt eine bereits laufende ESPHome-Firmware
+   voraus:
+
+   ```sh
+   cd ~/esphome
+   PLATFORMIO_CORE_DIR="$HOME/.platformio_esphome" \
+     ~/.local/bin/esphome run ha-frontroom-info-display.yaml
+   ```
+
+   Ab dem zweiten Mal genügt `upload … --device <ip>`.
+
+5. **In Home Assistant übernehmen.** Das Gerät meldet sich über mDNS; bei der
+   Einrichtung wird der `frontroom_api_key` abgefragt.
+
+6. **Touch kalibrieren**, falls die Flächen nicht sitzen — siehe
+   [HARDWARE.md](HARDWARE.md), Abschnitt 8. Bei einem anderen Panelexemplar ist
+   das der Regelfall, nicht die Ausnahme.
+
+7. **evcc-Anbindung prüfen.** Adresse, Loadpoint-Nummer und Fahrzeug-ID stehen
+   direkt in den Skripten der YAML (`homeassistant.local:7070`, Loadpoint `1`,
+   Fahrzeug `db:1`) und müssen zur eigenen Installation passen. Siehe
+   Abschnitt 4.
+
+8. **Ein bis zwei Minuten warten**, bevor die Diagnosewerte beurteilt werden.
+   WLAN- und Heap-Sensoren liefern ihren ersten Wert erst nach 60 s; bis dahin
+   stehen die Ampeln auf „⚪ Startet".
 
 ---
 
