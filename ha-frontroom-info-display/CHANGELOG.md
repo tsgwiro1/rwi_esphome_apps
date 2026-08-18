@@ -2,6 +2,35 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.1.1] - 2026-08-18
+
+### Behoben
+
+* **`nan` auf den Anzeigeseiten nach jedem Neustart.** Von 28 importierten
+  Home-Assistant-Entitäten waren vier mit `has_state()` abgesichert, alle auf
+  der Übersichtsseite. Ein ESPHome-Sensor startet mit `NAN`, bis der erste Wert
+  aus HA eintrifft — bis dahin stand auf der Wallbox-, Batterie- und
+  Energieseite überall `nan W` beziehungsweise `-nan %`. Jetzt zeigen alle
+  Seiten `---`, solange ein Wert fehlt.
+
+  Auf der Energieseite kam ein zweiter Effekt dazu: Netzbezug und
+  Batterieleistung laufen dort durch `min()` und `max()`, und die geben gegen
+  `NAN` den anderen Operanden zurück. Aus dem fehlenden Wert wurde damit
+  stillschweigend eine Null, und die als Restgrösse gerechnete Hausleistung war
+  entsprechend zu hoch. Beide Sensoren werden nun direkt geprüft.
+
+  Ebenfalls behoben: Ohne Fahrzeug-SoC bekam `filled_rectangle()` auf der
+  Wallbox-Seite `NAN` als Balkenbreite.
+
+* **Die Rückkehr-Fläche brach den Ladeplan nicht ab.** `button_return` war der
+  einzige Touch-Bereich ohne Seitenbindung und lag damit unsichtbar auch über
+  der Ladeplan-Seite, direkt neben dem SoC-Pfeil. Ein Tipper daneben sprang zur
+  Übersicht, während `plan_setup_timeout_timer` weiterlief und den Plan zehn
+  Sekunden später trotzdem an evcc schickte. Die Fläche ist jetzt auf die drei
+  Seiten beschränkt, die oben rechts auch ein Zurück-Symbol zeichnen.
+
+---
+
 ## [1.1.0] - 2026-08-17
 
 ### Geändert
