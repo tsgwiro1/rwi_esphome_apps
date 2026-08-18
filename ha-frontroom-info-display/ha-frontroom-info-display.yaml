@@ -14,7 +14,7 @@ esp32:
 
 # HIER überschreiben wir die Grenzen für den starken ESP32
 substitutions:
-  fw_version: "1.2.0"
+  fw_version: "1.2.1"
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
   diag_min_heap_critical: "40000" # 40kb ist kritisch
 
@@ -167,10 +167,10 @@ binary_sensor:
     id: raining
   - platform: homeassistant
     entity_id: binary_sensor.evcc_loadpoint_charging
-    id: grigio_charging
+    id: vehicle_charging
   - platform: homeassistant
     entity_id: binary_sensor.evcc_loadpoint_connected
-    id: grigio_connected
+    id: vehicle_connected
   - platform: homeassistant
     entity_id: binary_sensor.evcc_chargeplan_enabled
     id: evcc_chargeplan_enabled
@@ -298,8 +298,8 @@ binary_sensor:
             condition:
               - lambda: |-
                   return !id(touch_lock) &&
-                         id(grigio_connected).has_state() &&
-                         id(grigio_connected).state;
+                         id(vehicle_connected).has_state() &&
+                         id(vehicle_connected).state;
             then:
               - script.execute: set_mode_off
               - lambda: |-
@@ -317,8 +317,8 @@ binary_sensor:
             condition:
               - lambda: |-
                   return !id(touch_lock) &&
-                         id(grigio_connected).has_state() &&
-                         id(grigio_connected).state;
+                         id(vehicle_connected).has_state() &&
+                         id(vehicle_connected).state;
             then:
               - script.execute: set_mode_pv
               - lambda: |-
@@ -336,8 +336,8 @@ binary_sensor:
             condition:
               - lambda: |-
                   return !id(touch_lock) &&
-                         id(grigio_connected).has_state() &&
-                         id(grigio_connected).state;
+                         id(vehicle_connected).has_state() &&
+                         id(vehicle_connected).state;
             then:
               - script.execute: set_mode_now
               - lambda: |-
@@ -470,16 +470,16 @@ sensor:
               brightness: 50%
   - platform: homeassistant
     entity_id: sensor.input_power
-    id: solar_input
+    id: pv_power
   - platform: homeassistant
     entity_id: sensor.grid_active_power
-    id: solar_grid_power
+    id: grid_power
   - platform: homeassistant
     entity_id: sensor.battery_state_of_capacity
-    id: solar_battery_soc
+    id: battery_soc
   - platform: homeassistant
     entity_id: sensor.charge_discharge_power
-    id: solar_battery_power
+    id: battery_power
   - platform: homeassistant
     entity_id: sensor.outdoor_temperature
     id: outside_temperature
@@ -488,10 +488,10 @@ sensor:
     id: rain_freq
   - platform: homeassistant
     entity_id: sensor.evcc_vehicle_soc
-    id: grigio_soc
+    id: vehicle_soc
   - platform: homeassistant
     entity_id: sensor.evcc_vehicle_range
-    id: grigio_range
+    id: vehicle_range
   - platform: homeassistant
     entity_id: sensor.evcc_charge_power_w
     id: wallbox_charge_power
@@ -499,32 +499,23 @@ sensor:
     entity_id: sensor.evcc_charge_current
     id: wallbox_charge_current
   - platform: homeassistant
-    entity_id: sensor.home_power
-    id: home_power
-  - platform: homeassistant
-    entity_id: sensor.temperature_living_room
-    id: temperature_living_room
-  - platform: homeassistant
-    entity_id: sensor.humidity_living_room
-    id: humidity_living_room
-  - platform: homeassistant
     entity_id: sensor.evcc_vehicle_target_soc
-    id: grigio_target_soc
+    id: vehicle_target_soc
   - platform: homeassistant
     entity_id: sensor.evcc_charge_30d_solar_percentage
     id: evcc_charge_30d_solar_percentage
   - platform: homeassistant
     entity_id: sensor.heizstab
-    id: heizstab_power
+    id: heater_power
   - platform: homeassistant
     entity_id: sensor.wp_zwe2_controller_output_power
-    id: heizstab_power_percent
+    id: heater_percent
   - platform: homeassistant
     entity_id: sensor.total_wp
-    id: wp_electric_power
+    id: heatpump_power_electric
   - platform: homeassistant
     entity_id: sensor.wp_warmeleistung
-    id: wp_heat_power
+    id: heatpump_power_heat
   - platform: homeassistant
     entity_id: sensor.evcc_chargeplan_soc
     id: evcc_charge_plan_soc
@@ -843,7 +834,7 @@ graph:
     max_value: 100.0
     min_value: 0.1
     traces:
-      - sensor: solar_battery_soc
+      - sensor: battery_soc
         color: GREEN
         line_type: SOLID
         continuous: true
@@ -978,51 +969,51 @@ display:
               it.printf(240,38,id(lato20), WHITE,"---");
           }
           //** SOLAR *********************************
-          if (id(solar_input).has_state()) {
-            it.printf(65, 91, id(lato20), WHITE, "%.0f W", id(solar_input).state);
-            if (!id(solar_grid_power).has_state()) {
+          if (id(pv_power).has_state()) {
+            it.printf(65, 91, id(lato20), WHITE, "%.0f W", id(pv_power).state);
+            if (!id(grid_power).has_state()) {
               it.printf(65, 126, id(lato20), WHITE, "---");
-            } else if (id(solar_grid_power).state > 0) {
-              it.printf(65, 126, id(lato20), LIGHTGREEN, "%.0f W", id(solar_grid_power).state);
-            } else if (id(solar_grid_power).state < 0) {
-              it.printf(65, 126, id(lato20), LIGHTRED, "%.0f W", abs(id(solar_grid_power).state));
+            } else if (id(grid_power).state > 0) {
+              it.printf(65, 126, id(lato20), LIGHTGREEN, "%.0f W", id(grid_power).state);
+            } else if (id(grid_power).state < 0) {
+              it.printf(65, 126, id(lato20), LIGHTRED, "%.0f W", abs(id(grid_power).state));
             } else {
-              it.printf(65, 126, id(lato20), WHITE, "%.0f W", id(solar_grid_power).state);
+              it.printf(65, 126, id(lato20), WHITE, "%.0f W", id(grid_power).state);
             }
           } else {
             it.printf(85, 113, id(lato14), WHITE, "---");
           }
           //** BATTERY *******************************
-          if (id(solar_battery_soc).has_state()) {
-              if (id(solar_battery_soc).state >= 80) it.image(170, 85, id(b100_icon));
-              else if (id(solar_battery_soc).state >= 60) it.image(170, 85, id(b80_icon));
-              else if (id(solar_battery_soc).state >= 40) it.image(170, 85, id(b60_icon));
-              else if (id(solar_battery_soc).state >= 20) it.image(170, 85, id(b40_icon));
+          if (id(battery_soc).has_state()) {
+              if (id(battery_soc).state >= 80) it.image(170, 85, id(b100_icon));
+              else if (id(battery_soc).state >= 60) it.image(170, 85, id(b80_icon));
+              else if (id(battery_soc).state >= 40) it.image(170, 85, id(b60_icon));
+              else if (id(battery_soc).state >= 20) it.image(170, 85, id(b40_icon));
               else it.image(170, 85, id(b20_icon));
-              it.printf(230, 94, id(lato20), WHITE, "%5.0f %%", id(solar_battery_soc).state);
-              if (!id(solar_battery_power).has_state()) {
+              it.printf(230, 94, id(lato20), WHITE, "%5.0f %%", id(battery_soc).state);
+              if (!id(battery_power).has_state()) {
                 it.printf(230, 126, id(lato20), WHITE, "  ---");
-              } else if (id(solar_battery_power).state > 0) {
-                it.printf(230, 126, id(lato20), LIGHTGREEN, "%5.0f W", id(solar_battery_power).state);
-              } else if (id(solar_battery_power).state < 0) {
-                it.printf(230, 126, id(lato20), LIGHTRED, "%5.0f W", abs(id(solar_battery_power).state));
+              } else if (id(battery_power).state > 0) {
+                it.printf(230, 126, id(lato20), LIGHTGREEN, "%5.0f W", id(battery_power).state);
+              } else if (id(battery_power).state < 0) {
+                it.printf(230, 126, id(lato20), LIGHTRED, "%5.0f W", abs(id(battery_power).state));
               } else {
-                it.printf(230, 126, id(lato20), WHITE, "%5.0f W", id(solar_battery_power).state);
+                it.printf(230, 126, id(lato20), WHITE, "%5.0f W", id(battery_power).state);
               }
           } else {
             it.printf(230, 113, id(lato14), WHITE, "---");
           }
           //** EV CHARGER ***************************
-          if (id(grigio_connected).has_state()) {
-            if (id(grigio_connected).state == true) {
-              if (id(grigio_charging).state == true) {
+          if (id(vehicle_connected).has_state()) {
+            if (id(vehicle_connected).state == true) {
+              if (id(vehicle_charging).state == true) {
                 it.printf(90, 170, id(lato30), WHITE, "CHARGING");
-                if (id(wallbox_charge_power).has_state() && id(grigio_soc).has_state() && id(grigio_range).has_state()) {
-                  it.printf(90, 210, id(lato20), WHITE, "%.0f W / %.0f %% (%.0f km)", id(wallbox_charge_power).state, id(grigio_soc).state, id(grigio_range).state);
+                if (id(wallbox_charge_power).has_state() && id(vehicle_soc).has_state() && id(vehicle_range).has_state()) {
+                  it.printf(90, 210, id(lato20), WHITE, "%.0f W / %.0f %% (%.0f km)", id(wallbox_charge_power).state, id(vehicle_soc).state, id(vehicle_range).state);
                 }
               } else {
-                if (id(grigio_soc).state >= id(grigio_target_soc).state) {
-                  it.printf(90, 185, id(lato30), WHITE, "DONE  -  %.0f %%", id(grigio_soc).state);
+                if (id(vehicle_soc).state >= id(vehicle_target_soc).state) {
+                  it.printf(90, 185, id(lato30), WHITE, "DONE  -  %.0f %%", id(vehicle_soc).state);
                 } else {
                   if (id(evcc_chargeplan_enabled).state) {
                     it.printf(195, 172, id(lato24), WHITE, BLACK,TextAlign::TOP_CENTER, "READY");
@@ -1063,19 +1054,19 @@ display:
             if (id(evcc_charge_plan_soc).has_state()) {
               it.printf(28,163,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0f%%", id(evcc_charge_plan_soc).state);
             }
-            if (id(grigio_connected).state && !id(grigio_charging).state) {
+            if (id(vehicle_connected).state && !id(vehicle_charging).state) {
               it.printf(160,130,id(lato20),WHITE, BLACK,TextAlign::TOP_CENTER, "Plan active");
             }
           }
-          if (!id(grigio_connected).has_state()) {
+          if (!id(vehicle_connected).has_state()) {
             // Noch keine Meldung aus HA - weder "verbunden" noch "nichts
             // angeschlossen" waere hier belegt.
             it.printf(160, 120, id(lato30), WHITE, BLACK, TextAlign::TOP_CENTER, "---");
-          } else if (id(grigio_connected).state) {
-            if (id(grigio_charging).state) {
+          } else if (id(vehicle_connected).state) {
+            if (id(vehicle_charging).state) {
               it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charging");
             } else {
-              if (id(grigio_soc).state >= id(grigio_target_soc).state) {
+              if (id(vehicle_soc).state >= id(vehicle_target_soc).state) {
                 it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charge done");
               } else {
                 it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charger ready");
@@ -1085,13 +1076,13 @@ display:
             it.printf(2,79,id(lato20), WHITE, BLACK, TextAlign::TOP_LEFT, "SoC");
             it.printf(50,102,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "0%%"); it.printf(300,102,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "100%%");
             float ch = 0;
-            if (id(grigio_soc).has_state()) {
-              ch = 2.5 * id(grigio_soc).state;
+            if (id(vehicle_soc).has_state()) {
+              ch = 2.5 * id(vehicle_soc).state;
               it.filled_rectangle(50,80,ch,20,GREEN); it.filled_rectangle(50+ch,80,250-ch,20,HA_BLUE);
-              if (id(grigio_range).has_state()) {
-                it.printf(160,78,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "%.0f %% (%.0f km)", id(grigio_soc).state, id(grigio_range).state);
+              if (id(vehicle_range).has_state()) {
+                it.printf(160,78,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "%.0f %% (%.0f km)", id(vehicle_soc).state, id(vehicle_range).state);
               } else {
-                it.printf(160,78,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "%.0f %%", id(grigio_soc).state);
+                it.printf(160,78,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "%.0f %%", id(vehicle_soc).state);
               }
             } else {
               // Ohne SoC keine Balkenlaenge: filled_rectangle() bekaeme NAN
@@ -1100,7 +1091,7 @@ display:
               it.printf(160,78,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "---");
             }
             // **** Power ****
-            if (id(grigio_charging).state && id(wallbox_charge_power).has_state()) {
+            if (id(vehicle_charging).state && id(wallbox_charge_power).has_state()) {
               it.printf(2,139,id(lato20), WHITE, BLACK, TextAlign::TOP_LEFT, "Pow");
               it.printf(50,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "0kW"); it.printf(300,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "11kW");
               ch =  min (250.0, 0.023 * id(wallbox_charge_power).state);
@@ -1151,20 +1142,20 @@ display:
           it.image(280, 0, id(back_icon));
           it.image(20, 70, id(batt_icon));
           it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Home Battery");
-          if (id(solar_battery_soc).has_state()) {
-            it.printf(80,72,id(lato24), WHITE, BLACK, TextAlign::TOP_LEFT, "%5.0f %%", id(solar_battery_soc).state);
+          if (id(battery_soc).has_state()) {
+            it.printf(80,72,id(lato24), WHITE, BLACK, TextAlign::TOP_LEFT, "%5.0f %%", id(battery_soc).state);
           } else {
             it.printf(80,72,id(lato24), WHITE, BLACK, TextAlign::TOP_LEFT, "  ---");
           }
           it.image(170, 70, id(elect_icon));
-          if (!id(solar_battery_power).has_state()) {
+          if (!id(battery_power).has_state()) {
             it.printf(223, 72, id(lato24), WHITE, "---");
-          } else if (id(solar_battery_power).state > 0) {
-            it.printf(223, 72, id(lato24), LIGHTGREEN, "%.0f W", id(solar_battery_power).state);
-          } else if (id(solar_battery_power).state < 0) {
-            it.printf(223, 72, id(lato24), LIGHTRED, "%.0f W", abs(id(solar_battery_power).state));
+          } else if (id(battery_power).state > 0) {
+            it.printf(223, 72, id(lato24), LIGHTGREEN, "%.0f W", id(battery_power).state);
+          } else if (id(battery_power).state < 0) {
+            it.printf(223, 72, id(lato24), LIGHTRED, "%.0f W", abs(id(battery_power).state));
           } else {
-            it.printf(223, 72, id(lato24), WHITE, "%.0f W", id(solar_battery_power).state);
+            it.printf(223, 72, id(lato24), WHITE, "%.0f W", id(battery_power).state);
           }
           it.graph(10, 130, id(home_bat_graph));
       - id: energy_page
@@ -1178,8 +1169,8 @@ display:
           // "---" statt "nan". Bei Netz und Batterie geht das nicht:
           // min()/max() liefern gegen NAN die 0 zurueck und machen aus dem
           // fehlenden Wert stillschweigend eine Null.
-          bool ok_grid = id(solar_grid_power).has_state();
-          bool ok_bat = id(solar_battery_power).has_state();
+          bool ok_grid = id(grid_power).has_state();
+          bool ok_bat = id(battery_power).has_state();
           auto num = [&](int x, int y, Color col, TextAlign align, float v, const char *unit) {
             if (std::isnan(v)) {
               it.printf(x, y, id(lato14), col, BLACK, align, "---");
@@ -1187,23 +1178,23 @@ display:
               it.printf(x, y, id(lato14), col, BLACK, align, "%.0f %s", v, unit);
             }
           };
-          auto p_I_Solar = id(solar_input).state;
-          auto p_I_Bat = abs(min((float)0.0, id(solar_battery_power).state));
-          auto p_I_Grid = abs(min((float)0.0, id(solar_grid_power).state));
+          auto p_I_Solar = id(pv_power).state;
+          auto p_I_Bat = abs(min((float)0.0, id(battery_power).state));
+          auto p_I_Grid = abs(min((float)0.0, id(grid_power).state));
           auto p_I_Total = p_I_Solar + p_I_Grid + p_I_Bat;
-          auto p_O_Grid = max((float)0.0, id(solar_grid_power).state);
-          auto p_O_Bat = max((float)0.0, id(solar_battery_power).state);
+          auto p_O_Grid = max((float)0.0, id(grid_power).state);
+          auto p_O_Bat = max((float)0.0, id(battery_power).state);
           auto p_O_EV = id(wallbox_charge_power).state;
-          auto p_O_Heater = id(heizstab_power).state;
-          auto p_O_WP = id(wp_electric_power).state;
+          auto p_O_Heater = id(heater_power).state;
+          auto p_O_WP = id(heatpump_power_electric).state;
           auto p_O_House = (ok_grid && ok_bat)
               ? p_I_Total - p_O_Grid - p_O_Bat - p_O_EV - p_O_Heater - p_O_WP
               : (float) NAN;
           // **** Aux Power and Values ****
-          auto p_WP_Heat = id(wp_heat_power).state;
-          auto p_percent_heater = id(heizstab_power_percent).state;
-          auto soc_Battery = id(solar_battery_soc).state;
-          auto soc_EV = id(grigio_soc).state;
+          auto p_WP_Heat = id(heatpump_power_heat).state;
+          auto p_percent_heater = id(heater_percent).state;
+          auto soc_Battery = id(battery_soc).state;
+          auto soc_vehicle = id(vehicle_soc).state;
           // **** Energy Flow ****
           if (id(arr_anim) > 5) {
             id(arr_anim) = 0;
@@ -1214,28 +1205,28 @@ display:
           it.image(153 + id(arr_anim) * 4,130, id(arrow_r_icon));
           it.image(177 + id(arr_anim) * 4,130, id(arrow_r_icon));
           // ** Energy flow to / from grid **
-          if (id(solar_grid_power).state > 0) {
+          if (id(grid_power).state > 0) {
             if (id(arr_anim) < 3) it.image(46 - id(arr_anim) * 4,130, id(arrow_l_icon));  // ** push energy to the grid **
             it.image(70 - id(arr_anim) * 4,130, id(arrow_l_icon));  // ** push energy to the grid **
             it.image(94 - id(arr_anim) * 4,130, id(arrow_l_icon));  // ** push energy to the grid **
-          } else if (id(solar_grid_power).state < 0) {
+          } else if (id(grid_power).state < 0) {
             if (id(arr_anim) > 3) it.image(22 + id(arr_anim) * 4,130, id(arrow_r_icon));  // ** get energy from grid **
             it.image(46 + id(arr_anim) * 4,130, id(arrow_r_icon));  // ** get energy from grid **
             it.image(70 + id(arr_anim) * 4,130, id(arrow_r_icon));  // ** get energy from grid **
             if (id(arr_anim) < 3) it.image(94 + id(arr_anim) * 4,130, id(arrow_r_icon));  // ** get energy from grid **
           }
           // ** Energy flow from solar **
-          if (id(solar_input).state > 0) {
+          if (id(pv_power).state > 0) {
             if (id(arr_anim) > 0) it.image(103,76 + id(arr_anim) * 4, id(arrow_d_icon));
             it.image(103,100 + id(arr_anim) * 4, id(arrow_d_icon));
             if (id(arr_anim) < 2) it.image(103,124 + id(arr_anim) * 4, id(arrow_d_icon));
           }
           // ** Energy flow to / from battery **
-          if (id(solar_battery_power).state > 0) {
+          if (id(battery_power).state > 0) {
             if (id(arr_anim) > 3) it.image(103,117 + id(arr_anim) * 4, id(arrow_d_icon)); // ** charge battery **
             it.image(103,141 + id(arr_anim) * 4, id(arrow_d_icon)); // ** charge battery **
             it.image(103,165 + id(arr_anim) * 4, id(arrow_d_icon)); // ** charge battery **
-          } else if (id(solar_battery_power).state < 0) {
+          } else if (id(battery_power).state < 0) {
             if (id(arr_anim) < 3) it.image(103,141 - id(arr_anim) * 4, id(arrow_u_icon)); // ** discharge battery **
             it.image(103,165 - id(arr_anim) * 4, id(arrow_u_icon)); // ** discharge battery **
             if (id(arr_anim) > 0) it.image(103,189 - id(arr_anim) * 4, id(arrow_u_icon)); // ** discharge battery **
@@ -1246,12 +1237,12 @@ display:
           // **** Energy Distribution ****
           auto c = WHITE;
           it.image(10,115, id(powerline_icon));
-          c = !ok_grid ? WHITE : (id(solar_grid_power).state > 0 ? LIGHTGREEN : LIGHTRED);
+          c = !ok_grid ? WHITE : (id(grid_power).state > 0 ? LIGHTGREEN : LIGHTRED);
           num(33, 164, c, TextAlign::TOP_CENTER, ok_grid ? p_I_Grid + p_O_Grid : (float) NAN, "W");
           it.image(92,50, id(solarpanel_icon));
           if (p_I_Solar > 0) it.printf(85,65,id(lato14), WHITE, BLACK, TextAlign::TOP_RIGHT, "%.0f W", p_I_Solar);
           it.image(190,65, id(wallbox_small_icon));
-          if (soc_EV > 0) it.printf(210,63,id(lato14), WHITE, BLACK, TextAlign::BOTTOM_CENTER, "%.0f %%", soc_EV);
+          if (soc_vehicle > 0) it.printf(210,63,id(lato14), WHITE, BLACK, TextAlign::BOTTOM_CENTER, "%.0f %%", soc_vehicle);
           if (p_O_EV > 0) it.printf(210,107,id(lato14), WHITE, BLACK, TextAlign::TOP_CENTER, "%.0f W", p_O_EV);
           it.image(265,85, id(airconditioning_icon));
           num(285, 83, YELLOW, TextAlign::BOTTOM_CENTER, p_WP_Heat, "W");
@@ -1266,5 +1257,5 @@ display:
           // optische Mitte nach rechts, der Pol sitzt entsprechend links davon.
           it.image(98,189, id(batteryhor_icon));
           num(85, 190, WHITE, TextAlign::TOP_RIGHT, soc_Battery, "%");
-          c = id(solar_battery_power).state > 0 ? LIGHTGREEN : LIGHTRED;
+          c = id(battery_power).state > 0 ? LIGHTGREEN : LIGHTRED;
           if (ok_bat && p_I_Bat + p_O_Bat > 0) it.printf(85,210,id(lato14), c, BLACK, TextAlign::TOP_RIGHT, "%.0f W", p_I_Bat + p_O_Bat);

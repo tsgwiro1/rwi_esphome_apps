@@ -2,6 +2,48 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.2.1] - 2026-08-18
+
+### Entfernt
+
+* **Drei nie gelesene Abonnements.** `sensor.home_power`,
+  `sensor.temperature_living_room` und `sensor.humidity_living_room` wurden aus
+  Home Assistant importiert, aber in keinem Lambda verwendet. Jedes kostete ein
+  Abonnement und liess jede Zustandsänderung über den Event-Bus ans Gerät
+  schicken, ohne dass irgendwo etwas davon zu sehen war. Damit sinkt die Zahl
+  der abonnierten Entitäten von 27 auf 24.
+
+  Nebenbei korrigiert: README und CHANGELOG sprachen bisher von 28 Entitäten,
+  tatsächlich waren es 27.
+
+### Geändert
+
+* **Sprechende IDs statt Eigennamen und Abkürzungen.** Die internen Bezeichner
+  hiessen teils nach dem Fahrzeug des Autors, teils nach deutschen
+  Anlagenbegriffen. Für einen Nachbau ist beides nichtssagend:
+
+  | vorher | nachher |
+  | :--- | :--- |
+  | `grigio_connected`, `grigio_charging`, `grigio_soc`, `grigio_range`, `grigio_target_soc` | `vehicle_*` |
+  | `solar_input` | `pv_power` |
+  | `solar_grid_power` | `grid_power` |
+  | `solar_battery_soc`, `solar_battery_power` | `battery_soc`, `battery_power` |
+  | `heizstab_power`, `heizstab_power_percent` | `heater_power`, `heater_percent` |
+  | `wp_electric_power`, `wp_heat_power` | `heatpump_power_electric`, `heatpump_power_heat` |
+
+  Zusammen 92 Fundstellen. Alle betroffenen Objekte sind geräteintern; in Home
+  Assistant ändert sich dadurch nichts.
+
+### Dokumentation
+
+* **Abschnitt 8 der README aufgeräumt.** Vier Einträge beschrieben Punkte, die
+  in V1.1.1 und V1.2.0 behoben wurden: der dauerhaft aktive Kalibrierlogger,
+  die Schreibfehler in den LED-IDs, die drei ungenutzten Abonnements und die
+  Rückkehrfläche, die den Ladeplan-Timer weiterlaufen liess. Der Punkt zum
+  fehlenden Abbrechen bleibt bestehen, ist aber auf den heutigen Stand gebracht.
+
+---
+
 ## [1.2.0] - 2026-08-18
 
 ### Hinzugefügt

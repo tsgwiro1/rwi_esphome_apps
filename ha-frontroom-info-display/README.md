@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue)
+![Version](https://img.shields.io/badge/version-1.2.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -282,7 +282,7 @@ beiden Status-LEDs - sie sind als `internal: true` deklariert.
 
 ### Vom Gerät konsumiert
 
-Das Display abonniert 28 Entitäten aus Home Assistant.
+Das Display abonniert 24 Entitäten aus Home Assistant.
 
 **Binärsensoren:** `binary_sensor.raining`,
 `binary_sensor.evcc_loadpoint_charging`, `binary_sensor.evcc_loadpoint_connected`,
@@ -301,10 +301,6 @@ Das Display abonniert 28 Entitäten aus Home Assistant.
 | Fahrzeug | `sensor.evcc_vehicle_soc`, `sensor.evcc_vehicle_range`, `sensor.evcc_vehicle_target_soc` |
 | Wallbox | `sensor.evcc_charge_power_w`, `sensor.evcc_charge_current`, `sensor.evcc_charge_30d_solar_percentage`, `sensor.evcc_chargeplan_soc` |
 | Wärmepumpe & Heizstab | `sensor.total_wp`, `sensor.wp_warmeleistung`, `sensor.heizstab`, `sensor.wp_zwe2_controller_output_power` |
-| Ungenutzt | `sensor.home_power`, `sensor.temperature_living_room`, `sensor.humidity_living_room` |
-
-Die drei letztgenannten werden abonniert, aber in keiner Anzeige verwendet -
-siehe Abschnitt 8.
 
 Ein `time`-Sensor der Plattform `homeassistant` liefert die Zeitbasis für den
 Ladeplan. Ohne HA-Verbindung ist damit auch das Setzen eines Plans nicht
@@ -426,7 +422,7 @@ Abonnent im Haus.
   Lambdas) und dem Backlight-Light publiziert das Gerät nichts Eigenes. Der
   LDR-Sensor tastet alle 2 s ab, ist aber `internal` und erzeugt keinen
   Netzwerkverkehr. Den Hauptanteil stellt `common/diagnostics.yaml`.
-* **Empfangen:** 28 Abonnements bedeuten, dass jede Zustandsänderung dieser
+* **Empfangen:** 24 Abonnements bedeuten, dass jede Zustandsänderung dieser
   Entitäten an das Display geschickt wird. Das ist Last auf dem Event-Bus und
   im Netzwerk, nicht in der Datenbank - und sie entsteht auf der HA-Seite
   ohnehin, unabhängig davon, ob das Display zuhört.
@@ -459,25 +455,14 @@ Dauerbelastung des NVS entsteht daraus nicht.
   und eine künftige Änderung der Sommerzeitregelung müsste hier nachgezogen
   werden. Saubere Lösung wäre ein `time`-Sensor mit gesetzter `timezone` und
   `mktime`, statt der Handrechnung.
-* **Drei ungenutzte Abonnements:** `sensor.home_power`,
-  `sensor.temperature_living_room` und `sensor.humidity_living_room` werden
-  importiert, aber in keinem Lambda gelesen. Entweder sollen sie noch angezeigt
-  werden, oder sie können entfallen. Beim Hausverbrauch ist zu beachten, dass
-  das Energiebild den Wert bewusst selbst als Restgrösse rechnet - ein Vergleich
-  der beiden Zahlen wäre eine gute Plausibilitätsprüfung.
 * **Keine Rückmeldung bei fehlgeschlagenen evcc-Aufrufen.** Weder Display noch
   Home Assistant zeigen an, dass eine Modusumschaltung oder ein Ladeplan nicht
   angekommen ist (siehe Abschnitt 4).
 * **Ladeplan ohne Abbrechen.** Die Eingabeseite sendet nach zehn Sekunden ohne
-  Berührung immer. Es gibt keinen Weg, die Seite zu verlassen, ohne einen Plan
-  zu setzen - die Rückkehrfläche oben rechts wechselt zwar die Seite, der Timer
-  läuft aber weiter und feuert trotzdem.
-* **`on_touch`-Kalibrierlogger dauerhaft aktiv.** Jede Berührung schreibt eine
-  `ESP_LOGI`-Zeile mit Roh- und Zielkoordinaten. Nützlich beim Einrichten, im
-  Betrieb unnötig.
-* **Schreibfehler `now_indiactor` / `plan_indiactor`** in den beiden LED-IDs.
-  Beide sind `internal: true`, eine Korrektur hat daher keine Auswirkung auf
-  Home Assistant und ist reine Kosmetik.
+  Berührung immer. Es gibt keinen Weg, die Seite bewusst zu verlassen, ohne
+  einen Plan zu setzen. Seit V1.1.1 ist wenigstens die Rückkehrfläche dort
+  inaktiv - vorher wechselte sie die Seite, während der Timer weiterlief und
+  den Plan trotzdem abschickte.
 * **`logger` unterdrückt Komponentenwarnungen** (`component: ERROR`). Das
   blendet unter anderem die Warnungen über zu lange Lambda-Laufzeiten aus - bei
   fünf Seiten mit umfangreichen Zeichenroutinen genau die Meldung, die man
