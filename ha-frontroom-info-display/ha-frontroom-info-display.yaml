@@ -13,7 +13,9 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.3.0"
+  fw_version: "1.3.1"
+  device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
+                                     # Zeitzone des bauenden Rechners
 
 # ---- evcc: Steuerung ueber REST ----------------------------
   evcc_url: "http://homeassistant.local:7070"
@@ -153,17 +155,21 @@ script:
       - http_request.send:
           method: POST
           url: !lambda |-
-            auto ts_local = id(esptime).now().timestamp;
-            auto local_timediff = 60 * 60;
-            if (id(esptime).now().is_dst) { local_timediff += 60 * 60; }
-            auto today = id(esptime).now().hour * 60 * 60 + id(esptime).now().minute * 60 + id(esptime).now().second;
-            auto plan = id(plan_time_hour) * 60 * 60 + id(plan_time_minute) * 60;
-            auto day_adjust = 86400;
-            if (plan > today) { day_adjust = 0; }
-            auto ts = ts_local + day_adjust - today - local_timediff + plan;
-            auto t = localtime(&ts);
+            // now().timestamp ist die UTC-Epoche, hour/minute/second sind
+            // Ortszeit. Die Differenz ist die Epoche der letzten Mitternacht
+            // vor Ort - ohne jede Annahme ueber die Zeitzone. Liegt die
+            // eingestellte Uhrzeit heute schon hinter uns, gilt sie fuer morgen.
+            auto t_now = id(esptime).now();
+            int32_t today = t_now.hour * 3600 + t_now.minute * 60 + t_now.second;
+            int32_t plan = id(plan_time_hour) * 3600 + id(plan_time_minute) * 60;
+            time_t ts = t_now.timestamp - today + plan + (plan > today ? 0 : 86400);
+            // Faellt eine Zeitumstellung zwischen diese Mitternacht und die
+            // geplante Uhrzeit, liegt das Ergebnis eine Stunde daneben.
+            auto check = ESPTime::from_epoch_local(ts);
+            int32_t drift = check.hour * 3600 + check.minute * 60 - plan;
+            if (drift >= -7200 && drift <= 7200) { ts -= drift; }
             char tstr[21];
-            strftime(tstr, sizeof(tstr), "%Y-%m-%dT%H:%M:%SZ", t);
+            ESPTime::from_epoch_utc(ts).strftime(tstr, sizeof(tstr), "%Y-%m-%dT%H:%M:%SZ");
             char soc[4];
             snprintf(soc, sizeof(soc), "%d", id(plan_soc));
             return ((std::string) "${evcc_url}/api/vehicles/${evcc_vehicle}/plan/soc/" + soc + "/" + tstr);
@@ -663,6 +669,7 @@ switch:
 time:
   - platform: homeassistant
     id: esptime
+    timezone: ${device_timezone}
 
 
 # ============================================================ 

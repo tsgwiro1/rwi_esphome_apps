@@ -2,6 +2,41 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.3.1] - 2026-08-18
+
+### Behoben
+
+* **Zeitzone war nicht festgelegt.** Das `time`-Bauteil hatte kein `timezone:`.
+  ESPHome ermittelt in diesem Fall die Zeitzone des **bauenden Rechners**
+  (`tzlocal.get_localzone_name()`) und schreibt sie fest in die Firmware. Auf
+  Rogers Rechner ergab das `Europe/Zurich` und damit das Richtige — ein Build
+  anderswo hätte dem Gerät stillschweigend eine fremde Ortszeit gegeben, und
+  der Ladeplan wäre entsprechend verschoben bei evcc angekommen. Jetzt steht
+  die Zeitzone als `device_timezone` im Substitutionsblock.
+
+  Der erzeugte Zeitzonenblock ist dadurch unverändert: `Europe/Zurich` liefert
+  genau die Struktur, die bisher erraten wurde.
+
+* **Ladeplan-Zeitstempel an den beiden Umstellungsnächten falsch.** Das Lambda
+  rechnete mit einem fest verdrahteten Basisversatz von einer Stunde plus
+  `is_dst` und gab das Ergebnis über `localtime()` mit angehängtem `Z` aus —
+  zwei Fehler, die sich im Normalbetrieb gegenseitig aufhoben. In der Nacht der
+  Zeitumstellung nicht:
+
+  | Fall | Soll | vorher |
+  | :--- | :--- | :--- |
+  | Nacht der Vorstellung, Plan 03:30 | `2026-03-29T01:30:00Z` | `03:30:00Z` |
+  | Nacht der Rückstellung, Plan 03:30 | `2026-10-25T02:30:00Z` | `01:30:00Z` |
+
+  Die Rechnung geht jetzt über `now().timestamp` (UTC) abzüglich der
+  Ortszeit-Sekunden seit Mitternacht. Das ergibt die Epoche der lokalen
+  Mitternacht ohne jede Annahme über die Zeitzone. Ein Gegencheck mit
+  `ESPTime::from_epoch_local()` fängt den Fall ab, dass eine Umstellung
+  zwischen Mitternacht und die geplante Uhrzeit fällt. `local_timediff`,
+  `is_dst` und `localtime()` sind damit weg.
+
+---
+
 ## [1.3.0] - 2026-08-18
 
 ### Hinzugefügt

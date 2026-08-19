@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.3.0-blue)
+![Version](https://img.shields.io/badge/version-1.3.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -243,11 +243,15 @@ Skripte decken die Funktionen ab:
 | `delete_plan_request` | `DELETE /api/vehicles/${evcc_vehicle}/plan/soc` |
 
 **Zeitstempel des Ladeplans:** Aus Stunde, Minute und der aktuellen Zeit von
-Home Assistant wird im Lambda ein ISO-8601-Zeitstempel gebildet. Liegt die
-eingestellte Uhrzeit noch in der Zukunft, gilt sie für heute, sonst für morgen.
-Die Umrechnung in UTC nutzt einen **fest verdrahteten Basisversatz von einer
-Stunde** und addiert bei `is_dst` eine weitere - gültig also nur für
-Mitteleuropa (CET/CEST), siehe Abschnitt 8.
+Home Assistant wird im Lambda ein ISO-8601-Zeitstempel in UTC gebildet. Liegt
+die eingestellte Uhrzeit noch in der Zukunft, gilt sie für heute, sonst für
+morgen. Die Rechnung geht über `now().timestamp` (UTC) abzüglich der
+Ortszeit-Sekunden seit Mitternacht und macht damit keine Annahme über die
+Zeitzone; fällt eine Zeitumstellung dazwischen, korrigiert ein Gegencheck mit
+`ESPTime::from_epoch_local()` die Stunde.
+
+Voraussetzung ist ein gesetztes `timezone:` — siehe `device_timezone` in
+Abschnitt 6.
 
 **Keine Fehlerbehandlung:** Die Skripte werten die HTTP-Antwort nicht aus. Ist
 evcc nicht erreichbar, bleibt die Anzeige unverändert und es gibt keinen
@@ -317,7 +321,8 @@ verdrahtet.
 | :--- | :--- | :--- |
 | `device_name` | `ha-frontroom-info-display` | `name` und `friendly_name`, zugleich der mDNS-Name |
 | `project_name` | `tsgwiro1.ha-frontroom-info-display` | `project:`-Block |
-| `fw_version` | `1.3.0` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
+| `fw_version` | `1.3.1` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
+| `device_timezone` | `Europe/Zurich` | IANA-Name oder POSIX-TZ-Zeichenkette. **Ohne Angabe nimmt ESPHome die Zeitzone des bauenden Rechners** — der Ladeplan ginge dann mit einer fremden Ortszeit an evcc |
 
 **evcc**
 
