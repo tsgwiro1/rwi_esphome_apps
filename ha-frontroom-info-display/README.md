@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.3.1-blue)
+![Version](https://img.shields.io/badge/version-1.3.2-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -67,7 +67,12 @@ verzichten.
   dieselben Skripte aus. Die Taster und der HA-Schalter kennen nur `NOW` und
   `PV`, die Touchflächen zusätzlich `OFF` — und sie sind nur wirksam, wenn ein
   Fahrzeug angesteckt ist. Der **Ladeplan** hat zwei Wege: Hardware-Taster
-  «Ladeplan» und Template-Schalter.
+  «Ladeplan» und Template-Schalter. Beide öffnen die Eingabeseite nur, wenn
+  evcc ein angestecktes Fahrzeug meldet; **löschen** lässt sich ein Plan immer.
+* **Das Gerät zeigt, was evcc meldet.** Die beiden Tasten-LEDs werden nicht
+  lokal geschaltet, sondern im Sekundentakt gegen `${ent_plan_enabled}` und
+  `${ent_evcc_mode}` abgeglichen. Ein lokaler Eingriff kann damit nicht stehen
+  bleiben, und eine verpasste Meldung heilt von selbst.
 * **Lokale Helligkeitsregelung.** Ein LDR am ADC steuert die
   Hintergrundbeleuchtung in zwei Stufen, unabhängig von Home Assistant.
 
@@ -156,7 +161,10 @@ Vier Zonen, durch Linien in HA-Blau getrennt:
 
 ### `ev_page` - Wallbox-Detail
 
-Kopfzeile je nach Zustand `Charging`, `Charge done` oder `Charger ready`. Darunter
+Kopfzeile je nach Zustand `Charging`, `Charge done` oder `Charger ready`.
+`Charge done` erscheint nur, wenn Ladestand **und** Ziel-SoC bekannt sind: evcc
+meldet einen unbekannten Ladestand als 0, und ein schlafendes Fahrzeug würde
+sonst als fertig geladen gelten. Darunter
 ein SoC-Balken mit Skala 0…100 % sowie - nur während des Ladens - ein
 Leistungsbalken mit Skala 0…11 kW. Unten drei Flächen zur Modusumschaltung, der
 aktive Modus ist gefüllt dargestellt:
@@ -200,7 +208,8 @@ Jede Berührung setzt einen **10-Sekunden-Timer** zurück. Läuft er ab, wird de
 Plan an evcc gesendet und die Anzeige springt auf die Übersicht - es gibt keine
 gesonderte Bestätigungsfläche und kein Abbrechen. Die Seite lässt sich nur über
 den Taster an GPIO22 oder den HA-Schalter «EVCC Planladung» öffnen, nicht per
-Touch von der Übersicht aus.
+Touch von der Übersicht aus — und nur, solange evcc ein angestecktes Fahrzeug
+meldet.
 
 ### `bat_page` - Hausbatterie
 
@@ -238,7 +247,7 @@ Skripte decken die Funktionen ab:
 | :--- | :--- |
 | `set_mode_now` | `POST /api/loadpoints/${evcc_loadpoint}/mode/now` |
 | `set_mode_pv` | `POST /api/loadpoints/${evcc_loadpoint}/mode/pv` |
-| `set_mode_off` | `POST /api/loadpoints/${evcc_loadpoint}/mode/off` (löscht zusätzlich die NOW-LED) |
+| `set_mode_off` | `POST /api/loadpoints/${evcc_loadpoint}/mode/off` |
 | `send_plan_request` | `POST /api/vehicles/${evcc_vehicle}/plan/soc/<soc>/<zeitstempel>` |
 | `delete_plan_request` | `DELETE /api/vehicles/${evcc_vehicle}/plan/soc` |
 
@@ -252,6 +261,12 @@ Zeitzone; fällt eine Zeitumstellung dazwischen, korrigiert ein Gegencheck mit
 
 Voraussetzung ist ein gesetztes `timezone:` — siehe `device_timezone` in
 Abschnitt 6.
+
+**Kein Plan ohne gemeldetes Fahrzeug:** `send_plan_request` wird nur
+ausgeführt, wenn `${ent_evcc_connected}` ein angestecktes Fahrzeug meldet — evcc
+könnte einen Plan sonst keinem Fahrzeug zuordnen. Das gilt auch für den
+Zehn-Sekunden-Timer der Eingabeseite. `delete_plan_request` ist nicht
+eingeschränkt.
 
 **Keine Fehlerbehandlung:** Die Skripte werten die HTTP-Antwort nicht aus. Ist
 evcc nicht erreichbar, bleibt die Anzeige unverändert und es gibt keinen
@@ -269,7 +284,7 @@ aufgerufen wird.
 | :--- | :--- | :--- |
 | **Display Backlight** | `light` (monochromatic) | Helligkeit der Hintergrundbeleuchtung, `restore_mode: ALWAYS_ON` |
 | **EVCC Schnellladen** | `switch` (template) | EIN spiegelt evcc-Modus `NOW`; Einschalten setzt `NOW`, Ausschalten `PV` |
-| **EVCC Planladung** | `switch` (template) | EIN spiegelt einen aktiven Ladeplan; Einschalten öffnet die Eingabeseite am Display, Ausschalten löscht den Plan |
+| **EVCC Planladung** | `switch` (template) | EIN spiegelt einen aktiven Ladeplan; Einschalten öffnet die Eingabeseite am Display — nur bei angestecktem Fahrzeug —, Ausschalten löscht den Plan |
 | **Touch Kalibrierlog** | `switch` (template, Kategorie *Konfiguration*) | Gibt bei jeder Berührung Bildschirm- und Rohkoordinaten ins Log aus. Für die Kalibrierung eines neuen Panels, siehe [HARDWARE.md](HARDWARE.md), Abschnitt 8. Nach einem Neustart immer aus |
 
 Dazu die Diagnose-Entitäten der Kategorien 2.x bis 6.x aus
@@ -282,8 +297,9 @@ beiden Status-LEDs - sie sind als `internal: true` deklariert.
 > **Achtung beim Schalter «EVCC Planladung»:** Einschalten *setzt keinen Plan*,
 > sondern öffnet nur die Eingabeseite am Display und startet den
 > 10-Sekunden-Timer. Wer den Schalter in HA einschaltet und nicht ans Display
-> geht, sendet nach zehn Sekunden die zuletzt gespeicherten Werte. Der Schalter
-> fällt danach auf den tatsächlichen evcc-Zustand zurück.
+> geht, sendet nach zehn Sekunden die zuletzt gespeicherten Werte. Ohne
+> angestecktes Fahrzeug passiert gar nichts. Der Schalter fällt danach auf den
+> tatsächlichen evcc-Zustand zurück.
 
 ### Vom Gerät konsumiert
 

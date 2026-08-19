@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.3.1"
+  fw_version: "1.3.2"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -185,7 +185,6 @@ script:
   - id : set_mode_off
     then:
       - http_request.post: ${evcc_url}/api/loadpoints/${evcc_loadpoint}/mode/off
-      - light.turn_off: now_indicator
 
 # ============================================================ 
 # Home Assistant related setup
@@ -257,16 +256,6 @@ binary_sensor:
   - platform: homeassistant
     entity_id: ${ent_plan_enabled}
     id: evcc_chargeplan_enabled
-    on_state:
-      then:
-        - if:
-            condition:
-              - lambda: |-
-                  return x;
-            then:
-              - light.turn_on: plan_indicator
-            else:
-              - light.turn_off: plan_indicator
   - platform: gpio
     pin: GPIO35
     id: button_charge_now
@@ -299,10 +288,17 @@ binary_sensor:
             then:
               - script.execute: delete_plan_request
             else:
-              - display.page.show: plan_setup_page
-              - lambda: |-
-                  id(recent_touch) = true;
-                  id(plan_setup_timeout_timer) = id(plan_setup_timeout);
+              # Loeschen geht immer, Setzen nur mit gemeldetem Fahrzeug.
+              - if:
+                  condition:
+                    - lambda: |-
+                        return id(vehicle_connected).has_state() &&
+                               id(vehicle_connected).state;
+                  then:
+                    - display.page.show: plan_setup_page
+                    - lambda: |-
+                        id(recent_touch) = true;
+                        id(plan_setup_timeout_timer) = id(plan_setup_timeout);
 
   - platform: touchscreen
     id: button_ev
@@ -615,14 +611,6 @@ text_sensor:
     id: wallbox_mode
     filters:
       - to_upper:
-    on_value:
-      then:
-        - lambda: |-
-            if (x == "NOW") {
-              id(now_indicator).turn_on().perform();
-            } else {
-              id(now_indicator).turn_off().perform();
-            }
   - platform: homeassistant
     entity_id: ${ent_plan_time}
     id: evcc_charge_plan_time
@@ -648,10 +636,16 @@ switch:
     lambda: |-
       return id(evcc_chargeplan_enabled).state;
     turn_on_action:
-      - display.page.show: plan_setup_page
-      - lambda: |-
-          id(recent_touch) = true;
-          id(plan_setup_timeout_timer) = id(plan_setup_timeout);
+      - if:
+          condition:
+            - lambda: |-
+                return id(vehicle_connected).has_state() &&
+                       id(vehicle_connected).state;
+          then:
+            - display.page.show: plan_setup_page
+            - lambda: |-
+                id(recent_touch) = true;
+                id(plan_setup_timeout_timer) = id(plan_setup_timeout);
     turn_off_action:
       - script.execute: delete_plan_request
 
@@ -986,11 +980,32 @@ interval:
   - interval: 1s
     then:
       - lambda: |-
+          // Die beiden Tasten-LEDs zeigen, was evcc meldet - nicht, was hier
+          // lokal geschaltet wurde. Deshalb wird abgeglichen statt nur auf
+          // Zustandswechsel reagiert: eine verpasste Meldung heilt von selbst,
+          // und ein lokaler Eingriff kann nicht stehen bleiben.
+          bool plan_soll = id(evcc_chargeplan_enabled).state;
+          if (id(plan_indicator).remote_values.is_on() != plan_soll) {
+            auto c = id(plan_indicator).make_call();
+            c.set_state(plan_soll);
+            c.perform();
+          }
+          bool now_soll = id(wallbox_mode).state == "NOW";
+          if (id(now_indicator).remote_values.is_on() != now_soll) {
+            auto c = id(now_indicator).make_call();
+            c.set_state(now_soll);
+            c.perform();
+          }
+
           if (id(plan_setup_timeout_timer)) {
             id(plan_setup_timeout_timer)--;
 
             if (id(plan_setup_timeout_timer) == 0) {
-              id(send_plan_request).execute();
+              // Ohne gemeldetes Fahrzeug wird nichts gesendet: evcc koennte
+              // den Plan keinem Fahrzeug zuordnen.
+              if (id(vehicle_connected).has_state() && id(vehicle_connected).state) {
+                id(send_plan_request).execute();
+              }
               id(main_page).show();
             }
           }
@@ -1092,11 +1107,16 @@ display:
             if (id(vehicle_connected).state == true) {
               if (id(vehicle_charging).state == true) {
                 it.printf(90, 170, id(lato30), WHITE, "CHARGING");
-                if (id(wallbox_charge_power).has_state() && id(vehicle_soc).has_state() && id(vehicle_range).has_state()) {
+                if (id(wallbox_charge_power).has_state() && id(vehicle_soc).state > 0 && id(vehicle_range).has_state()) {
                   it.printf(90, 210, id(lato20), WHITE, "%.0f W / %.0f %% (%.0f km)", id(wallbox_charge_power).state, id(vehicle_soc).state, id(vehicle_range).state);
                 }
               } else {
-                if (id(vehicle_soc).state >= id(vehicle_target_soc).state) {
+          // evcc meldet einen unbekannten Ladestand als 0: der MQTT-Sensor
+          // setzt float(0), wenn die Nachricht leer ist. Ein schlafendes Auto
+          // liefert deshalb 0 %, und 0 >= 0 hiesse faelschlich "geladen".
+                bool soc_bekannt = id(vehicle_soc).has_state() && id(vehicle_soc).state > 0;
+                bool ziel_bekannt = id(vehicle_target_soc).has_state() && id(vehicle_target_soc).state > 0;
+                if (soc_bekannt && ziel_bekannt && id(vehicle_soc).state >= id(vehicle_target_soc).state) {
                   it.printf(90, 185, id(lato30), WHITE, "DONE  -  %.0f %%", id(vehicle_soc).state);
                 } else {
                   if (id(evcc_chargeplan_enabled).state) {
@@ -1150,7 +1170,10 @@ display:
             if (id(vehicle_charging).state) {
               it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charging");
             } else {
-              if (id(vehicle_soc).state >= id(vehicle_target_soc).state) {
+              // Siehe Uebersichtsseite: 0 heisst "unbekannt", nicht "leer".
+              bool soc_bekannt = id(vehicle_soc).has_state() && id(vehicle_soc).state > 0;
+              bool ziel_bekannt = id(vehicle_target_soc).has_state() && id(vehicle_target_soc).state > 0;
+              if (soc_bekannt && ziel_bekannt && id(vehicle_soc).state >= id(vehicle_target_soc).state) {
                 it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charge done");
               } else {
                 it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charger ready");
@@ -1160,7 +1183,7 @@ display:
             it.printf(2,79,id(lato20), WHITE, BLACK, TextAlign::TOP_LEFT, "SoC");
             it.printf(50,102,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "0%%"); it.printf(300,102,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "100%%");
             float ch = 0;
-            if (id(vehicle_soc).has_state()) {
+            if (id(vehicle_soc).has_state() && id(vehicle_soc).state > 0) {
               ch = 2.5 * id(vehicle_soc).state;
               it.filled_rectangle(50,80,ch,20,GREEN); it.filled_rectangle(50+ch,80,250-ch,20,HA_BLUE);
               if (id(vehicle_range).has_state()) {

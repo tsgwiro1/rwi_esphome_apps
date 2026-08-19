@@ -2,6 +2,63 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.3.2] - 2026-08-19
+
+### Geändert
+
+* **Die Tasten-LEDs zeigen jetzt, was evcc meldet.** Bisher wurden sie an drei
+  Stellen lokal geschaltet: aus dem Zustandswechsel von
+  `binary_sensor.evcc_chargeplan_enabled`, aus dem Wertwechsel von
+  `select.evcc_mode` und zusätzlich direkt in `set_mode_off`. Wer nur auf
+  Wechsel reagiert, verpasst jede Meldung, die keinen Wechsel darstellt — und
+  der Griff in `set_mode_off` setzte die LED auf einen lokal *gewünschten*
+  Zustand, bevor evcc ihn bestätigt hatte.
+
+  Alle drei Stellen sind entfernt. Stattdessen gleicht das Sekundenintervall
+  die beiden LEDs gegen den aktuellen Zustand der evcc-Entitäten ab und
+  schaltet nur bei Abweichung. Ein lokaler Eingriff kann damit nicht stehen
+  bleiben, eine verpasste Meldung heilt innerhalb einer Sekunde.
+
+  Anlass war ein beobachteter Widerspruch: Die Wallbox-Seite zeigte einen
+  Ladeplan, während die zugehörige Taste dunkel blieb. Der Mechanismus dahinter
+  liess sich aus dem Quelltext nicht rekonstruieren — der Abgleich macht ihn
+  gegenstandslos, unabhängig von der Ursache.
+
+### Behoben
+
+* **Kein Ladeplan mehr ohne gemeldetes Fahrzeug.** Die Eingabeseite liess sich
+  über den Taster an GPIO22 und über den HA-Schalter «EVCC Planladung» auch
+  dann öffnen, wenn nichts angesteckt war; nach zehn Sekunden ging der Plan an
+  evcc. Dort konnte er keinem Fahrzeug zugeordnet werden. Beide Wege prüfen
+  jetzt `binary_sensor.evcc_loadpoint_connected`, ebenso der Timer selbst.
+  `delete_plan_request` bleibt uneingeschränkt — einen Plan zu löschen ist auch
+  ohne angestecktes Fahrzeug sinnvoll.
+
+* **«DONE - 0 %» bei schlafendem Fahrzeug.** Beide Seiten entschieden mit
+  `vehicle_soc >= vehicle_target_soc`, ob geladen ist. evcc meldet einen
+  unbekannten Ladestand als 0 — der MQTT-Sensor setzt `float(0)`, wenn die
+  Nachricht leer ist —, und `0 >= 0` ergab «geladen». Reproduzierbar mit
+  angestecktem, schlafendem Fahrzeug und einem evcc-Neustart. Beide Werte
+  müssen jetzt grösser als 0 sein, sonst steht dort «Charger ready»; der
+  SoC-Balken auf der Wallbox-Seite zeigt in dem Fall `---` statt 0 %.
+
+### Hinweis
+
+Ausgangspunkt war ein Fehlerbild nach einem evcc-Neustart: Plan aktiv, obwohl
+nichts angesteckt war. Die Ursache lag **nicht** im Gerät. Am Ladepunkt war in
+evcc «Grigio» als festes Fahrzeug eingetragen; beim Start ordnete evcc es zu,
+ohne je eine Verbindung gesehen zu haben, und reichte damit den am Fahrzeug
+hinterlegten Ladeplan als `effectivePlan` weiter. Nachgewiesen mit einem
+Versuch: Zuordnung entfernt → Plan verschwand; evcc neu gestartet → Zuordnung
+und Plan waren drei Sekunden später wieder da. Nach der Umstellung auf
+«automatisch erkennen» meldet evcc korrekt kein Fahrzeug.
+
+Das Gerät bleibt bei seiner Rolle als Anzeige: Es filtert nicht, was evcc
+meldet, sondern zeigt es. Ein Plan, den evcc als aktiv meldet, erscheint auf
+dem Display — auch wenn kein Fahrzeug angesteckt ist.
+
+---
+
 ## [1.3.1] - 2026-08-18
 
 ### Behoben
