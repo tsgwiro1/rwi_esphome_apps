@@ -2,6 +2,57 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.4.0] - 2026-08-20
+
+### Neu
+
+* **Das Gerät weiss jetzt, welches Fahrzeug an der Wallbox hängt.** Bisher kam
+  aus evcc nur, *dass* etwas angesteckt ist. Neu werden `vehicleName`,
+  `vehicleTitle` und `vehicleDetectionActive` als Substitutionen
+  `ent_vehicle_name`, `ent_vehicle_title` und `ent_vehicle_detection`
+  abonniert. Ein internes Merkmal `known_vehicle` vergleicht die gemeldete
+  Fahrzeug-ID mit `evcc_vehicle`. Verglichen wird die ID und nicht der Titel:
+  der Titel ist in evcc frei benannt.
+
+* **Fahrzeuganzeige auf beiden Seiten.** Auf `ev_page` steht unter dem Zustand
+  der Titel aus evcc, beim bekannten Fahrzeug weiss, bei einem fremden orange,
+  ohne Titel `Guest vehicle`. Auf der Übersicht steht dasselbe im Zustand
+  `READY` mittig über dem Fahrzeugsymbol, in den übrigen Zuständen klein
+  rechtsbündig in der freien Zeile darüber — dort füllt der Text den Streifen
+  bis nach rechts.
+
+* **Die Prüfphase ist sichtbar.** `ent_plan_automation` abonniert das Attribut
+  `current` der Home-Assistant-Automation «Wallbox: Fahrzeug angesteckt».
+  Solange sie nach dem Anstecken auf die Fahrzeugbestätigung wartet und den
+  Lademodus auf `OFF` hält, steht auf dem Display `Checking vehicle …` statt
+  eines Namens. Läuft evccs eigene Erkennung, steht dort `Detecting vehicle …`.
+  Ohne diese Unterscheidung sähe ein noch leerer Titel wie ein Gastfahrzeug
+  aus.
+
+### Geändert
+
+* **Der Ladeplan ist dem bekannten Fahrzeug vorbehalten.** Die Eingabeseite
+  wird nur noch geöffnet und der Plan nur noch gesendet, wenn evcc
+  `evcc_vehicle` als zugeordnetes Fahrzeug meldet — geprüft an allen drei
+  Eintrittspunkten: Touchfläche der Übersicht, HA-Schalter «EVCC Planladung»
+  und Ablauf des Sendetimers. V1.3.2 prüfte nur, *dass* etwas angesteckt ist;
+  der Plan wird aber fest auf `${evcc_vehicle}` geschrieben und landete bei
+  einem fremden Auto an der Wallbox trotzdem beim eigenen. Löschen bleibt
+  uneingeschränkt, und die drei Lademodi stehen weiterhin jedem Fahrzeug offen.
+
+* **`ev_page` neu aufgeteilt.** Der Fahrzeugname braucht Raum, und unten stand
+  eine leere Fläche. Ohne Ladung rückt der SoC-Balken deshalb an den Platz des
+  Leistungsbalkens direkt über die Modusflächen; wird geladen, bleibt die
+  bisherige Staffelung. Die Zeile `Plan active` steht neu unter dem Namen statt
+  über dem Balken, und die Skalenbeschriftungen sind nach innen gerückt, damit
+  sie den Ziel-SoC des Ladeplans nicht mehr berühren.
+
+* **Fahrzeugsymbol im Wallbox-Streifen der Übersicht auf 56 px vergrössert**
+  (`ev_icon_big`) und so gesetzt, dass sein sichtbarer Abstand zum rechten
+  Displayrand dem des Wallbox-Symbols links entspricht: beide Vorlagen haben
+  schwarzen Rand, gerechnet wurde mit dem sichtbaren Inhalt, nicht mit dem
+  Bildkasten.
+
 ## [1.3.2] - 2026-08-19
 
 ### Geändert

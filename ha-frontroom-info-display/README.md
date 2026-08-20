@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.3.2-blue)
+![Version](https://img.shields.io/badge/version-1.4.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -143,7 +143,12 @@ Vier Zonen, durch Linien in HA-Blau getrennt:
 * **Unten:** Wallbox. `CHARGING` mit Leistung, SoC und Reichweite; `DONE`, wenn
   der Ziel-SoC erreicht ist; `READY` bei angestecktem, nicht ladendem Auto -
   mit Ladeplan-Angabe, falls ein Plan aktiv ist. Ist nichts angesteckt, steht
-  `nothing connected` samt Solaranteil der letzten 30 Tage.
+  `nothing connected` samt Solaranteil der letzten 30 Tage. Seit V1.4.0 steht
+  dabei, welches Fahrzeug evcc meldet — weiss beim bekannten, orange bei einem
+  fremden. Beim bekannten Fahrzeug im Zustand `READY` ohne Ladeplan mittig
+  über dem Fahrzeugsymbol rechts, sonst klein rechtsbündig in der freien Zeile
+  darüber — der Text der übrigen Zustände füllt den Streifen bis nach rechts,
+  und «Guest vehicle» wäre mittig über dem Symbol zu breit.
 
 ### Berührungsflächen der Übersicht
 
@@ -161,7 +166,17 @@ Vier Zonen, durch Linien in HA-Blau getrennt:
 
 ### `ev_page` - Wallbox-Detail
 
-Kopfzeile je nach Zustand `Charging`, `Charge done` oder `Charger ready`.
+Kopfzeile je nach Zustand `Charging`, `Charge done` oder `Charger ready`,
+darunter das Fahrzeug: beim bekannten der Titel aus evcc in Weiss, bei einem
+fremden dessen Titel in Orange, sonst `Guest vehicle`. Solange evcc erkennt oder
+die Home-Assistant-Automation prüft, steht dort `Detecting vehicle …`
+beziehungsweise `Checking vehicle …` — ein leerer Titel hiesse in dieser Phase
+sonst fälschlich Gastfahrzeug.
+
+**Der SoC-Balken wechselt die Höhe.** Wird geladen, braucht der Leistungsbalken
+seinen Platz knapp über den Modusflächen, und der SoC-Balken sitzt darüber auf
+y=96. Ohne Ladung entfällt der Leistungsbalken, und der SoC-Balken rückt auf
+dessen Platz bei y=140 — sonst klaffte unten eine leere Fläche.
 `Charge done` erscheint nur, wenn Ladestand **und** Ziel-SoC bekannt sind: evcc
 meldet einen unbekannten Ladestand als 0, und ein schlafendes Fahrzeug würde
 sonst als fertig geladen gelten. Darunter
@@ -208,8 +223,15 @@ Jede Berührung setzt einen **10-Sekunden-Timer** zurück. Läuft er ab, wird de
 Plan an evcc gesendet und die Anzeige springt auf die Übersicht - es gibt keine
 gesonderte Bestätigungsfläche und kein Abbrechen. Die Seite lässt sich nur über
 den Taster an GPIO22 oder den HA-Schalter «EVCC Planladung» öffnen, nicht per
-Touch von der Übersicht aus — und nur, solange evcc ein angestecktes Fahrzeug
-meldet.
+Touch von der Übersicht aus.
+
+**Der Ladeplan gilt nur für das bekannte Fahrzeug.** Seite, Schalter und
+Senderoutine prüfen seit V1.4.0, dass evcc genau `evcc_vehicle` als
+zugeordnetes Fahrzeug meldet. Der Plan wird auf diese Fahrzeug-ID geschrieben —
+bei einem fremden Auto an der Wallbox landete er sonst beim eigenen. Das
+Löschen eines bestehenden Plans bleibt jederzeit möglich. Alle anderen
+Funktionen, insbesondere die drei Lademodi, stehen auch einem Gastfahrzeug
+offen.
 
 ### `bat_page` - Hausbatterie
 
@@ -303,7 +325,7 @@ beiden Status-LEDs - sie sind als `internal: true` deklariert.
 
 ### Vom Gerät konsumiert
 
-Das Display abonniert 24 Entitäten aus Home Assistant. Seit V1.3.0 steht kein
+Das Display abonniert 28 Entitäten aus Home Assistant. Seit V1.3.0 steht kein
 Entitätsname mehr im Code — jeder hängt an einer Substitution am Kopf der YAML.
 Die Vorgabewerte stehen in Abschnitt 6.
 
@@ -312,10 +334,16 @@ Die Vorgabewerte stehen in Abschnitt 6.
 | PV & Netz | `ent_pv_power`, `ent_grid_power` |
 | Hausbatterie | `ent_battery_soc`, `ent_battery_power` |
 | Wetter | `ent_weather`, `ent_outdoor_temperature`, `ent_rain`, `ent_rain_frequency` |
-| Fahrzeug | `ent_vehicle_soc`, `ent_vehicle_range`, `ent_vehicle_target_soc` |
+| Fahrzeug | `ent_vehicle_soc`, `ent_vehicle_range`, `ent_vehicle_target_soc`, `ent_vehicle_name`, `ent_vehicle_title`, `ent_vehicle_detection` |
 | Wallbox & evcc | `ent_evcc_mode`, `ent_evcc_connected`, `ent_evcc_charging`, `ent_evcc_charge_power`, `ent_evcc_charge_current`, `ent_evcc_solar_share_30d` |
-| Ladeplan | `ent_plan_enabled`, `ent_plan_soc`, `ent_plan_time` |
+| Ladeplan | `ent_plan_enabled`, `ent_plan_soc`, `ent_plan_time`, `ent_plan_automation` |
 | Wärmepumpe & Heizstab | `ent_heatpump_power_electric`, `ent_heatpump_power_heat`, `ent_heater_power`, `ent_heater_percent` |
+
+`ent_plan_automation` ist der einzige Eintrag, der kein Entitätsergebnis
+abonniert, sondern das Attribut `current` der Home-Assistant-Automation
+«Wallbox: Fahrzeug angesteckt». Es ist grösser als 0, solange die Automation
+nach dem Anstecken auf die Fahrzeugbestätigung wartet und den Lademodus
+deshalb auf `OFF` hält.
 
 Ein `time`-Sensor der Plattform `homeassistant` liefert die Zeitbasis für den
 Ladeplan. Ohne HA-Verbindung ist damit auch das Setzen eines Plans nicht
@@ -377,6 +405,10 @@ Autors und werden in jeder anderen Installation abweichen:
 | `ent_plan_enabled` | `binary_sensor.evcc_chargeplan_enabled` |
 | `ent_plan_soc` | `sensor.evcc_chargeplan_soc` |
 | `ent_plan_time` | `sensor.evcc_chargeplan_time` |
+| `ent_vehicle_name` | `sensor.evcc_vehicle_name` |
+| `ent_vehicle_title` | `sensor.evcc_vehicle_title` |
+| `ent_vehicle_detection` | `binary_sensor.evcc_vehicle_detection` |
+| `ent_plan_automation` | `automation.set_planned_charge_for_next_day` |
 
 **Anlage**
 

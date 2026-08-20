@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.3.2"
+  fw_version: "1.4.0"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -53,6 +53,10 @@ substitutions:
   ent_plan_enabled: binary_sensor.evcc_chargeplan_enabled
   ent_plan_soc: sensor.evcc_chargeplan_soc
   ent_plan_time: sensor.evcc_chargeplan_time
+  ent_vehicle_name: sensor.evcc_vehicle_name
+  ent_vehicle_title: sensor.evcc_vehicle_title
+  ent_vehicle_detection: binary_sensor.evcc_vehicle_detection
+  ent_plan_automation: automation.set_planned_charge_for_next_day
 
 # ---- Anlage ------------------------------------------------
   wallbox_max_power: "11000"      # W, Skalenende des Leistungsbalkens
@@ -256,6 +260,16 @@ binary_sensor:
   - platform: homeassistant
     entity_id: ${ent_plan_enabled}
     id: evcc_chargeplan_enabled
+  - platform: homeassistant
+    entity_id: ${ent_vehicle_detection}
+    id: vehicle_detection
+  # Wahr, wenn evcc genau das konfigurierte Fahrzeug meldet. Verglichen wird
+  # die ID, nicht der Titel - der ist in evcc frei benannt.
+  - platform: template
+    id: known_vehicle
+    internal: true
+    lambda: |-
+      return id(vehicle_name).state == "${evcc_vehicle}";
   - platform: gpio
     pin: GPIO35
     id: button_charge_now
@@ -288,12 +302,15 @@ binary_sensor:
             then:
               - script.execute: delete_plan_request
             else:
-              # Loeschen geht immer, Setzen nur mit gemeldetem Fahrzeug.
+              # Loeschen geht immer, Setzen nur fuer das bekannte Fahrzeug:
+              # ein Plan ginge sonst an ${evcc_vehicle}, waehrend ein fremdes
+              # Auto an der Wallbox haengt.
               - if:
                   condition:
                     - lambda: |-
                         return id(vehicle_connected).has_state() &&
-                               id(vehicle_connected).state;
+                               id(vehicle_connected).state &&
+                               id(known_vehicle).state;
                   then:
                     - display.page.show: plan_setup_page
                     - lambda: |-
@@ -598,6 +615,13 @@ sensor:
   - platform: homeassistant
     entity_id: ${ent_plan_soc}
     id: evcc_charge_plan_soc
+  # Attribut current der Automation: 0 wenn sie ruht, sonst die Zahl der
+  # laufenden Durchgaenge. Solange einer laeuft, steht der Lademodus auf OFF,
+  # bis das Fahrzeug bestaetigt ist.
+  - platform: homeassistant
+    entity_id: ${ent_plan_automation}
+    attribute: current
+    id: plan_check_running
 
 # Define all the string sensors used
 text_sensor:
@@ -614,6 +638,12 @@ text_sensor:
   - platform: homeassistant
     entity_id: ${ent_plan_time}
     id: evcc_charge_plan_time
+  - platform: homeassistant
+    entity_id: ${ent_vehicle_name}
+    id: vehicle_name
+  - platform: homeassistant
+    entity_id: ${ent_vehicle_title}
+    id: vehicle_title
 
 switch:
 # Neuer Schalter für HA: Schnellladen
@@ -640,7 +670,8 @@ switch:
           condition:
             - lambda: |-
                 return id(vehicle_connected).has_state() &&
-                       id(vehicle_connected).state;
+                       id(vehicle_connected).state &&
+                       id(known_vehicle).state;
           then:
             - display.page.show: plan_setup_page
             - lambda: |-
@@ -808,6 +839,10 @@ image:
   - file: "pic/ev.png"
     id: ev_icon
     resize: 40x40
+    type: RGB
+  - file: "pic/ev.png"
+    id: ev_icon_big
+    resize: 56x56
     type: RGB
   - file: "pic/wallbox.png"
     id: wallbox_icon
@@ -1001,9 +1036,11 @@ interval:
             id(plan_setup_timeout_timer)--;
 
             if (id(plan_setup_timeout_timer) == 0) {
-              // Ohne gemeldetes Fahrzeug wird nichts gesendet: evcc koennte
-              // den Plan keinem Fahrzeug zuordnen.
-              if (id(vehicle_connected).has_state() && id(vehicle_connected).state) {
+              // Gesendet wird nur fuer das bekannte Fahrzeug. Ohne Fahrzeug
+              // koennte evcc den Plan nicht zuordnen, bei einem fremden ginge
+              // er an ${evcc_vehicle}.
+              if (id(vehicle_connected).has_state() && id(vehicle_connected).state &&
+                  id(known_vehicle).state) {
                 id(send_plan_request).execute();
               }
               id(main_page).show();
@@ -1105,6 +1142,25 @@ display:
           //** EV CHARGER ***************************
           if (id(vehicle_connected).has_state()) {
             if (id(vehicle_connected).state == true) {
+              // Wer haengt dran. Der Text wird erst weiter unten gezeichnet:
+              // wo ein Fahrzeugsymbol Platz hat, steht er mittig darueber,
+              // sonst klein rechts oben in den Streifen.
+              const char *fz_text;
+              Color fz_farbe = WHITE;
+              if (id(plan_check_running).has_state() && id(plan_check_running).state > 0) {
+                fz_text = "checking ..."; fz_farbe = GRAY;
+              } else if (id(vehicle_detection).state) {
+                fz_text = "detecting ..."; fz_farbe = GRAY;
+              } else if (id(known_vehicle).state) {
+                fz_text = id(vehicle_title).state.c_str();
+              } else {
+                bool ohne_titel = id(vehicle_title).state.empty() ||
+                                  id(vehicle_title).state == "unknown" ||
+                                  id(vehicle_title).state == "unavailable";
+                fz_text = ohne_titel ? "Guest vehicle" : id(vehicle_title).state.c_str();
+                fz_farbe = ORANGE;
+              }
+              bool fz_gezeichnet = false;
               if (id(vehicle_charging).state == true) {
                 it.printf(90, 170, id(lato30), WHITE, "CHARGING");
                 if (id(wallbox_charge_power).has_state() && id(vehicle_soc).state > 0 && id(vehicle_range).has_state()) {
@@ -1126,9 +1182,18 @@ display:
                     }
                   } else {
                     it.printf(160, 180, id(lato30), WHITE, BLACK,TextAlign::TOP_CENTER, "READY");
-                    it.image(260, 180, id(ev_icon));
+                    it.image(259, 180, id(ev_icon_big));
+                    // Mitte des sichtbaren Symbols: 259 + 7 px Rand bis 308.7,
+                    // also 287 - nicht die Mitte des Bildkastens.
+                    if (id(known_vehicle).state) {
+                      it.printf(287, 161, id(lato14), fz_farbe, BLACK, TextAlign::TOP_CENTER, "%s", fz_text);
+                      fz_gezeichnet = true;
+                    }
                   }
                 }
+              }
+              if (!fz_gezeichnet) {
+                it.printf(318,161,id(lato14), fz_farbe, BLACK, TextAlign::TOP_RIGHT, "%s", fz_text);
               }
             } else {
               it.printf(160,180,id(lato20), WHITE, BLACK,TextAlign::TOP_CENTER, "nothing");
@@ -1156,10 +1221,12 @@ display:
             it.image(10, 180, id(clock_icon));
             it.printf(28,220,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%s", id(evcc_charge_plan_time).state.c_str());
             if (id(evcc_charge_plan_soc).has_state()) {
-              it.printf(28,163,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0f%%", id(evcc_charge_plan_soc).state);
+              it.printf(20,163,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0f%%", id(evcc_charge_plan_soc).state);
             }
             if (id(vehicle_connected).state && !id(vehicle_charging).state) {
-              it.printf(160,130,id(lato20),WHITE, BLACK,TextAlign::TOP_CENTER, "Plan active");
+              // Unter den Fahrzeugnamen: weiter unten stiesse die Zeile mit
+              // dem SoC-Balken zusammen, der ohne Ladung dort steht.
+              it.printf(160,80,id(lato20),WHITE, BLACK,TextAlign::TOP_CENTER, "Plan active");
             }
           }
           if (!id(vehicle_connected).has_state()) {
@@ -1179,28 +1246,50 @@ display:
                 it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charger ready");
               }
             }
+            // **** Fahrzeug ****
+            // Angezeigt wird, was evcc meldet. Waehrend die Automation prueft
+            // oder evcc erkennt, steht das hier statt eines Namens - sonst
+            // hiesse ein leerer Titel faelschlich "Gastfahrzeug".
+            if (id(plan_check_running).has_state() && id(plan_check_running).state > 0) {
+              it.printf(160,44,id(lato24), GRAY, BLACK, TextAlign::TOP_CENTER, "Checking vehicle ...");
+            } else if (id(vehicle_detection).state) {
+              it.printf(160,44,id(lato24), GRAY, BLACK, TextAlign::TOP_CENTER, "Detecting vehicle ...");
+            } else if (id(known_vehicle).state) {
+              it.printf(160,44,id(lato24), WHITE, BLACK, TextAlign::TOP_CENTER, "%s", id(vehicle_title).state.c_str());
+            } else {
+              bool ohne_titel = id(vehicle_title).state.empty() ||
+                                id(vehicle_title).state == "unknown" ||
+                                id(vehicle_title).state == "unavailable";
+              it.printf(160,44,id(lato24), ORANGE, BLACK, TextAlign::TOP_CENTER, "%s",
+                        ohne_titel ? "Guest vehicle" : id(vehicle_title).state.c_str());
+            }
             // **** SoC ****
-            it.printf(2,79,id(lato20), WHITE, BLACK, TextAlign::TOP_LEFT, "SoC");
-            it.printf(50,102,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "0%%"); it.printf(300,102,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "100%%");
+            // Der Leistungsbalken erscheint nur beim Laden. Sonst rutscht der
+            // SoC-Balken an dessen Platz, damit oben Raum fuer das Fahrzeug
+            // bleibt und unten kein Loch steht.
+            bool laedt = id(vehicle_charging).state && id(wallbox_charge_power).has_state();
+            int soc_y = laedt ? 96 : 140;
+            it.printf(2,soc_y - 1,id(lato20), WHITE, BLACK, TextAlign::TOP_LEFT, "SoC");
+            it.printf(58,soc_y + 22,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "0%%"); it.printf(296,soc_y + 22,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "100%%");
             float ch = 0;
             if (id(vehicle_soc).has_state() && id(vehicle_soc).state > 0) {
               ch = 2.5 * id(vehicle_soc).state;
-              it.filled_rectangle(50,80,ch,20,GREEN); it.filled_rectangle(50+ch,80,250-ch,20,HA_BLUE);
+              it.filled_rectangle(50,soc_y,ch,20,GREEN); it.filled_rectangle(50+ch,soc_y,250-ch,20,HA_BLUE);
               if (id(vehicle_range).has_state()) {
-                it.printf(160,78,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "%.0f %% (%.0f km)", id(vehicle_soc).state, id(vehicle_range).state);
+                it.printf(160,soc_y - 2,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "%.0f %% (%.0f km)", id(vehicle_soc).state, id(vehicle_range).state);
               } else {
-                it.printf(160,78,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "%.0f %%", id(vehicle_soc).state);
+                it.printf(160,soc_y - 2,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "%.0f %%", id(vehicle_soc).state);
               }
             } else {
               // Ohne SoC keine Balkenlaenge: filled_rectangle() bekaeme NAN
               // als Breite.
-              it.filled_rectangle(50,80,250,20,HA_BLUE);
-              it.printf(160,78,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "---");
+              it.filled_rectangle(50,soc_y,250,20,HA_BLUE);
+              it.printf(160,soc_y - 2,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "---");
             }
             // **** Power ****
-            if (id(vehicle_charging).state && id(wallbox_charge_power).has_state()) {
+            if (laedt) {
               it.printf(2,139,id(lato20), WHITE, BLACK, TextAlign::TOP_LEFT, "Pow");
-              it.printf(50,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "0kW"); it.printf(300,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0fkW", ${wallbox_max_power} / 1000.0);
+              it.printf(58,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "0kW"); it.printf(296,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0fkW", ${wallbox_max_power} / 1000.0);
               ch = min(250.0, 250.0 / ${wallbox_max_power} * id(wallbox_charge_power).state);
               it.filled_rectangle(50,140,ch,20,LIGHTRED); it.filled_rectangle(50+ch,140,250-ch,20,HA_BLUE);
               if (id(wallbox_charge_current).has_state()) {
