@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.4.0-blue)
+![Version](https://img.shields.io/badge/version-1.4.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -448,11 +448,24 @@ zusammengesetzt.
 
 **Zur Bildgrösse:** `resize:` passt eine Vorlage unter Wahrung ihres
 Seitenverhältnisses in den angegebenen Kasten ein — eine hochkant-Vorlage füllt
-ihn also nicht aus. ESPHome legt das Ergebnis unkomprimiert als
-`Breite × Höhe × 3` Bytes im Flash ab. Beim Ersetzen einer Vorlage lohnt daher
-der Blick auf beides: auf den Platzbedarf und darauf, dass `it.image(x, y, …)`
-die **linke obere Ecke** setzt — ein breiteres Bild verschiebt das sichtbare
-Symbol nach rechts und kann Beschriftungen überdecken.
+ihn also nicht aus. Beim Ersetzen einer Vorlage lohnt daher der Blick darauf,
+dass `it.image(x, y, …)` die **linke obere Ecke** setzt — ein breiteres Bild
+verschiebt das sichtbare Symbol nach rechts und kann Beschriftungen überdecken.
+
+**Zum Bildtyp:** ESPHome legt jedes Bild unkomprimiert im Flash ab, der `type:`
+bestimmt den Platz je Bildpunkt. Seit V1.4.1 steht deshalb nicht mehr überall
+`RGB`:
+
+| `type:` | Bytes je Bildpunkt | verwendet für |
+| :--- | :---: | :--- |
+| `GRAYSCALE` | 1 | die 22 einfarbigen Symbole |
+| `RGB565` | 2 | die 13 farbigen Bilder samt Wetteranimation |
+
+Bei einem grauen Symbol ist `GRAYSCALE` verlustfrei — ESPHome liefert
+`Color(gray, gray, gray)`, also denselben Bildpunkt wie zuvor. `BINARY` wäre
+nochmals achtmal kleiner, opfert aber die Kantenglättung. Wer eine Vorlage
+ersetzt, prüft mit einem Blick auf die Farbwerte, ob sie wirklich einfarbig ist:
+ein einziger farbiger Bildpunkt verlangt `RGB565`.
 
 Die Schriften werden über `gfonts` (Lato in fünf Schnitten und sechs Grössen)
 zur Buildzeit heruntergeladen und brauchen keine lokalen Dateien. Die

@@ -2,6 +2,24 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.4.1] - 2026-08-20
+
+### Geändert
+
+* **Bildtypen von `RGB` auf `GRAYSCALE` und `RGB565` umgestellt.** Alle 35
+  Bilder lagen mit drei Bytes je Bildpunkt im Flash. 22 davon sind
+  nachweislich einfarbig — jeder sichtbare Bildpunkt hat R=G=B — und liegen
+  jetzt als `GRAYSCALE` mit einem Byte dort. Das ist verlustfrei: ESPHome
+  liefert bei der Vorgabe `TRANSPARENCY_OPAQUE` genau
+  `Color(gray, gray, gray, 0xFF)`. Die übrigen 13 samt Wetteranimation sind
+  `RGB565` mit zwei Bytes.
+
+  Die Bilddaten schrumpfen damit von 250.9 KiB auf 131.7 KiB, der Flash von
+  77.9 % auf **71.2 %**. An der Darstellung ändert sich nichts.
+
+  `BINARY` wäre für die einfarbigen Symbole nochmals achtmal kleiner, opfert
+  aber die Kantenglättung und wurde deshalb nicht genommen.
+
 ## [1.4.0] - 2026-08-20
 
 ### Neu

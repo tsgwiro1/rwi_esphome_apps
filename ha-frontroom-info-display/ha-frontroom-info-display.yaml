@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.4.0"
+  fw_version: "1.4.1"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -795,146 +795,146 @@ image:
   - file: "pic/thermometer_icon.png"
     id: thermometer_icon
     resize: 30x30
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/sun.png"
     id: sun_icon
     resize: 31x31
-    type: RGB
+    type: RGB565
   - file: "pic/plug.png"
     id: plug_icon
     resize: 31x31
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/energy.png"
     id: energy_icon
     resize: 40x40
-    type: RGB
+    type: RGB565
   - file: "pic/bat80.png"
     id: b100_icon
     resize: 70x70
-    type: RGB
+    type: RGB565
   - file: "pic/bat60.png"
     id: b80_icon
     resize: 70x70
-    type: RGB
+    type: RGB565
   - file: "pic/bat40.png"
     id: b60_icon
     resize: 70x70
-    type: RGB
+    type: RGB565
   - file: "pic/bat20.png"
     id: b40_icon
     resize: 70x70
-    type: RGB
+    type: RGB565
   - file: "pic/bat0.png"
     id: b20_icon
     resize: 70x70
-    type: RGB
+    type: RGB565
   - file: "pic/rain_ws.png"
     id: rain_icon
     resize: 30x30
-    type: RGB
+    type: RGB565
   - file: "pic/dry.png"
     id: dry_icon
     resize: 30x30
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/ev.png"
     id: ev_icon
     resize: 40x40
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/ev.png"
     id: ev_icon_big
     resize: 56x56
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/wallbox.png"
     id: wallbox_icon
     resize: 70x70
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/arrow_back.png"
     id: back_icon
     resize: 40x40
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/electricity-icon.png"
     id: elect_icon
     resize: 40x40
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/battery-icon.png"
     id: batt_icon
     resize: 40x40
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/clock.png"
     id: clock_icon
     resize: 37x37
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/power-line.png"
     id: powerline_icon
     resize: 46x46
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/solar-panel.png"
     id: solarpanel_icon
     resize: 46x46
-    type: RGB
+    type: RGB565
   - file: "pic/battery-hor.png"
     id: batteryhor_icon
     resize: 46x46
-    type: RGB
+    type: RGB565
   - file: "pic/air-conditioning.png"
     id: airconditioning_icon
     resize: 40x40
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/wallbox.png"
     id: wallbox_small_icon
     resize: 40x40
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/house.png"
     id: house_icon
     resize: 40x40
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/water-heater.png"
     id: waterheater_icon
     resize: 40x40
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/arrow_right.png"
     id: arrow_r_icon
     resize: 20x20
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/arrow_left.png"
     id: arrow_l_icon
     resize: 20x20
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/arrow_up.png"
     id: arrow_u_icon
     resize: 20x20
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/arrow_down.png"
     id: arrow_d_icon
     resize: 20x20
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/arrow_up.jpeg"
     id: button_arrow_up
     resize: 60x60
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/arrow_down.jpeg"
     id: button_arrow_down
     resize: 60x60
-    type: RGB
+    type: GRAYSCALE
   - file: "pic/arrow_up_pressed.jpeg"
     id: button_arrow_up_pressed
     resize: 60x60
-    type: RGB
+    type: RGB565
   - file: "pic/arrow_down_pressed.jpeg"
     id: button_arrow_down_pressed
     resize: 60x60
-    type: RGB
+    type: RGB565
   - file: "pic/gate-valve.png"
     id: valve_icon
     resize: 24x24
-    type: RGB
+    type: GRAYSCALE
 
 # Define animations
 animation:
   - file: "pic/weather.gif"
     id: weather_animation
     resize: 70x70
-    type: RGB
+    type: RGB565
 
 # Define the graphs for sensors that you want to show on the display
 graph:
