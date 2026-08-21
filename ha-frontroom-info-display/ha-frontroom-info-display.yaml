@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.6.0"
+  fw_version: "1.6.1"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -1335,6 +1335,11 @@ display:
     pages:
       - id: main_page
         lambda: |-         
+          // Ein HA-Sensor auf "unknown" veroeffentlicht NAN. has_state() bleibt
+          // dabei wahr, und "%.0f" schreibt "nan". Nach jedem evcc-Neustart und
+          // jedem MQTT-Reload gehen alle Werte kurz durch diesen Zustand.
+          // ok() fragt beides ab, damit die vorhandenen ---Zweige greifen.
+          auto ok = [](sensor::Sensor *s) { return s->has_state() && !std::isnan(s->state); };
           //***********************************
           id(weather_animation).next_frame();
           it.image(0, 5, id(weather_animation), COLOR_ON, COLOR_OFF);
@@ -1347,7 +1352,7 @@ display:
           //***********************************
           it.printf(90,0,id(lato24), WHITE,"%s",id(weather_condition).state.c_str());
           it.image(85, 42, id(thermometer_icon));       
-          if (id(outside_temperature).has_state()) {
+          if (ok(id(outside_temperature))) {
             it.printf(112,38,id(lato20), WHITE,"%.1f °C", id(outside_temperature).state);
           } else {
             it.printf(112,38,id(lato20), WHITE,"--- °C");
@@ -1356,7 +1361,7 @@ display:
             if (id(raining).state == true) {
               it.image(200, 47,  id(rain_icon));
               it.printf(240, 38, id(lato20), WHITE,"WET");
-              if (id(rain_freq).has_state()) {
+              if (ok(id(rain_freq))) {
                 it.printf(240, 63, id(lato14), WHITE, "%.0f Hz", id(rain_freq).state);
               }
             } else {
@@ -1367,9 +1372,9 @@ display:
               it.printf(240,38,id(lato20), WHITE,"---");
           }
           //** SOLAR *********************************
-          if (id(pv_power).has_state()) {
+          if (ok(id(pv_power))) {
             it.printf(65, 91, id(lato20), WHITE, "%.0f W", id(pv_power).state);
-            if (!id(grid_power).has_state()) {
+            if (!ok(id(grid_power))) {
               it.printf(65, 126, id(lato20), WHITE, "---");
             } else if (id(grid_power).state > 0) {
               it.printf(65, 126, id(lato20), LIGHTGREEN, "%.0f W", id(grid_power).state);
@@ -1382,14 +1387,14 @@ display:
             it.printf(85, 113, id(lato14), WHITE, "---");
           }
           //** BATTERY *******************************
-          if (id(battery_soc).has_state()) {
+          if (ok(id(battery_soc))) {
               if (id(battery_soc).state >= 80) it.image(170, 85, id(b100_icon));
               else if (id(battery_soc).state >= 60) it.image(170, 85, id(b80_icon));
               else if (id(battery_soc).state >= 40) it.image(170, 85, id(b60_icon));
               else if (id(battery_soc).state >= 20) it.image(170, 85, id(b40_icon));
               else it.image(170, 85, id(b20_icon));
               it.printf(230, 94, id(lato20), WHITE, "%5.0f %%", id(battery_soc).state);
-              if (!id(battery_power).has_state()) {
+              if (!ok(id(battery_power))) {
                 it.printf(230, 126, id(lato20), WHITE, "  ---");
               } else if (id(battery_power).state > 0) {
                 it.printf(230, 126, id(lato20), LIGHTGREEN, "%5.0f W", id(battery_power).state);
@@ -1409,7 +1414,7 @@ display:
               // sonst klein rechts oben in den Streifen.
               const char *fz_text;
               Color fz_farbe = WHITE;
-              if (id(plan_check_running).has_state() && id(plan_check_running).state > 0) {
+              if (ok(id(plan_check_running)) && id(plan_check_running).state > 0) {
                 fz_text = "checking ..."; fz_farbe = GRAY;
               } else if (id(vehicle_detection).state) {
                 fz_text = "detecting ..."; fz_farbe = GRAY;
@@ -1425,21 +1430,21 @@ display:
               bool fz_gezeichnet = false;
               if (id(vehicle_charging).state == true) {
                 it.printf(90, 170, id(lato30), WHITE, "CHARGING");
-                if (id(wallbox_charge_power).has_state() && id(vehicle_soc).state > 0 && id(vehicle_range).has_state()) {
+                if (ok(id(wallbox_charge_power)) && id(vehicle_soc).state > 0 && ok(id(vehicle_range))) {
                   it.printf(90, 210, id(lato20), WHITE, "%.0f W / %.0f %% (%.0f km)", id(wallbox_charge_power).state, id(vehicle_soc).state, id(vehicle_range).state);
                 }
               } else {
           // evcc meldet einen unbekannten Ladestand als 0: der MQTT-Sensor
           // setzt float(0), wenn die Nachricht leer ist. Ein schlafendes Auto
           // liefert deshalb 0 %, und 0 >= 0 hiesse faelschlich "geladen".
-                bool soc_bekannt = id(vehicle_soc).has_state() && id(vehicle_soc).state > 0;
-                bool ziel_bekannt = id(vehicle_target_soc).has_state() && id(vehicle_target_soc).state > 0;
+                bool soc_bekannt = ok(id(vehicle_soc)) && id(vehicle_soc).state > 0;
+                bool ziel_bekannt = ok(id(vehicle_target_soc)) && id(vehicle_target_soc).state > 0;
                 if (soc_bekannt && ziel_bekannt && id(vehicle_soc).state >= id(vehicle_target_soc).state) {
                   it.printf(90, 185, id(lato30), WHITE, "DONE  -  %.0f %%", id(vehicle_soc).state);
                 } else {
                   if (id(evcc_chargeplan_enabled).state) {
                     it.printf(195, 172, id(lato24), WHITE, BLACK,TextAlign::TOP_CENTER, "READY");
-                    if (id(evcc_charge_plan_soc).has_state()) {
+                    if (ok(id(evcc_charge_plan_soc))) {
                       it.printf(195, 204, id(lato20), WHITE, BLACK,TextAlign::TOP_CENTER, "Charge plan %s %.0f %%", id(evcc_charge_plan_time).state.c_str(), id(evcc_charge_plan_soc).state);
                     }
                   } else {
@@ -1461,7 +1466,7 @@ display:
               it.printf(160,180,id(lato20), WHITE, BLACK,TextAlign::TOP_CENTER, "nothing");
               it.printf(160,202,id(lato20), WHITE, BLACK,TextAlign::TOP_CENTER, "connected");
               it.image(270, 179, id(sun_icon));
-              if (id(evcc_charge_30d_solar_percentage).has_state()) {
+              if (ok(id(evcc_charge_30d_solar_percentage))) {
                 it.printf(285,212,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0f%%", id(evcc_charge_30d_solar_percentage).state);
               }
             }   
@@ -1485,10 +1490,11 @@ display:
           }
       - id: ev_page
         lambda: |-
+          auto ok = [](sensor::Sensor *s) { return s->has_state() && !std::isnan(s->state); };
           it.image(0, 0, id(ev_icon));
           it.image(280, 0, id(back_icon));
           it.image(280, 189, id(sun_icon));
-          if (id(evcc_charge_30d_solar_percentage).has_state()) {
+          if (ok(id(evcc_charge_30d_solar_percentage))) {
             it.printf(295,222,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0f%%", id(evcc_charge_30d_solar_percentage).state);
           } else {
             it.printf(295,222,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "---");
@@ -1496,7 +1502,7 @@ display:
           if (id(evcc_chargeplan_enabled).state) {
             it.image(10, 180, id(clock_icon));
             it.printf(28,220,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%s", id(evcc_charge_plan_time).state.c_str());
-            if (id(evcc_charge_plan_soc).has_state()) {
+            if (ok(id(evcc_charge_plan_soc))) {
               it.printf(20,163,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0f%%", id(evcc_charge_plan_soc).state);
             }
             if (id(vehicle_connected).state && !id(vehicle_charging).state) {
@@ -1514,8 +1520,8 @@ display:
               it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charging");
             } else {
               // Siehe Uebersichtsseite: 0 heisst "unbekannt", nicht "leer".
-              bool soc_bekannt = id(vehicle_soc).has_state() && id(vehicle_soc).state > 0;
-              bool ziel_bekannt = id(vehicle_target_soc).has_state() && id(vehicle_target_soc).state > 0;
+              bool soc_bekannt = ok(id(vehicle_soc)) && id(vehicle_soc).state > 0;
+              bool ziel_bekannt = ok(id(vehicle_target_soc)) && id(vehicle_target_soc).state > 0;
               if (soc_bekannt && ziel_bekannt && id(vehicle_soc).state >= id(vehicle_target_soc).state) {
                 it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charge done");
               } else {
@@ -1526,7 +1532,7 @@ display:
             // Angezeigt wird, was evcc meldet. Waehrend die Automation prueft
             // oder evcc erkennt, steht das hier statt eines Namens - sonst
             // hiesse ein leerer Titel faelschlich "Gastfahrzeug".
-            if (id(plan_check_running).has_state() && id(plan_check_running).state > 0) {
+            if (ok(id(plan_check_running)) && id(plan_check_running).state > 0) {
               it.printf(160,44,id(lato24), GRAY, BLACK, TextAlign::TOP_CENTER, "Checking vehicle ...");
             } else if (id(vehicle_detection).state) {
               it.printf(160,44,id(lato24), GRAY, BLACK, TextAlign::TOP_CENTER, "Detecting vehicle ...");
@@ -1543,15 +1549,15 @@ display:
             // Der Leistungsbalken erscheint nur beim Laden. Sonst rutscht der
             // SoC-Balken an dessen Platz, damit oben Raum fuer das Fahrzeug
             // bleibt und unten kein Loch steht.
-            bool laedt = id(vehicle_charging).state && id(wallbox_charge_power).has_state();
+            bool laedt = id(vehicle_charging).state && ok(id(wallbox_charge_power));
             int soc_y = laedt ? 96 : 140;
             it.printf(2,soc_y - 1,id(lato20), WHITE, BLACK, TextAlign::TOP_LEFT, "SoC");
             it.printf(58,soc_y + 22,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "0%%"); it.printf(296,soc_y + 22,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "100%%");
             float ch = 0;
-            if (id(vehicle_soc).has_state() && id(vehicle_soc).state > 0) {
+            if (ok(id(vehicle_soc)) && id(vehicle_soc).state > 0) {
               ch = 2.5 * id(vehicle_soc).state;
               it.filled_rectangle(50,soc_y,ch,20,GREEN); it.filled_rectangle(50+ch,soc_y,250-ch,20,HA_BLUE);
-              if (id(vehicle_range).has_state()) {
+              if (ok(id(vehicle_range))) {
                 it.printf(160,soc_y - 2,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "%.0f %% (%.0f km)", id(vehicle_soc).state, id(vehicle_range).state);
               } else {
                 it.printf(160,soc_y - 2,id(lato20),WHITE, BLACK,TextAlign::BOTTOM_CENTER, "%.0f %%", id(vehicle_soc).state);
@@ -1624,17 +1630,18 @@ display:
           }
       - id: bat_page
         lambda: |-
+          auto ok = [](sensor::Sensor *s) { return s->has_state() && !std::isnan(s->state); };
           it.image(0, 0, id(energy_icon));
           it.image(280, 0, id(back_icon));
           it.image(20, 70, id(batt_icon));
           it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Home Battery");
-          if (id(battery_soc).has_state()) {
+          if (ok(id(battery_soc))) {
             it.printf(80,72,id(lato24), WHITE, BLACK, TextAlign::TOP_LEFT, "%5.0f %%", id(battery_soc).state);
           } else {
             it.printf(80,72,id(lato24), WHITE, BLACK, TextAlign::TOP_LEFT, "  ---");
           }
           it.image(170, 70, id(elect_icon));
-          if (!id(battery_power).has_state()) {
+          if (!ok(id(battery_power))) {
             it.printf(223, 72, id(lato24), WHITE, "---");
           } else if (id(battery_power).state > 0) {
             it.printf(223, 72, id(lato24), LIGHTGREEN, "%.0f W", id(battery_power).state);
@@ -1653,17 +1660,19 @@ display:
           }
       - id: energy_page
         lambda: |-
+          auto ok = [](sensor::Sensor *s) { return s->has_state() && !std::isnan(s->state); };
           it.image(0, 0, id(energy_icon));
           it.image(280, 0, id(back_icon));
           it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Energy");
           // **** Electrical Power ****
-          // Ein HA-Sensor ohne Zustand steht auf NAN. Durch die Bilanz
+          // Ein HA-Sensor ohne Zustand steht auf NAN, ebenso einer, den Home
+          // Assistant als "unknown" meldet. Durch die Bilanz
           // rechnet sich das von selbst weiter, num() schreibt am Ende
           // "---" statt "nan". Bei Netz und Batterie geht das nicht:
           // min()/max() liefern gegen NAN die 0 zurueck und machen aus dem
           // fehlenden Wert stillschweigend eine Null.
-          bool ok_grid = id(grid_power).has_state();
-          bool ok_bat = id(battery_power).has_state();
+          bool ok_grid = ok(id(grid_power));
+          bool ok_bat = ok(id(battery_power));
           auto num = [&](int x, int y, Color col, TextAlign align, float v, const char *unit) {
             if (std::isnan(v)) {
               it.printf(x, y, id(lato14), col, BLACK, align, "---");

@@ -2,6 +2,44 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.6.1] - 2026-08-21
+
+### Behoben
+
+* **Kein „nan" mehr auf der Anzeige.** Meldet Home Assistant eine Entität als
+  `unknown` oder `unavailable`, veröffentlicht der ESPHome-Sensor **NAN**.
+  `has_state()` bleibt dabei wahr, und `%.0f` schreibt „nan". Genau so entstand
+  das `nan A` neben der Ladeleistung, das mit V1.6.0 verschwand — die Ursache
+  betraf aber **25 weitere Abfragen** auf vier Seiten.
+
+  Der Fall ist nicht selten: Nach jedem evcc-Neustart und jedem MQTT-Reload
+  gehen sämtliche evcc-Sensoren erst auf `unavailable` und dann auf `unknown`.
+  Im Gerätelog vom 2026-08-21, 16:41 ist das für jeden Sensor einzeln
+  nachweisbar.
+
+  Neu prüft ein Helfer am Anfang jeder zeichnenden Seite beides:
+
+  ```cpp
+  auto ok = [](sensor::Sensor *s) { return s->has_state() && !std::isnan(s->state); };
+  ```
+
+  Aus `if (id(x).has_state())` wird `if (ok(id(x)))`. Die Ausgabe ändert sich
+  dadurch nicht: jeder dieser Zweige hatte längst ein `else` mit `---`, das nun
+  auch greift. Binäre Sensoren und Textsensoren bleiben unverändert, sie kennen
+  kein NAN.
+
+* **Die Energieseite rechnete mit stillschweigenden Nullen.** Dort stand der
+  Fall sogar schon im Kommentar — `min()`/`max()` liefern gegen NAN eine 0 —,
+  nur prüften `ok_grid` und `ok_bat` bloss auf `has_state()`. Ein `unknown` bei
+  Netz oder Batterie ging damit als echte 0 in die Hausverbrauchsbilanz ein.
+  Beide nutzen jetzt denselben Helfer.
+
+### Bekannt
+
+Textsensoren kennen kein NAN, geben ein `unknown` aber wörtlich aus: Auf der
+Übersicht kann kurzzeitig `unavailable` als Wetterlage stehen. Dieselbe
+Ursache, andere Behandlung — noch offen.
+
 ## [1.6.0] - 2026-08-21
 
 ### Neu
