@@ -2,6 +2,35 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.6.2] - 2026-08-21
+
+### Behoben
+
+* **Ein Neustart schickte Befehle an die Wallbox.** Bei jedem Start führte
+  ESPHome die `turn_off_action` der beiden evcc-Schalter aus — also
+  `set_mode_pv` und `delete_plan_request`. Ursache ist die Vorgabe
+  `restore_mode: ALWAYS_OFF` (`switch/__init__.py:75`): `TemplateSwitch::setup()`
+  schreibt den Schalter damit beim Start auf AUS, und das ist ein
+  `write_state(false)` samt Auslöser (`template_switch.cpp:37`).
+
+  Bisher blieb es folgenlos, weil zum Bootzeitpunkt das Netz noch nicht steht
+  und der Aufruf scheitert — sichtbar wurde es erst durch die Rückmeldung aus
+  V1.5.0: Der Sensor «Letzter Hinweis» sprang nach jedem Flash auf
+  `evcc not reachable`. Wäre das WLAN einmal eher oben, setzte ein Neustart des
+  Displays den Lademodus auf PV zurück und löschte den Ladeplan.
+
+  Beide Schalter tragen jetzt `restore_mode: DISABLED`. Das ist der einzige
+  Modus, bei dem `get_initial_state_with_restore_mode()` leer zurückkommt und
+  `setup()` den Schalter gar nicht anfasst. Für diese beiden ist es auch
+  sachlich richtig: Sie speichern keinen Zustand, sondern spiegeln über ihr
+  `lambda` den von evcc gemeldeten. Nach dem Flash steht «Letzter Hinweis» auf
+  `unknown` statt auf einer Fehlermeldung, beide Schalter melden unverändert
+  korrekt.
+
+  `touch_cal_log` bleibt auf `ALWAYS_OFF` — dort bewirkt die Vorgabe genau das
+  Gewollte, nämlich dass das Kalibrierlog nach jedem Neustart aus ist, und eine
+  `turn_off_action` gibt es nicht.
+
 ## [1.6.1] - 2026-08-21
 
 ### Behoben

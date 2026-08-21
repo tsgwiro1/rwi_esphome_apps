@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.6.1"
+  fw_version: "1.6.2"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -837,11 +837,17 @@ text_sensor:
     id: vehicle_title
 
 switch:
-# Neuer Schalter für HA: Schnellladen
+  # restore_mode: DISABLED ist wesentlich. Die Vorgabe ALWAYS_OFF laesst
+  # TemplateSwitch::setup() den Schalter beim Start auf AUS schreiben, und das
+  # fuehrt die turn_off_action aus - hier also set_mode_pv an die Wallbox, bei
+  # jedem Neustart. Nur bei DISABLED bleibt setup() untaetig. Der Schalter
+  # speichert ohnehin keinen Zustand, er spiegelt ueber sein lambda den von
+  # evcc gemeldeten.
   - platform: template
     name: "EVCC Schnellladen"
     id: switch_evcc_now
     icon: "mdi:lightning-bolt"
+    restore_mode: DISABLED
     lambda: |-
       if (id(wallbox_mode).state == "NOW") { return true; } else { return false; }
     turn_on_action:
@@ -850,10 +856,13 @@ switch:
       - script.execute: set_mode_pv
 
   # Neuer Schalter für HA: Planladung
+  # DISABLED aus demselben Grund wie oben - sonst ginge beim Start ein
+  # delete_plan_request an evcc.
   - platform: template
     name: "EVCC Planladung"
     id: switch_evcc_plan
     icon: "mdi:battery-clock"
+    restore_mode: DISABLED
     lambda: |-
       return id(evcc_chargeplan_enabled).state;
     turn_on_action:

@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.6.1-blue)
+![Version](https://img.shields.io/badge/version-1.6.2-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -350,6 +350,12 @@ und 40 kB (kritisch) angehoben.
 Nicht in Home Assistant sichtbar sind der LDR-Sensor «Room Brightness» und die
 beiden Status-LEDs - sie sind als `internal: true` deklariert.
 
+Die beiden evcc-Schalter tragen seit V1.6.2 `restore_mode: DISABLED`. Bei der
+Vorgabe `ALWAYS_OFF` schreibt ESPHome sie beim Start auf AUS und führt dabei
+ihre `turn_off_action` aus — ein Neustart schickte damit `set_mode_pv` und
+`delete_plan_request` an die Wallbox. Wer hier einen Schalter mit Aktion
+ergänzt, denkt am besten gleich an diesen Punkt.
+
 > **Achtung beim Schalter «EVCC Planladung»:** Einschalten *setzt keinen Plan*,
 > sondern öffnet nur die Eingabeseite am Display und startet den
 > 10-Sekunden-Timer. Wer den Schalter in HA einschaltet und nicht ans Display
@@ -400,7 +406,7 @@ verdrahtet.
 | :--- | :--- | :--- |
 | `device_name` | `ha-frontroom-info-display` | `name` und `friendly_name`, zugleich der mDNS-Name |
 | `project_name` | `tsgwiro1.ha-frontroom-info-display` | `project:`-Block |
-| `fw_version` | `1.6.1` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
+| `fw_version` | `1.6.2` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
 | `device_timezone` | `Europe/Zurich` | IANA-Name oder POSIX-TZ-Zeichenkette. **Ohne Angabe nimmt ESPHome die Zeitzone des bauenden Rechners** — der Ladeplan ginge dann mit einer fremden Ortszeit an evcc |
 
 **evcc**
