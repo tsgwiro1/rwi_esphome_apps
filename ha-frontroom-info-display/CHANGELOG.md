@@ -2,6 +2,58 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.5.0] - 2026-08-21
+
+### Neu
+
+* **Abgelehnte Befehle sagen, warum.** Bisher tat das Gerät bei einem
+  unzulässigen Befehl schlicht nichts — kein Bild, keine LED, keine Meldung.
+  «Gerät kaputt» und «absichtlich abgelehnt» sahen gleich aus. Neu erscheint
+  ein Balken über die volle Breite, 44 px hoch am unteren Rand, vier Sekunden
+  lang: **blau** für abgelehnt, **rot** für fehlgeschlagen. Er wird auf allen
+  fünf Seiten zuletzt gezeichnet und deckt ab, was darunter liegt.
+
+  Gesetzt wird er ausschliesslich über das Skript `show_hint` mit Text und
+  Stufe als Parameter. `hint_no_plan` unterscheidet die beiden Gründe, aus
+  denen ein Ladeplan abgelehnt wird — `No vehicle connected` oder
+  `Guest vehicle - no plan`.
+
+  **Erfolg meldet sich bewusst nicht.** Dafür sind die beiden Tasten-LEDs da,
+  die im Sekundentakt den evcc-Zustand spiegeln. Der Balken zeigt nur, was
+  davon abweicht; so bleibt die Anzeige ruhig und ein Hinweis heisst etwas.
+
+* **Sensor «Letzter Hinweis» in Home Assistant.** Hält denselben Text fest,
+  ohne Ablauf. Der Schalter *EVCC Planladung* springt bei einer Ablehnung
+  sofort zurück, weil sein Lambda den evcc-Zustand meldet — das sah bisher nach
+  einem Fehler aus. Jetzt steht der Grund daneben.
+
+### Geändert
+
+* **Die Hardware-Taste *Schnellladen* prüft auf ein angestecktes Fahrzeug.**
+  Sie schaltete den Modus bisher bedingungslos, während die drei Modusfelder
+  auf `ev_page` das längst ablehnen — dieselbe Handlung war auf dem Bildschirm
+  verboten und auf der Taste erlaubt. Eine Vorwahl brächte ohnehin nichts: die
+  HA-Automation «Wallbox: Fahrzeug angesteckt» setzt beim Einstecken als Erstes
+  `off` und überschreibt sie.
+
+* **`touch_lock` ist aus der gemeinsamen Bedingung gelöst.** Auf `ev_page`
+  stand die Sperre gegen die Berührung vom Seitenwechsel im selben `&&` wie die
+  Fahrzeugprüfung. Das ist keine Ablehnung, sondern ein Fehlereignis, und muss
+  stumm bleiben — sonst blinkte bei jedem Wechsel auf die Seite ein Balken auf.
+
+* **Der verworfene Ladeplan meldet sich.** Läuft der Zehn-Sekunden-Timer der
+  Eingabeseite ab, während kein oder ein fremdes Fahrzeug angesteckt ist, wurde
+  der eingestellte Plan wortlos verworfen.
+
+### Bekannt
+
+Die fünf evcc-Skripte werten die HTTP-Antwort weiterhin nicht aus; die rote
+Stufe des Balkens ist dafür schon angelegt. Ebenso fehlt die Überwachung, ob
+evcc einen angenommenen Befehl auch ausführt. Beides ist für V1.6.0 vorgesehen,
+zusammen mit `timeout: 2s` gegen das Einfrieren der Anzeige — `http_request`
+ist synchron, ein nicht erreichbares evcc blockiert die Schleife bis zum
+Zeitablauf.
+
 ## [1.4.2] - 2026-08-21
 
 ### Geändert

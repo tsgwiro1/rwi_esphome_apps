@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.4.2"
+  fw_version: "1.5.0"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -76,6 +76,7 @@ substitutions:
   plan_default_soc: "65"
   plan_send_timeout: "10"         # s ohne Beruehrung, dann wird gesendet
   page_return_timeout: "2min"     # Ruecksprung auf die Uebersicht
+  hint_seconds: "4"               # s, so lange steht ein Hinweisbalken
 
 # ---- Diagnose-Paket ----------------------------------------
   diag_min_heap_ok: "80000"       # 80 kB ist gut fuer den ESP32
@@ -184,6 +185,30 @@ script:
           method: DELETE
           url: ${evcc_url}/api/vehicles/${evcc_vehicle}/plan/soc
           
+  # Zeigt einen Hinweis auf allen Seiten und schreibt ihn nach Home Assistant.
+  # Erfolg wird bewusst nicht gemeldet - dafuer sind die Tasten-LEDs da, die
+  # den evcc-Zustand spiegeln. Hier steht nur, was davon abweicht.
+  - id: show_hint
+    parameters:
+      text: string
+      level: int
+    then:
+      - lambda: |-
+          id(hint_text) = text;
+          id(hint_level) = level;
+          id(hint_left) = ${hint_seconds};
+          id(last_hint).publish_state(text);
+
+  # Ein Ladeplan wurde abgelehnt. Der Grund ist einer von zweien, und die
+  # Unterscheidung braucht es an drei Stellen - deshalb ein eigenes Skript.
+  - id: hint_no_plan
+    then:
+      - lambda: |-
+          bool kein_auto = !id(vehicle_connected).has_state() ||
+                           !id(vehicle_connected).state;
+          id(show_hint)->execute(kein_auto ? "No vehicle connected"
+                                           : "Guest vehicle - no plan", 1);
+
   # Logik: Modus off setzen
   - id : set_mode_off
     then:
@@ -225,6 +250,19 @@ globals:
     type: int
     restore_value: yes
     initial_value: '${plan_default_soc}'
+  # Hinweisbalken: Text, Stufe (1 = orange, 2 = rot) und Restlaufzeit in
+  # Sekunden. Gesetzt wird ausschliesslich ueber das Skript show_hint.
+  - id: hint_text
+    type: std::string
+    restore_value: no
+  - id: hint_level
+    type: int
+    restore_value: no
+    initial_value: '1'
+  - id: hint_left
+    type: int
+    restore_value: no
+    initial_value: '0'
 
 light:
   - platform: monochromatic
@@ -276,14 +314,29 @@ binary_sensor:
       - delayed_on: 10ms
     on_press:
       then:
+        # Ohne angestecktes Fahrzeug bringt ein Moduswechsel nichts: die
+        # Automatisierung "Wallbox: Fahrzeug angesteckt" setzt beim Einstecken
+        # als Erstes auf off und ueberschreibt jede Vorwahl. Die Modusfelder
+        # auf ev_page lehnen aus demselben Grund schon lange ab.
         - if:
             condition:
               - lambda: |-
-                  return id(wallbox_mode).state != "NOW";
-            then:   
-              - script.execute: set_mode_now
+                  return id(vehicle_connected).has_state() &&
+                         id(vehicle_connected).state;
+            then:
+              - if:
+                  condition:
+                    - lambda: |-
+                        return id(wallbox_mode).state != "NOW";
+                  then:
+                    - script.execute: set_mode_now
+                  else:
+                    - script.execute: set_mode_pv
             else:
-              - script.execute: set_mode_pv
+              - script.execute:
+                  id: show_hint
+                  text: "No vehicle connected"
+                  level: 1
   - platform: gpio
     id: button_charge_plan
     pin:
@@ -315,6 +368,8 @@ binary_sensor:
                     - lambda: |-
                         id(recent_touch) = true;
                         id(plan_setup_timeout_timer) = id(plan_setup_timeout);
+                  else:
+                    - script.execute: hint_no_plan
 
   - platform: touchscreen
     id: button_ev
@@ -389,16 +444,27 @@ binary_sensor:
     page_id: ev_page
     on_press:
       then:
+        # touch_lock faengt die Beruehrung ab, die noch vom Seitenwechsel
+        # stammt. Das ist kein abgelehnter Befehl und bleibt deshalb stumm -
+        # sonst blinkte bei jedem Wechsel auf diese Seite ein Balken auf.
         - if:
             condition:
-              - lambda: |-
-                  return !id(touch_lock) &&
-                         id(vehicle_connected).has_state() &&
-                         id(vehicle_connected).state;
+              - lambda: 'return !id(touch_lock);'
             then:
-              - script.execute: set_mode_off
-              - lambda: |-
-                  id(recent_touch) = true;
+              - if:
+                  condition:
+                    - lambda: |-
+                        return id(vehicle_connected).has_state() &&
+                               id(vehicle_connected).state;
+                  then:
+                    - script.execute: set_mode_off
+                    - lambda: |-
+                        id(recent_touch) = true;
+                  else:
+                    - script.execute:
+                        id: show_hint
+                        text: "No vehicle connected"
+                        level: 1
   - platform: touchscreen
     id: button_ev_pv
     x_min: 132
@@ -410,14 +476,22 @@ binary_sensor:
       then:
         - if:
             condition:
-              - lambda: |-
-                  return !id(touch_lock) &&
-                         id(vehicle_connected).has_state() &&
-                         id(vehicle_connected).state;
+              - lambda: 'return !id(touch_lock);'
             then:
-              - script.execute: set_mode_pv
-              - lambda: |-
-                  id(recent_touch) = true;
+              - if:
+                  condition:
+                    - lambda: |-
+                        return id(vehicle_connected).has_state() &&
+                               id(vehicle_connected).state;
+                  then:
+                    - script.execute: set_mode_pv
+                    - lambda: |-
+                        id(recent_touch) = true;
+                  else:
+                    - script.execute:
+                        id: show_hint
+                        text: "No vehicle connected"
+                        level: 1
   - platform: touchscreen
     id: button_ev_now
     x_min: 204
@@ -429,14 +503,22 @@ binary_sensor:
       then:
         - if:
             condition:
-              - lambda: |-
-                  return !id(touch_lock) &&
-                         id(vehicle_connected).has_state() &&
-                         id(vehicle_connected).state;
+              - lambda: 'return !id(touch_lock);'
             then:
-              - script.execute: set_mode_now
-              - lambda: |-
-                  id(recent_touch) = true;
+              - if:
+                  condition:
+                    - lambda: |-
+                        return id(vehicle_connected).has_state() &&
+                               id(vehicle_connected).state;
+                  then:
+                    - script.execute: set_mode_now
+                    - lambda: |-
+                        id(recent_touch) = true;
+                  else:
+                    - script.execute:
+                        id: show_hint
+                        text: "No vehicle connected"
+                        level: 1
   - platform: touchscreen
     id: button_h_plus
     x_min: 40
@@ -624,6 +706,16 @@ sensor:
 
 # Define all the string sensors used
 text_sensor:
+  # Der zuletzt gezeigte Hinweis. Bleibt stehen, nicht nur die vier Sekunden
+  # des Balkens: Wer den Ladeplan-Schalter in Home Assistant umlegt und ihn
+  # zurueckspringen sieht, findet hier den Grund.
+  - platform: template
+    name: "Letzter Hinweis"
+    id: last_hint
+    icon: "mdi:message-alert-outline"
+    entity_category: diagnostic
+    update_interval: never
+
   - platform: homeassistant
     entity_id: ${ent_weather}
     id: weather_condition
@@ -676,6 +768,10 @@ switch:
             - lambda: |-
                 id(recent_touch) = true;
                 id(plan_setup_timeout_timer) = id(plan_setup_timeout);
+          else:
+            # Der Schalter springt gleich wieder zurueck, weil sein lambda den
+            # evcc-Zustand meldet. Ohne Hinweis saehe das nach einem Fehler aus.
+            - script.execute: hint_no_plan
     turn_off_action:
       - script.execute: delete_plan_request
 
@@ -1066,6 +1162,8 @@ interval:
             c.perform();
           }
 
+          if (id(hint_left) > 0) { id(hint_left)--; }
+
           if (id(plan_setup_timeout_timer)) {
             id(plan_setup_timeout_timer)--;
 
@@ -1076,6 +1174,10 @@ interval:
               if (id(vehicle_connected).has_state() && id(vehicle_connected).state &&
                   id(known_vehicle).state) {
                 id(send_plan_request).execute();
+              } else {
+                // Zehn Sekunden eingestellt und dann doch nichts gesendet -
+                // das darf nicht wortlos passieren.
+                id(hint_no_plan).execute();
               }
               id(main_page).show();
             }
@@ -1247,6 +1349,20 @@ display:
             it.printf(85, 193, id(lato14), WHITE, "---");
           }
           //***********************************
+
+          // **** Hinweisbalken ****
+          // Wird zuletzt gezeichnet und deckt ab, was darunter liegt. Er
+          // erscheint nur, wenn wirklich etwas zu sagen ist - der Normalfall
+          // meldet sich ueber die Tasten-LEDs, nicht hier.
+          //
+          // Blau heisst abgelehnt, rot heisst fehlgeschlagen. Der Text darf
+          // hoechstens rund 23 Zeichen haben: in lato30 misst die laengste
+          // Meldung 302 der 320 Pixel.
+          if (id(hint_left) > 0) {
+            Color hbg = id(hint_level) == 2 ? RED : HA_BLUE;
+            it.filled_rectangle(0, 196, 320, 44, hbg);
+            it.printf(160, 218, id(lato30), BLACK, hbg, TextAlign::CENTER, "%s", id(hint_text).c_str());
+          }
       - id: ev_page
         lambda: |-
           it.image(0, 0, id(ev_icon));
@@ -1358,6 +1474,13 @@ display:
             it.printf(160, 118, id(lato30), WHITE, BLACK, TextAlign::BOTTOM_CENTER, "Nothing");
             it.printf(160, 122, id(lato30), WHITE, BLACK, TextAlign::TOP_CENTER, "connected to wallbox");
           }
+
+          // **** Hinweisbalken **** (siehe main_page)
+          if (id(hint_left) > 0) {
+            Color hbg = id(hint_level) == 2 ? RED : HA_BLUE;
+            it.filled_rectangle(0, 196, 320, 44, hbg);
+            it.printf(160, 218, id(lato30), BLACK, hbg, TextAlign::CENTER, "%s", id(hint_text).c_str());
+          }
       - id: plan_setup_page
         lambda: |-
           it.image(0, 0, id(clock_icon));
@@ -1372,6 +1495,13 @@ display:
           id(button_h_minus).state   ? it.image(40, 160, id(button_arrow_down_pressed))  : it.image(40, 160, id(button_arrow_down)); 
           id(button_min_minus).state ? it.image(120, 160, id(button_arrow_down_pressed)) : it.image(120, 160, id(button_arrow_down)); 
           id(button_soc_minus).state ? it.image(220, 160, id(button_arrow_down_pressed)) : it.image(220, 160, id(button_arrow_down)); 
+
+          // **** Hinweisbalken **** (siehe main_page)
+          if (id(hint_left) > 0) {
+            Color hbg = id(hint_level) == 2 ? RED : HA_BLUE;
+            it.filled_rectangle(0, 196, 320, 44, hbg);
+            it.printf(160, 218, id(lato30), BLACK, hbg, TextAlign::CENTER, "%s", id(hint_text).c_str());
+          }
       - id: bat_page
         lambda: |-
           it.image(0, 0, id(energy_icon));
@@ -1394,6 +1524,13 @@ display:
             it.printf(223, 72, id(lato24), WHITE, "%.0f W", id(battery_power).state);
           }
           it.graph(10, 130, id(home_bat_graph));
+
+          // **** Hinweisbalken **** (siehe main_page)
+          if (id(hint_left) > 0) {
+            Color hbg = id(hint_level) == 2 ? RED : HA_BLUE;
+            it.filled_rectangle(0, 196, 320, 44, hbg);
+            it.printf(160, 218, id(lato30), BLACK, hbg, TextAlign::CENTER, "%s", id(hint_text).c_str());
+          }
       - id: energy_page
         lambda: |-
           it.image(0, 0, id(energy_icon));
@@ -1495,3 +1632,11 @@ display:
           num(85, 190, WHITE, TextAlign::TOP_RIGHT, soc_Battery, "%");
           c = id(battery_power).state > 0 ? LIGHTGREEN : LIGHTRED;
           if (ok_bat && p_I_Bat + p_O_Bat > 0) it.printf(85,210,id(lato14), c, BLACK, TextAlign::TOP_RIGHT, "%.0f W", p_I_Bat + p_O_Bat);
+
+
+          // **** Hinweisbalken **** (siehe main_page)
+          if (id(hint_left) > 0) {
+            Color hbg = id(hint_level) == 2 ? RED : HA_BLUE;
+            it.filled_rectangle(0, 196, 320, 44, hbg);
+            it.printf(160, 218, id(lato30), BLACK, hbg, TextAlign::CENTER, "%s", id(hint_text).c_str());
+          }

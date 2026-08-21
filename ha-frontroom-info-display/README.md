@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.4.2-blue)
+![Version](https://img.shields.io/badge/version-1.5.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -290,10 +290,28 @@ könnte einen Plan sonst keinem Fahrzeug zuordnen. Das gilt auch für den
 Zehn-Sekunden-Timer der Eingabeseite. `delete_plan_request` ist nicht
 eingeschränkt.
 
-**Keine Fehlerbehandlung:** Die Skripte werten die HTTP-Antwort nicht aus. Ist
-evcc nicht erreichbar, bleibt die Anzeige unverändert und es gibt keinen
-Hinweis; erst der nächste Zustandsbericht der evcc-Integration korrigiert das
-Bild. `verify_ssl: false` ist gesetzt, ohne Bedeutung, da ohnehin nur `http://`
+**Kein Moduswechsel ohne Fahrzeug:** Seit V1.5.0 prüft auch die Hardware-Taste
+*Schnellladen*, ob ein Fahrzeug angesteckt ist — die drei Modusfelder auf der
+EV-Seite tun es seit jeher. Eine Vorwahl brächte ohnehin nichts: die
+HA-Automation «Wallbox: Fahrzeug angesteckt» setzt beim Einstecken als Erstes
+`off` und überschreibt sie.
+
+**Abgelehnte Befehle melden sich.** Was das Gerät nicht ausführt, bleibt seit
+V1.5.0 nicht mehr stumm. Ein Balken über die volle Breite, 44 px hoch am
+unteren Rand, nennt vier Sekunden lang den Grund: **blau** für abgelehnt, **rot**
+für fehlgeschlagen. Er wird auf allen fünf Seiten zuletzt gezeichnet und deckt
+ab, was darunter liegt. Für den Text sind rund 23 Zeichen Platz — die längste
+Meldung misst in `lato30` 302 der 320 Pixel.
+
+Erfolg wird bewusst *nicht* gemeldet. Dafür sind die beiden Tasten-LEDs da, die
+im Sekundentakt den evcc-Zustand spiegeln; der Balken zeigt nur, was davon
+abweicht. Denselben Text hält der Sensor «Letzter Hinweis» in Home Assistant
+fest, dort ohne Ablauf.
+
+**Weiterhin keine Fehlerbehandlung:** Die Skripte werten die HTTP-Antwort nicht
+aus. Ist evcc nicht erreichbar, bleibt die Anzeige unverändert und es gibt
+keinen Hinweis; erst der nächste Zustandsbericht der evcc-Integration korrigiert
+das Bild. `verify_ssl: false` ist gesetzt, ohne Bedeutung, da ohnehin nur `http://`
 aufgerufen wird.
 
 ---
@@ -307,6 +325,7 @@ aufgerufen wird.
 | **Display Backlight** | `light` (monochromatic) | Helligkeit der Hintergrundbeleuchtung, `restore_mode: ALWAYS_ON` |
 | **EVCC Schnellladen** | `switch` (template) | EIN spiegelt evcc-Modus `NOW`; Einschalten setzt `NOW`, Ausschalten `PV` |
 | **EVCC Planladung** | `switch` (template) | EIN spiegelt einen aktiven Ladeplan; Einschalten öffnet die Eingabeseite am Display — nur bei angestecktem Fahrzeug —, Ausschalten löscht den Plan |
+| **Letzter Hinweis** | `text_sensor` (template, Kategorie *Diagnose*) | Der zuletzt am Display gezeigte Hinweis. Bleibt stehen, damit ein in HA abgelehnter Schalter dort eine Begründung hat |
 | **Touch Kalibrierlog** | `switch` (template, Kategorie *Konfiguration*) | Gibt bei jeder Berührung Bildschirm- und Rohkoordinaten ins Log aus. Für die Kalibrierung eines neuen Panels, siehe [HARDWARE.md](HARDWARE.md), Abschnitt 8. Nach einem Neustart immer aus |
 
 Dazu die Diagnose-Entitäten der Kategorien 2.x bis 6.x aus
@@ -320,8 +339,9 @@ beiden Status-LEDs - sie sind als `internal: true` deklariert.
 > sondern öffnet nur die Eingabeseite am Display und startet den
 > 10-Sekunden-Timer. Wer den Schalter in HA einschaltet und nicht ans Display
 > geht, sendet nach zehn Sekunden die zuletzt gespeicherten Werte. Ohne
-> angestecktes Fahrzeug passiert gar nichts. Der Schalter fällt danach auf den
-> tatsächlichen evcc-Zustand zurück.
+> angestecktes oder mit einem fremden Fahrzeug wird der Schalter abgelehnt; der
+> Grund steht dann am Display und im Sensor «Letzter Hinweis». Der Schalter
+> fällt danach auf den tatsächlichen evcc-Zustand zurück.
 
 ### Vom Gerät konsumiert
 
@@ -365,7 +385,7 @@ verdrahtet.
 | :--- | :--- | :--- |
 | `device_name` | `ha-frontroom-info-display` | `name` und `friendly_name`, zugleich der mDNS-Name |
 | `project_name` | `tsgwiro1.ha-frontroom-info-display` | `project:`-Block |
-| `fw_version` | `1.4.2` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
+| `fw_version` | `1.5.0` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
 | `device_timezone` | `Europe/Zurich` | IANA-Name oder POSIX-TZ-Zeichenkette. **Ohne Angabe nimmt ESPHome die Zeitzone des bauenden Rechners** — der Ladeplan ginge dann mit einer fremden Ortszeit an evcc |
 
 **evcc**
@@ -425,6 +445,7 @@ Autors und werden in jeder anderen Installation abweichen:
 | `plan_default_hour` / `_minute` / `_soc` | `3` / `30` / `65` | Startwerte der Ladeplan-Seite vor der ersten Eingabe |
 | `plan_send_timeout` | `10` | Sekunden ohne Berührung, dann wird der Plan gesendet |
 | `page_return_timeout` | `2min` | Rücksprung auf die Übersicht |
+| `hint_seconds` | `4` | Sekunden, so lange steht ein Hinweisbalken |
 | `diag_min_heap_ok` / `_critical` | `80000` / `40000` | Schwellen des Diagnose-Pakets |
 
 > **Zugangsdaten gehören nicht in den Substitutionsblock**, sondern in
