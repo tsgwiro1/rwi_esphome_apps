@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.6.3"
+  fw_version: "1.7.0"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -521,19 +521,27 @@ binary_sensor:
     y_max: 40
     on_press:
       then:
-        # Nur auf den Seiten, die oben rechts auch ein Zurueck-Symbol zeichnen.
-        # Ohne die Bedingung liegt die Flaeche unsichtbar auch ueber
-        # plan_setup_page: ein Tipper neben dem SoC-Pfeil verliesse die Seite,
-        # waehrend plan_setup_timeout_timer weiterlaeuft und den Ladeplan zehn
-        # Sekunden spaeter trotzdem abschickt.
+        # Auf plan_setup_page steht hier das X: Abbrechen. Entscheidend ist,
+        # dass zuerst der Timer stehenbleibt - sonst ginge der Ladeplan zehn
+        # Sekunden spaeter trotzdem raus, obwohl die Seite verlassen wurde.
         - if:
             condition:
-              or:
-                - display.is_displaying_page: ev_page
-                - display.is_displaying_page: bat_page
-                - display.is_displaying_page: energy_page
+              - display.is_displaying_page: plan_setup_page
             then:
+              - lambda: |-
+                  id(plan_setup_timeout_timer) = 0;
               - display.page.show: main_page
+            else:
+              # Die uebrigen Seiten zeichnen oben rechts den Zurueck-Pfeil.
+              # Auf der Uebersicht liegt dort nichts, deshalb die Abfrage.
+              - if:
+                  condition:
+                    or:
+                      - display.is_displaying_page: ev_page
+                      - display.is_displaying_page: bat_page
+                      - display.is_displaying_page: energy_page
+                  then:
+                    - display.page.show: main_page
   - platform: touchscreen
     id: button_ev_off
     # Die drei Modusfelder werden auf ev_page nur im Zweig "verbunden"
@@ -1069,6 +1077,13 @@ image:
   - platform: file
     file: "pic/arrow_back.png"
     id: back_icon
+    resize: 40x40
+    type: GRAYSCALE
+  # X aus dem MDI-Pfad close-circle-outline, Ring auf die Staerke von
+  # arrow_back.png gebracht - beide sitzen oben rechts an derselben Stelle.
+  - platform: file
+    file: "pic/close.png"
+    id: close_icon
     resize: 40x40
     type: GRAYSCALE
   - platform: file
@@ -1630,6 +1645,7 @@ display:
       - id: plan_setup_page
         lambda: |-
           it.image(0, 0, id(clock_icon));
+          it.image(280, 0, id(close_icon));
           it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charge Plan");
           it.printf(70,96,id(lato50), WHITE, BLACK, TextAlign::TOP_CENTER, "%02d", id(plan_time_hour));
           it.printf(110,96,id(lato50), WHITE, BLACK, TextAlign::TOP_CENTER, ":");

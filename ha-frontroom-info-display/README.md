@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.6.3-blue)
+![Version](https://img.shields.io/badge/version-1.7.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -220,10 +220,19 @@ Bilder von 60 × 60 px. Die Flächen liegen deckungsgleich darauf:
 
 Alle drei Werte sind neustartfest (`restore_value: yes`, Vorgaben 03:30 / 65 %).
 Jede Berührung setzt einen **10-Sekunden-Timer** zurück. Läuft er ab, wird der
-Plan an evcc gesendet und die Anzeige springt auf die Übersicht - es gibt keine
-gesonderte Bestätigungsfläche und kein Abbrechen. Die Seite lässt sich nur über
-den Taster an GPIO22 oder den HA-Schalter «EVCC Planladung» öffnen, nicht per
-Touch von der Übersicht aus.
+Plan an evcc gesendet und die Anzeige springt auf die Übersicht - eine
+gesonderte Bestätigungsfläche gibt es nicht.
+
+**Abbrechen seit V1.7.0:** Oben rechts auf `280…320` / `0…40` steht ein X, an
+derselben Stelle wie der Zurück-Pfeil der übrigen Seiten. Es stoppt den Timer
+und springt zur Übersicht, ohne zu senden. Die eingestellte Uhrzeit und der SoC
+bleiben stehen — sie sind kein Teil eines Plans, sondern die Vorgabe für das
+nächste Mal.
+
+Die Seite lässt sich nur über den Taster an GPIO22 oder den HA-Schalter «EVCC
+Planladung» öffnen, nicht per Touch von der Übersicht aus. **Ist bereits ein
+Plan aktiv, löscht dieselbe Taste ihn, statt die Seite zu öffnen** — zum Ändern
+eines bestehenden Plans muss er also erst weg.
 
 **Der Ladeplan gilt nur für das bekannte Fahrzeug.** Seite, Schalter und
 Senderoutine prüfen seit V1.4.0, dass evcc genau `evcc_vehicle` als
@@ -406,7 +415,7 @@ verdrahtet.
 | :--- | :--- | :--- |
 | `device_name` | `ha-frontroom-info-display` | `name` und `friendly_name`, zugleich der mDNS-Name |
 | `project_name` | `tsgwiro1.ha-frontroom-info-display` | `project:`-Block |
-| `fw_version` | `1.6.3` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
+| `fw_version` | `1.7.0` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
 | `device_timezone` | `Europe/Zurich` | IANA-Name oder POSIX-TZ-Zeichenkette. **Ohne Angabe nimmt ESPHome die Zeitzone des bauenden Rechners** — der Ladeplan ginge dann mit einer fremden Ortszeit an evcc |
 
 **evcc**
@@ -477,13 +486,15 @@ Autors und werden in jeder anderen Installation abweichen:
 ### Assets
 
 
-**Die Bilddateien liegen seit V1.1.0 im Ordner `pic/` neben dieser Datei** — 32
-Symbole und ein Wetter-GIF, zusammen 144 KB. Die Konfiguration ist damit ohne
+**Die Bilddateien liegen seit V1.1.0 im Ordner `pic/` neben dieser Datei** — 33
+Symbole und ein Wetter-GIF, zusammen 148 KB. Die Konfiguration ist damit ohne
 weiteres Zutun baubar; ESPHome löst die Pfade `pic/…` relativ zur YAML auf.
 
 Alle Symbole stammen aus [Material Design Icons](https://pictogrammers.com/library/mdi/)
 und stehen unter Apache 2.0. Sie wurden aus den SVG-Vorlagen als PNG in der
-jeweils benötigten Grösse gerendert und eingefärbt; das Wetter-GIF ist aus
+jeweils benötigten Grösse gerendert und eingefärbt; beim X von `close.png` ist
+der Ring gegenüber `close-circle-outline` verstärkt, damit er zum Zurück-Pfeil
+auf demselben Platz passt; das Wetter-GIF ist aus
 `white-balance-sunny`, `cloud` und den Tropfen von `weather-pouring`
 zusammengesetzt.
 
@@ -499,7 +510,7 @@ bestimmt den Platz je Bildpunkt. Seit V1.4.1 steht deshalb nicht mehr überall
 
 | `type:` | Bytes je Bildpunkt | verwendet für |
 | :--- | :---: | :--- |
-| `GRAYSCALE` | 1 | die 22 einfarbigen Symbole |
+| `GRAYSCALE` | 1 | die 23 einfarbigen Symbole |
 | `RGB565` | 2 | die 13 farbigen Bilder samt Wetteranimation |
 
 Bei einem grauen Symbol ist `GRAYSCALE` verlustfrei — ESPHome liefert

@@ -2,6 +2,44 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.7.0] - 2026-08-21
+
+### Neu
+
+* **Die Ladeplanseite lässt sich abbrechen.** Sie sendete nach zehn Sekunden
+  ohne Berührung immer; es gab keinen Weg, sie zu verlassen, ohne einen Plan zu
+  setzen. Oben rechts steht jetzt ein X, an derselben Stelle, an der die
+  übrigen Seiten den Zurück-Pfeil zeigen.
+
+  Die Touchfläche `button_return` gab es dort längst — sie war für diese Seite
+  ausdrücklich gesperrt, weil ein Verlassen den Timer weiterlaufen liess und
+  den Plan zehn Sekunden später trotzdem abschickte. Der Abbruch setzt deshalb
+  **zuerst** `plan_setup_timeout_timer = 0` und wechselt dann zur Übersicht.
+  Damit wird aus dem versehentlichen Tipper neben dem SoC-Pfeil, vor dem der
+  alte Kommentar warnte, ein harmloser Abbruch.
+
+  Die eingestellte Uhrzeit und der SoC bleiben stehen. Sie sind kein Teil eines
+  Plans, sondern die Vorgabe für das nächste Mal.
+
+  Am Gerät geprüft: Nach dem Abbruch drei Minuten lang kein Aufruf im Log und
+  `effectivePlanId: 0` bei evcc. Die Gegenprobe — Seite offen lassen — meldet
+  unverändert nach zehn Sekunden `Ladeplan gesetzt: Antwort 200`.
+
+* **Symbol `close_icon`.** Das X stammt Punkt für Punkt aus dem MDI-Pfad
+  `close-circle-outline`; Innenradius und X-Grösse sind so gewählt, dass der
+  Ring dem vorhandenen `arrow_back.png` entspricht. Das echte MDI-Symbol hat
+  einen halb so dicken Ring — gemessen 6 gegen 13 Pixel bei 80 px Breite — und
+  wirkte neben dem Zurück-Pfeil zu dünn. Ohne SVG-Renderer auf dem Rechner
+  wurde der Pfad direkt gerastert: 32-fach überabgetastet, mit Lanczos auf
+  80 × 80 verkleinert, von dort halbiert ESPHome auf 40 × 40. Kein farbiger
+  Bildpunkt, `GRAYSCALE` ist verlustfrei.
+
+### Bekannt
+
+Solange ein Plan aktiv ist, öffnet die Plan-Taste die Eingabeseite nicht,
+sondern löscht den Plan — die erste Verzweigung ihrer Logik, unverändert seit
+jeher. Zum Ändern eines bestehenden Plans muss er also erst gelöscht werden.
+
 ## [1.6.3] - 2026-08-21
 
 ### Behoben
