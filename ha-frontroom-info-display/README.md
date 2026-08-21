@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.5.0-blue)
+![Version](https://img.shields.io/badge/version-1.6.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -308,11 +308,26 @@ im Sekundentakt den evcc-Zustand spiegeln; der Balken zeigt nur, was davon
 abweicht. Denselben Text hält der Sensor «Letzter Hinweis» in Home Assistant
 fest, dort ohne Ablauf.
 
-**Weiterhin keine Fehlerbehandlung:** Die Skripte werten die HTTP-Antwort nicht
-aus. Ist evcc nicht erreichbar, bleibt die Anzeige unverändert und es gibt
-keinen Hinweis; erst der nächste Zustandsbericht der evcc-Integration korrigiert
-das Bild. `verify_ssl: false` ist gesetzt, ohne Bedeutung, da ohnehin nur `http://`
-aufgerufen wird.
+**Antwort und Bestätigung.** Seit V1.6.0 stehen alle fünf Skripte in der vollen
+Form mit `on_response` und `on_error`. Ein Statuscode ausserhalb 2xx meldet rot
+`evcc error <code>`, ein Transportfehler `evcc not reachable`. Die Trennung
+folgt ESPHome: bei einem 4xx kommt der Container zurück, der Fehlerzweig feuert
+nur, wenn gar keine Verbindung zustande kam.
+
+Ein 2xx heisst allerdings bloss, dass die Anfrage angekommen ist. Ob evcc auch
+gehandelt hat, prüft der Sekundentakt an derselben Spiegelung, die die LEDs
+treibt: erreicht sie binnen zehn Sekunden den erwarteten Zustand, verfällt die
+Erwartung stumm, sonst erscheint `Mode not confirmed`, `Plan sent, not active`
+oder `Plan still active`. Der mittlere Fall tritt auf, wenn evcc einen Plan
+annimmt, ihn aber nicht wirksam macht, weil der Ziel-SoC schon erreicht ist.
+
+Jede Antwort steht zusätzlich im Log (`Modus PV: Antwort 200`).
+
+**`timeout: 2s`:** `http_request` ist synchron, `perform()` blockiert die
+Schleife bis zur Antwort — mit der Vorgabe von 4.5 s fror ein nicht
+erreichbares evcc die Anzeige entsprechend lange ein. Gemessen kostet ein
+Aufruf im Normalfall 52 bis 62 ms. `verify_ssl: false` ist gesetzt, ohne
+Bedeutung, da ohnehin nur `http://` aufgerufen wird.
 
 ---
 
@@ -345,7 +360,7 @@ beiden Status-LEDs - sie sind als `internal: true` deklariert.
 
 ### Vom Gerät konsumiert
 
-Das Display abonniert 28 Entitäten aus Home Assistant. Seit V1.3.0 steht kein
+Das Display abonniert 27 Entitäten aus Home Assistant. Seit V1.3.0 steht kein
 Entitätsname mehr im Code — jeder hängt an einer Substitution am Kopf der YAML.
 Die Vorgabewerte stehen in Abschnitt 6.
 
@@ -355,7 +370,7 @@ Die Vorgabewerte stehen in Abschnitt 6.
 | Hausbatterie | `ent_battery_soc`, `ent_battery_power` |
 | Wetter | `ent_weather`, `ent_outdoor_temperature`, `ent_rain`, `ent_rain_frequency` |
 | Fahrzeug | `ent_vehicle_soc`, `ent_vehicle_range`, `ent_vehicle_target_soc`, `ent_vehicle_name`, `ent_vehicle_title`, `ent_vehicle_detection` |
-| Wallbox & evcc | `ent_evcc_mode`, `ent_evcc_connected`, `ent_evcc_charging`, `ent_evcc_charge_power`, `ent_evcc_charge_current`, `ent_evcc_solar_share_30d` |
+| Wallbox & evcc | `ent_evcc_mode`, `ent_evcc_connected`, `ent_evcc_charging`, `ent_evcc_charge_power`, `ent_evcc_solar_share_30d` |
 | Ladeplan | `ent_plan_enabled`, `ent_plan_soc`, `ent_plan_time`, `ent_plan_automation` |
 | Wärmepumpe & Heizstab | `ent_heatpump_power_electric`, `ent_heatpump_power_heat`, `ent_heater_power`, `ent_heater_percent` |
 
@@ -385,7 +400,7 @@ verdrahtet.
 | :--- | :--- | :--- |
 | `device_name` | `ha-frontroom-info-display` | `name` und `friendly_name`, zugleich der mDNS-Name |
 | `project_name` | `tsgwiro1.ha-frontroom-info-display` | `project:`-Block |
-| `fw_version` | `1.5.0` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
+| `fw_version` | `1.6.0` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
 | `device_timezone` | `Europe/Zurich` | IANA-Name oder POSIX-TZ-Zeichenkette. **Ohne Angabe nimmt ESPHome die Zeitzone des bauenden Rechners** — der Ladeplan ginge dann mit einer fremden Ortszeit an evcc |
 
 **evcc**
@@ -417,7 +432,6 @@ Autors und werden in jeder anderen Installation abweichen:
 | `ent_evcc_connected` | `binary_sensor.evcc_loadpoint_connected` |
 | `ent_evcc_charging` | `binary_sensor.evcc_loadpoint_charging` |
 | `ent_evcc_charge_power` | `sensor.evcc_charge_power_w` |
-| `ent_evcc_charge_current` | `sensor.evcc_charge_current` |
 | `ent_evcc_solar_share_30d` | `sensor.evcc_charge_30d_solar_percentage` |
 | `ent_vehicle_soc` | `sensor.evcc_vehicle_soc` |
 | `ent_vehicle_range` | `sensor.evcc_vehicle_range` |

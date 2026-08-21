@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.5.0"
+  fw_version: "1.6.0"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -45,7 +45,6 @@ substitutions:
   ent_evcc_connected: binary_sensor.evcc_loadpoint_connected
   ent_evcc_charging: binary_sensor.evcc_loadpoint_charging
   ent_evcc_charge_power: sensor.evcc_charge_power_w
-  ent_evcc_charge_current: sensor.evcc_charge_current
   ent_evcc_solar_share_30d: sensor.evcc_charge_30d_solar_percentage
   ent_vehicle_soc: sensor.evcc_vehicle_soc
   ent_vehicle_range: sensor.evcc_vehicle_range
@@ -77,6 +76,7 @@ substitutions:
   plan_send_timeout: "10"         # s ohne Beruehrung, dann wird gesendet
   page_return_timeout: "2min"     # Ruecksprung auf die Uebersicht
   hint_seconds: "4"               # s, so lange steht ein Hinweisbalken
+  confirm_seconds: "10"           # s, so lange wird auf evccs Bestaetigung gewartet
 
 # ---- Diagnose-Paket ----------------------------------------
   diag_min_heap_ok: "80000"       # 80 kB ist gut fuer den ESP32
@@ -138,6 +138,11 @@ web_server:
 
 http_request:
    verify_ssl: false
+   # http_request ist synchron: perform() blockiert die Schleife, bis die
+   # Antwort da ist. Ein nicht erreichbares evcc friert damit die Anzeige ein -
+   # mit der Vorgabe von 4.5 s deutlich zu lange. Zwei Sekunden, weil HA und
+   # evcc auf demselben Raspi laufen und unter Last nicht schnell antworten.
+   timeout: 2s
 
 # ============================================================
 # Custom scripts for evcc actions
@@ -146,12 +151,24 @@ script:
   # Logik: Modus auf NOW setzen
   - id: set_mode_now
     then:
-      - http_request.post: ${evcc_url}/api/loadpoints/${evcc_loadpoint}/mode/now
+      - http_request.send:
+          method: POST
+          url: ${evcc_url}/api/loadpoints/${evcc_loadpoint}/mode/now
+          on_response:
+            - lambda: 'id(evcc_mode_answer)->execute(response->status_code, "NOW");'
+          on_error:
+            - script.execute: hint_unreachable
 
   # Logik: Modus auf PV setzen
   - id: set_mode_pv
     then:
-      - http_request.post: ${evcc_url}/api/loadpoints/${evcc_loadpoint}/mode/pv
+      - http_request.send:
+          method: POST
+          url: ${evcc_url}/api/loadpoints/${evcc_loadpoint}/mode/pv
+          on_response:
+            - lambda: 'id(evcc_mode_answer)->execute(response->status_code, "PV");'
+          on_error:
+            - script.execute: hint_unreachable
 
   # Logik: Planladung senden
   - id: send_plan_request
@@ -177,6 +194,10 @@ script:
             char soc[4];
             snprintf(soc, sizeof(soc), "%d", id(plan_soc));
             return ((std::string) "${evcc_url}/api/vehicles/${evcc_vehicle}/plan/soc/" + soc + "/" + tstr);
+          on_response:
+            - lambda: 'id(evcc_plan_answer)->execute(response->status_code, 1);'
+          on_error:
+            - script.execute: hint_unreachable
 
   # Logik: Planladung löschen
   - id: delete_plan_request
@@ -184,6 +205,10 @@ script:
       - http_request.send:
           method: DELETE
           url: ${evcc_url}/api/vehicles/${evcc_vehicle}/plan/soc
+          on_response:
+            - lambda: 'id(evcc_plan_answer)->execute(response->status_code, 2);'
+          on_error:
+            - script.execute: hint_unreachable
           
   # Zeigt einen Hinweis auf allen Seiten und schreibt ihn nach Home Assistant.
   # Erfolg wird bewusst nicht gemeldet - dafuer sind die Tasten-LEDs da, die
@@ -199,6 +224,60 @@ script:
           id(hint_left) = ${hint_seconds};
           id(last_hint).publish_state(text);
 
+  # Antwort eines evcc-Aufrufs. Ein 2xx heisst nur, dass die Anfrage angekommen
+  # ist - ob evcc den Zustand auch aendert, prueft danach der Sekundentakt.
+  - id: evcc_mode_answer
+    parameters:
+      code: int
+      want: string
+    then:
+      - lambda: |-
+          ESP_LOGI("evcc", "Modus %s: Antwort %d", want.c_str(), code);
+          if (code >= 200 && code < 300) {
+            id(pend_mode) = want;
+            id(pend_mode_left) = ${confirm_seconds};
+          } else {
+            id(pend_mode_left) = 0;
+            id(hint_http_error)->execute(code);
+          }
+
+  # want: 1 = Plan erwartet, 2 = kein Plan erwartet.
+  - id: evcc_plan_answer
+    parameters:
+      code: int
+      want: int
+    then:
+      - lambda: |-
+          ESP_LOGI("evcc", "Ladeplan %s: Antwort %d",
+                   want == 1 ? "gesetzt" : "geloescht", code);
+          if (code >= 200 && code < 300) {
+            id(pend_plan) = want;
+            id(pend_plan_left) = ${confirm_seconds};
+          } else {
+            id(pend_plan_left) = 0;
+            id(hint_http_error)->execute(code);
+          }
+
+  - id: hint_http_error
+    parameters:
+      code: int
+    then:
+      - lambda: |-
+          char t[24];
+          snprintf(t, sizeof(t), "evcc error %d", code);
+          id(show_hint)->execute(t, 2);
+
+  # Kein Container zurueck: evcc hat gar nicht geantwortet.
+  - id: hint_unreachable
+    then:
+      - logger.log:
+          format: "evcc hat nicht geantwortet"
+          level: WARN
+      - script.execute:
+          id: show_hint
+          text: "evcc not reachable"
+          level: 2
+
   # Ein Ladeplan wurde abgelehnt. Der Grund ist einer von zweien, und die
   # Unterscheidung braucht es an drei Stellen - deshalb ein eigenes Skript.
   - id: hint_no_plan
@@ -210,9 +289,15 @@ script:
                                            : "Guest vehicle - no plan", 1);
 
   # Logik: Modus off setzen
-  - id : set_mode_off
+  - id: set_mode_off
     then:
-      - http_request.post: ${evcc_url}/api/loadpoints/${evcc_loadpoint}/mode/off
+      - http_request.send:
+          method: POST
+          url: ${evcc_url}/api/loadpoints/${evcc_loadpoint}/mode/off
+          on_response:
+            - lambda: 'id(evcc_mode_answer)->execute(response->status_code, "OFF");'
+          on_error:
+            - script.execute: hint_unreachable
 
 # ============================================================ 
 # Home Assistant related setup
@@ -260,6 +345,24 @@ globals:
     restore_value: no
     initial_value: '1'
   - id: hint_left
+    type: int
+    restore_value: no
+    initial_value: '0'
+  # Bestaetigung: Ein 2xx sagt nur, dass die Anfrage angekommen ist. Ob evcc
+  # den Zustand auch aendert, zeigt erst die Spiegelung. pend_mode haelt den
+  # erwarteten Modus, pend_plan 1 = Plan erwartet, 2 = kein Plan erwartet.
+  - id: pend_mode
+    type: std::string
+    restore_value: no
+  - id: pend_mode_left
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: pend_plan
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: pend_plan_left
     type: int
     restore_value: no
     initial_value: '0'
@@ -672,9 +775,6 @@ sensor:
   - platform: homeassistant
     entity_id: ${ent_evcc_charge_power}
     id: wallbox_charge_power
-  - platform: homeassistant
-    entity_id: ${ent_evcc_charge_current}
-    id: wallbox_charge_current
   - platform: homeassistant
     entity_id: ${ent_vehicle_target_soc}
     id: vehicle_target_soc
@@ -1164,6 +1264,26 @@ interval:
 
           if (id(hint_left) > 0) { id(hint_left)--; }
 
+          // Hat evcc den angenommenen Befehl auch ausgefuehrt? Verglichen wird
+          // gegen dieselbe Spiegelung, die auch die LEDs treibt.
+          if (id(pend_mode_left) > 0) {
+            if (id(wallbox_mode).state == id(pend_mode)) {
+              id(pend_mode_left) = 0;
+            } else if (--id(pend_mode_left) == 0) {
+              id(show_hint)->execute("Mode not confirmed", 1);
+            }
+          }
+          if (id(pend_plan_left) > 0) {
+            if (id(evcc_chargeplan_enabled).state == (id(pend_plan) == 1)) {
+              id(pend_plan_left) = 0;
+            } else if (--id(pend_plan_left) == 0) {
+              // Ein gesendeter Plan wird nicht wirksam, wenn der Ziel-SoC
+              // schon erreicht ist. Kein Fehler, aber man will es wissen.
+              id(show_hint)->execute(id(pend_plan) == 1 ? "Plan sent, not active"
+                                                        : "Plan still active", 1);
+            }
+          }
+
           if (id(plan_setup_timeout_timer)) {
             id(plan_setup_timeout_timer)--;
 
@@ -1357,7 +1477,7 @@ display:
           //
           // Blau heisst abgelehnt, rot heisst fehlgeschlagen. Der Text darf
           // hoechstens rund 23 Zeichen haben: in lato30 misst die laengste
-          // Meldung 302 der 320 Pixel.
+          // Meldung 306 der 320 Pixel.
           if (id(hint_left) > 0) {
             Color hbg = id(hint_level) == 2 ? RED : HA_BLUE;
             it.filled_rectangle(0, 196, 320, 44, hbg);
@@ -1448,11 +1568,11 @@ display:
               it.printf(58,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "0kW"); it.printf(296,161,id(lato10),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0fkW", ${wallbox_max_power} / 1000.0);
               ch = min(250.0, 250.0 / ${wallbox_max_power} * id(wallbox_charge_power).state);
               it.filled_rectangle(50,140,ch,20,LIGHTRED); it.filled_rectangle(50+ch,140,250-ch,20,HA_BLUE);
-              if (id(wallbox_charge_current).has_state()) {
-                it.printf(160,138,id(lato20),WHITE, BLACK, TextAlign::BOTTOM_CENTER, "%.0f W (%.0f A)", id(wallbox_charge_power).state, id(wallbox_charge_current).state);
-              } else {
-                it.printf(160,138,id(lato20),WHITE, BLACK, TextAlign::BOTTOM_CENTER, "%.0f W", id(wallbox_charge_power).state);
-              }
+              // Kein Ladestrom mehr: evcc kennt kein Feld chargeCurrent,
+              // sondern chargeCurrents je Phase. Der HA-Sensor horchte auf ein
+              // Thema, das es nie gab, stand dauerhaft auf unknown und schrieb
+              // deshalb "nan A" neben die Leistung.
+              it.printf(160,138,id(lato20),WHITE, BLACK, TextAlign::BOTTOM_CENTER, "%.0f W", id(wallbox_charge_power).state);
             }
             // **** Mode ****
             if (id(wallbox_mode).state == "OFF") {

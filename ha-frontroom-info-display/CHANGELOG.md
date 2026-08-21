@@ -2,6 +2,65 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.6.0] - 2026-08-21
+
+### Neu
+
+* **Die evcc-Aufrufe werten ihre Antwort aus.** Alle fünf Skripte stehen in der
+  vollen Form mit `on_response` und `on_error`; die Kurzform
+  `http_request.post:` konnte das nicht. Ein Statuscode ausserhalb 2xx meldet
+  rot `evcc error <code>`, ein Transportfehler `evcc not reachable`.
+
+  Die Aufteilung folgt dem ESPHome-Verhalten: `start()` gibt den Container auch
+  bei Misserfolg zurück (`http_request_idf.cpp:218`), ein 4xx landet also in
+  `on_response`. `on_error` feuert nur, wenn gar keine Verbindung zustande kam.
+
+* **Bestätigung durch evcc.** Ein 2xx sagt nur, dass die Anfrage angekommen
+  ist. Nach einem angenommenen Aufruf prüft der bestehende Sekundentakt, ob die
+  Spiegelung — dieselbe, die auch die LEDs treibt — den erwarteten Zustand
+  erreicht. Kommt sie binnen zehn Sekunden, verfällt die Erwartung stumm.
+  Sonst: `Mode not confirmed`, `Plan sent, not active` oder
+  `Plan still active`.
+
+  `Plan sent, not active` ist der Fall, in dem evcc einen Plan annimmt, aber
+  nicht wirksam macht, weil der Ziel-SoC schon erreicht ist. Kein Fehler, aber
+  ohne Meldung stünde das Gerät still da.
+
+* **Jede evcc-Antwort steht im Log.** `Modus PV: Antwort 200` beziehungsweise
+  `Ladeplan gesetzt: Antwort 200`, dazu eine Warnung, wenn evcc gar nicht
+  antwortet. Ein gelungener Aufruf schrieb bisher nichts — weder liess sich der
+  Weg prüfen noch später nachvollziehen.
+
+### Geändert
+
+* **`timeout: 2s` am `http_request`-Block.** `http_request` ist synchron,
+  `perform()` blockiert die Schleife bis zur Antwort; mit der Vorgabe von 4.5 s
+  fror ein nicht erreichbares evcc die Anzeige entsprechend lange ein. Zwei
+  Sekunden, weil Home Assistant und evcc auf demselben Raspi laufen. Am
+  laufenden Gerät gemessen kostet ein Aufruf 52 bis 62 ms.
+
+* **Der Ladestrom ist ausgebaut.** Auf der EV-Seite stand neben der Leistung
+  `(nan A)`. Ursache: evcc hat kein Feld `chargeCurrent`, sondern
+  `chargeCurrents` je Phase. Der HA-Sensor horchte auf ein Thema, das es nie
+  gab, stand dauerhaft auf `unknown` — und ein Sensor mit `unknown`
+  veröffentlicht **NAN**, weshalb `has_state()` wahr bleibt und `%.0f` „nan"
+  schreibt. Substitution, Sensorabo und Anzeige sind entfernt, die Zeile lautet
+  jetzt nur noch `<Leistung> W`. Damit sinkt die Zahl der abonnierten
+  Entitäten von 28 auf 27.
+
+### Bekannt
+
+* Dieselbe NAN-Falle betrifft 27 weitere `printf`-Stellen. Nach jedem
+  evcc-Neustart und jedem MQTT-Reload gehen alle evcc-Sensoren kurz auf
+  `unavailable` und dann `unknown`; in diesem Fenster steht überall „nan".
+  Vorgesehen für V1.6.1.
+
+* **Beim Start führt ESPHome die `turn_off_action` der beiden Vorlagen-Schalter
+  aus** (`Restore Mode: always OFF`). Ein Neustart schickt also `set_mode_pv`
+  und `delete_plan_request` an die Wallbox. Bisher blieb das unbemerkt, weil
+  zum Bootzeitpunkt das Netz noch nicht steht und der Aufruf scheitert — der
+  Hinweis `evcc not reachable` nach einem Flash kommt genau daher.
+
 ## [1.5.0] - 2026-08-21
 
 ### Neu
