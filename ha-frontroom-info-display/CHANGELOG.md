@@ -2,6 +2,53 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.4.2] - 2026-08-21
+
+### Geändert
+
+* **Die Unterdrückung `logger: logs: component: ERROR` ist entfernt.** Sie
+  verbarg die Warnungen über zu lange Komponentenlaufzeiten — bei fünf
+  umfangreichen Zeichenroutinen genau die Meldung, die man sucht, wenn die
+  Anzeige träge wird.
+
+  Vorher gemessen, weil die Sorge vor einem zugespammten Log berechtigt war:
+  Die Anzeige braucht 120 bis 130 ms je Zeichenvorgang und meldet das **rund
+  dreimal in den ersten zehn Sekunden nach dem Start**, danach nicht mehr. Der
+  Grund steht in `esphome/core/component.cpp:233` — nach jeder Meldung hebt
+  `should_warn_of_blocking()` die Schwelle der betroffenen Komponente auf die
+  gemessene Zeit plus 10 ms an, ab Werk sind es 50 ms. Ein Dauerstrom entsteht
+  dadurch nicht.
+
+* **Bilder und Animation sind Plattformen des `image`-Bausteins.** Die obersten
+  Blöcke `image:` und `animation:` sind abgekündigt und fallen mit ESPHome
+  2027.1 weg. Die 34 Bilder tragen jetzt `- platform: file`, die
+  Wetteranimation ist als `- platform: animation` der 35. Eintrag derselben
+  Liste, der eigene `animation:`-Block ist aufgelöst. An den Bilddaten und an
+  der Darstellung ändert sich nichts.
+
+### Geprüft und verworfen
+
+* **`mipi_spi` löst `ili9xxx` noch nicht ab.** Der Nachfolger wurde gebaut und
+  geflasht: Modell `ESP32-2432S028-9342`, Geometrie und Farben bestätigt
+  identisch (320×240, Mirror X, RGB, nicht invertiert). Der Zeichenvorgang
+  stieg dabei von 124 ms auf **193 ms**.
+
+  Ursache ist die Formatumwandlung. `mipi_spi` schreibt den Puffer nur dann am
+  Stück heraus, wenn Puffer- und Panelformat übereinstimmen
+  (`mipi_spi.h:423`). Hier sind es 8 gegen 16 Bit, also läuft alles über
+  `dbuffer[DISPLAYPIXEL * 48]` — 48 Bildpunkte je SPI-Übertragung gegenüber 63
+  bei `ili9xxx` (`ili9xxx_display.h:11`). Ein Vollbild sind 76 800
+  Bildpunkte, und ein Vollbild ist es jedes Mal, weil ESPHome vor jedem
+  Seitenaufruf `clear()` ruft und das die ganze Fläche als verändert markiert.
+
+  Der schnelle Weg wäre ein 16-Bit-Puffer ohne Umwandlung. Der braucht
+  153.6 KB, frei sind rund 122 KB, und PSRAM hat das Board keinen. Teilpuffer
+  über `buffer_size` scheiden aus, weil `mipi_spi.h:554` das Seiten-Lambda
+  einmal je Teilstück aufruft.
+
+  `ili9xxx` bleibt deshalb bis auf Weiteres und ist in der YAML entsprechend
+  kommentiert.
+
 ## [1.4.1] - 2026-08-20
 
 ### Geändert
