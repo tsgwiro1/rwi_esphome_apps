@@ -2,6 +2,36 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.6.3] - 2026-08-21
+
+### Behoben
+
+* **Textsensoren geben einen Ausfall nicht mehr wörtlich aus.** Der Zwilling zu
+  V1.6.1: Textsensoren kennen kein NAN, sie reichen `unknown` oder
+  `unavailable` einfach als Zeichenkette durch. Auf der Übersicht konnte damit
+  `unavailable` als **Wetterlage** stehen, und beim Ladeplan an derselben
+  Stelle wie sonst die Uhrzeit.
+
+  Ein zweiter Helfer neben `ok()` prüft das:
+
+  ```cpp
+  auto txt = [](text_sensor::TextSensor *s) {
+    return s->has_state() && !s->state.empty() &&
+           s->state != "unknown" && s->state != "unavailable";
+  };
+  ```
+
+  Abgesichert sind die Wetterlage und die Ladeplan-Uhrzeit auf beiden Seiten;
+  ohne brauchbaren Wert steht dort `---`.
+
+* **Die Fahrzeugtitel-Prüfung ist jetzt derselbe Helfer.** Sie stand seit
+  V1.4.0 zweimal wörtlich im Code — dieselben drei Bedingungen, einmal je
+  Seite. Verhalten unverändert: ohne brauchbaren Titel `Guest vehicle`.
+
+  Nicht abgesichert und auch nicht nötig sind die Vergleiche auf
+  `wallbox_mode` und `vehicle_name` — ein Ausfall macht sie schlicht falsch,
+  nichts wird ausgegeben.
+
 ## [1.6.2] - 2026-08-21
 
 ### Behoben

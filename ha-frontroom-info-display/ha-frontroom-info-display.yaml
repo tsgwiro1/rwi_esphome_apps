@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.6.2"
+  fw_version: "1.6.3"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -1349,6 +1349,13 @@ display:
           // jedem MQTT-Reload gehen alle Werte kurz durch diesen Zustand.
           // ok() fragt beides ab, damit die vorhandenen ---Zweige greifen.
           auto ok = [](sensor::Sensor *s) { return s->has_state() && !std::isnan(s->state); };
+          // Textsensoren kennen kein NAN, sie geben denselben Ausfall woertlich
+          // aus - "unknown" oder "unavailable" stuenden sonst als Wetterlage
+          // oder als Uhrzeit auf der Anzeige.
+          auto txt = [](text_sensor::TextSensor *s) {
+            return s->has_state() && !s->state.empty() &&
+                   s->state != "unknown" && s->state != "unavailable";
+          };
           //***********************************
           id(weather_animation).next_frame();
           it.image(0, 5, id(weather_animation), COLOR_ON, COLOR_OFF);
@@ -1359,7 +1366,8 @@ display:
           it.line(0,160,320,160, HA_BLUE);
           it.image(0, 165, id(wallbox_icon));
           //***********************************
-          it.printf(90,0,id(lato24), WHITE,"%s",id(weather_condition).state.c_str());
+          it.printf(90,0,id(lato24), WHITE,"%s",
+                    txt(id(weather_condition)) ? id(weather_condition).state.c_str() : "---");
           it.image(85, 42, id(thermometer_icon));       
           if (ok(id(outside_temperature))) {
             it.printf(112,38,id(lato20), WHITE,"%.1f °C", id(outside_temperature).state);
@@ -1430,10 +1438,8 @@ display:
               } else if (id(known_vehicle).state) {
                 fz_text = id(vehicle_title).state.c_str();
               } else {
-                bool ohne_titel = id(vehicle_title).state.empty() ||
-                                  id(vehicle_title).state == "unknown" ||
-                                  id(vehicle_title).state == "unavailable";
-                fz_text = ohne_titel ? "Guest vehicle" : id(vehicle_title).state.c_str();
+                fz_text = txt(id(vehicle_title)) ? id(vehicle_title).state.c_str()
+                                                 : "Guest vehicle";
                 fz_farbe = ORANGE;
               }
               bool fz_gezeichnet = false;
@@ -1454,7 +1460,9 @@ display:
                   if (id(evcc_chargeplan_enabled).state) {
                     it.printf(195, 172, id(lato24), WHITE, BLACK,TextAlign::TOP_CENTER, "READY");
                     if (ok(id(evcc_charge_plan_soc))) {
-                      it.printf(195, 204, id(lato20), WHITE, BLACK,TextAlign::TOP_CENTER, "Charge plan %s %.0f %%", id(evcc_charge_plan_time).state.c_str(), id(evcc_charge_plan_soc).state);
+                      it.printf(195, 204, id(lato20), WHITE, BLACK,TextAlign::TOP_CENTER, "Charge plan %s %.0f %%",
+                                txt(id(evcc_charge_plan_time)) ? id(evcc_charge_plan_time).state.c_str() : "---",
+                                id(evcc_charge_plan_soc).state);
                     }
                   } else {
                     it.printf(160, 180, id(lato30), WHITE, BLACK,TextAlign::TOP_CENTER, "READY");
@@ -1500,6 +1508,10 @@ display:
       - id: ev_page
         lambda: |-
           auto ok = [](sensor::Sensor *s) { return s->has_state() && !std::isnan(s->state); };
+          auto txt = [](text_sensor::TextSensor *s) {
+            return s->has_state() && !s->state.empty() &&
+                   s->state != "unknown" && s->state != "unavailable";
+          };
           it.image(0, 0, id(ev_icon));
           it.image(280, 0, id(back_icon));
           it.image(280, 189, id(sun_icon));
@@ -1510,7 +1522,8 @@ display:
           }
           if (id(evcc_chargeplan_enabled).state) {
             it.image(10, 180, id(clock_icon));
-            it.printf(28,220,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%s", id(evcc_charge_plan_time).state.c_str());
+            it.printf(28,220,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%s",
+                      txt(id(evcc_charge_plan_time)) ? id(evcc_charge_plan_time).state.c_str() : "---");
             if (ok(id(evcc_charge_plan_soc))) {
               it.printf(20,163,id(lato14),WHITE, BLACK,TextAlign::TOP_CENTER, "%.0f%%", id(evcc_charge_plan_soc).state);
             }
@@ -1548,11 +1561,9 @@ display:
             } else if (id(known_vehicle).state) {
               it.printf(160,44,id(lato24), WHITE, BLACK, TextAlign::TOP_CENTER, "%s", id(vehicle_title).state.c_str());
             } else {
-              bool ohne_titel = id(vehicle_title).state.empty() ||
-                                id(vehicle_title).state == "unknown" ||
-                                id(vehicle_title).state == "unavailable";
               it.printf(160,44,id(lato24), ORANGE, BLACK, TextAlign::TOP_CENTER, "%s",
-                        ohne_titel ? "Guest vehicle" : id(vehicle_title).state.c_str());
+                        txt(id(vehicle_title)) ? id(vehicle_title).state.c_str()
+                                               : "Guest vehicle");
             }
             // **** SoC ****
             // Der Leistungsbalken erscheint nur beim Laden. Sonst rutscht der
