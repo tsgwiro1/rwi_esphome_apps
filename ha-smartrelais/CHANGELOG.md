@@ -15,8 +15,8 @@ Dieser Eintrag holt Änderungen nach, die bereits auf dem Gerät liefen, aber ni
   *Hinweis:* Die Entity-IDs bestehender Installationen bleiben unverändert (HAs Registry hängt an der `unique_id`), es ändern sich nur die Anzeigenamen. Bei einer Neuinstallation ergeben sich dagegen IDs mit dem Nummernpräfix.
 * **Zeilenenden auf LF normalisiert.** Die Datei lag im Arbeitsverzeichnis mit CRLF vor, was jeden Diff gegen das Repository unlesbar machte (1'182 vermeintlich geänderte Zeilen bei tatsächlich 38).
 
-### Offen
-* Das Gerät war zum Zeitpunkt dieses Commits nicht erreichbar und läuft daher noch mit der vorherigen Firmware. Die gebaute Firmware liegt bereit; nach dem nächsten OTA meldet `5.1 Common Diagnostics Version` dann 1.3.0 statt 1.2.1.
+### Ausgeliefert
+* Das Gerät war zum Zeitpunkt dieses Commits nicht erreichbar und lief weiter mit der vorherigen Firmware. Das OTA erfolgte am **2026-08-21**. Seither meldet das Gerät `1.0.1`, `5.1 Common Diagnostics Version` steht auf **1.4.1** und ESPHome auf 2026.7.4.
 
 ---
 
