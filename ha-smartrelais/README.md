@@ -64,12 +64,17 @@ Jeder Zustandswechsel wird als Klartext über den Text-Sensor **Status** an Home
 
 Das Projekt basiert auf dem kompakten Seeed Studio XIAO ESP32-C6 Modul, einem AQH3213A PhotoTRIAC-SSR mit RC-Snubber und einem IRM-01-5 Netzteil.
 
+> [!IMPORTANT]
+> Eigene Leiterplatte, **230 V führend**, nur mit drei Änderungen betriebssicher
+> — siehe [HARDWARE.md](HARDWARE.md). Die Tabelle unten gibt den umgebauten
+> Zustand wieder (`R3` = 150 Ω statt 220 Ω laut Schaltplan).
+
 | Peripherie / Funktion | XIAO Board Pin | Interner GPIO | Beschreibung / Besonderheit |
 | :--- | :---: | :---: | :--- |
 | **Status-LED (J6)** | D0 | `GPIO0` | LED zwischen +3.3V und GPIO (220Ω) → aktiv LOW, invertiert konfiguriert |
 | Reserve (J3 Pin 2) | D1 | `GPIO1` | frei, direkt am Stecker |
 | Reserve (J3 Pin 3) | D2 | `GPIO2` | frei, direkt am Stecker |
-| **SSR (REL)** | D3 | `GPIO21` | via 220Ω auf die LED des AQH3213A, aktiv HIGH |
+| **SSR (REL)** | D3 | `GPIO21` | via 150Ω auf die LED des AQH3213A, aktiv HIGH |
 | I2C SDA (J2 Pin 2) | D4 | `GPIO22` | 4K7 Pull-up bestückt, Reserve für Erweiterungen |
 | I2C SCL (J2 Pin 3) | D5 | `GPIO23` | 4K7 Pull-up bestückt, Reserve für Erweiterungen |
 | **DS18B20 Temp** | D6 | `GPIO16` | Lokaler Temperatursensor am SSR (Übertemperaturschutz) |
