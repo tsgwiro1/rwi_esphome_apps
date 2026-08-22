@@ -2,6 +2,27 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.7.1] - 2026-08-22
+
+### Behoben
+
+* **Die Modusfelder auf der EV-Seite antworteten ins Leere.** Ohne angestecktes
+  Fahrzeug zeichnet die Seite die drei Felder OFF / PV / NOW gar nicht, sondern
+  «Nothing connected to wallbox». Die Touchflächen darunter blieben aber aktiv
+  und quittierten einen Tipper mit dem Hinweisbalken «No vehicle connected» —
+  auf einer Fläche, auf der nichts zu sehen war, und der Balken deckte dabei
+  genau diese Fläche zu.
+
+  Der evcc-Modus war nie in Gefahr: die Prüfung auf `${ent_evcc_connected}`
+  stand seit jeher davor, gesendet wurde nichts. Neu bleiben die drei Felder
+  in diesem Fall vollständig stumm. Die Bedingung sitzt jetzt zusammen mit der
+  `touch_lock`-Abfrage in einer Lambda, was die doppelte Verschachtelung samt
+  dem dreifach wiederholten `show_hint`-Aufruf spart.
+
+  Die **Hardware-Taste** *Schnellladen* meldet den Grund weiterhin: Sie wirkt
+  von jeder Seite aus, und ihre LED leuchtet unabhängig davon, was die Anzeige
+  gerade zeigt.
+
 ## [1.7.0] - 2026-08-21
 
 ### Neu

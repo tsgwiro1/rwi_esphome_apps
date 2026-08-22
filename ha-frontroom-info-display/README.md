@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.7.0-blue)
+![Version](https://img.shields.io/badge/version-1.7.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -305,6 +305,12 @@ EV-Seite tun es seit jeher. Eine Vorwahl brächte ohnehin nichts: die
 HA-Automation «Wallbox: Fahrzeug angesteckt» setzt beim Einstecken als Erstes
 `off` und überschreibt sie.
 
+Die **Hardware-Taste** nennt dabei den Grund, die **Modusfelder** seit V1.7.1
+nicht mehr: Ohne angestecktes Fahrzeug werden sie gar nicht gezeichnet, die
+Seite zeigt stattdessen «Nothing connected to wallbox». Eine unsichtbare Fläche
+antwortet nicht — genauso wie der Zurück-Pfeil auf der Übersicht, wo an
+derselben Stelle nichts steht.
+
 **Abgelehnte Befehle melden sich.** Was das Gerät nicht ausführt, bleibt seit
 V1.5.0 nicht mehr stumm. Ein Balken über die volle Breite, 44 px hoch am
 unteren Rand, nennt vier Sekunden lang den Grund: **blau** für abgelehnt, **rot**
@@ -415,7 +421,7 @@ verdrahtet.
 | :--- | :--- | :--- |
 | `device_name` | `ha-frontroom-info-display` | `name` und `friendly_name`, zugleich der mDNS-Name |
 | `project_name` | `tsgwiro1.ha-frontroom-info-display` | `project:`-Block |
-| `fw_version` | `1.7.0` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
+| `fw_version` | `1.7.1` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
 | `device_timezone` | `Europe/Zurich` | IANA-Name oder POSIX-TZ-Zeichenkette. **Ohne Angabe nimmt ESPHome die Zeitzone des bauenden Rechners** — der Ladeplan ginge dann mit einer fremden Ortszeit an evcc |
 
 **evcc**

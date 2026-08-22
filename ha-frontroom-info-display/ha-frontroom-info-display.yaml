@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.7.0"
+  fw_version: "1.7.1"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -555,27 +555,25 @@ binary_sensor:
     page_id: ev_page
     on_press:
       then:
-        # touch_lock faengt die Beruehrung ab, die noch vom Seitenwechsel
-        # stammt. Das ist kein abgelehnter Befehl und bleibt deshalb stumm -
-        # sonst blinkte bei jedem Wechsel auf diese Seite ein Balken auf.
+        # Zwei Gruende, stumm zu bleiben. touch_lock faengt die Beruehrung ab,
+        # die noch vom Seitenwechsel stammt - sonst blinkte bei jedem Wechsel
+        # auf diese Seite ein Balken auf. Und ohne angestecktes Fahrzeug sind
+        # die Modusfelder gar nicht gezeichnet, die Seite zeigt stattdessen
+        # "Nothing connected to wallbox". Ein Tipper ins Leere darf nichts
+        # beantworten; so haelt es button_return auf der Uebersicht auch. Die
+        # Begruendung gibt die Anzeige schon gross in der Mitte aus, ein
+        # Hinweisbalken wiederholte sie nur - und deckte dabei genau die
+        # Flaeche zu, auf die getippt wurde.
         - if:
             condition:
-              - lambda: 'return !id(touch_lock);'
+              - lambda: |-
+                  return !id(touch_lock) &&
+                         id(vehicle_connected).has_state() &&
+                         id(vehicle_connected).state;
             then:
-              - if:
-                  condition:
-                    - lambda: |-
-                        return id(vehicle_connected).has_state() &&
-                               id(vehicle_connected).state;
-                  then:
-                    - script.execute: set_mode_off
-                    - lambda: |-
-                        id(recent_touch) = true;
-                  else:
-                    - script.execute:
-                        id: show_hint
-                        text: "No vehicle connected"
-                        level: 1
+              - script.execute: set_mode_off
+              - lambda: |-
+                  id(recent_touch) = true;
   - platform: touchscreen
     id: button_ev_pv
     x_min: 132
@@ -587,22 +585,14 @@ binary_sensor:
       then:
         - if:
             condition:
-              - lambda: 'return !id(touch_lock);'
+              - lambda: |-
+                  return !id(touch_lock) &&
+                         id(vehicle_connected).has_state() &&
+                         id(vehicle_connected).state;
             then:
-              - if:
-                  condition:
-                    - lambda: |-
-                        return id(vehicle_connected).has_state() &&
-                               id(vehicle_connected).state;
-                  then:
-                    - script.execute: set_mode_pv
-                    - lambda: |-
-                        id(recent_touch) = true;
-                  else:
-                    - script.execute:
-                        id: show_hint
-                        text: "No vehicle connected"
-                        level: 1
+              - script.execute: set_mode_pv
+              - lambda: |-
+                  id(recent_touch) = true;
   - platform: touchscreen
     id: button_ev_now
     x_min: 204
@@ -614,22 +604,14 @@ binary_sensor:
       then:
         - if:
             condition:
-              - lambda: 'return !id(touch_lock);'
+              - lambda: |-
+                  return !id(touch_lock) &&
+                         id(vehicle_connected).has_state() &&
+                         id(vehicle_connected).state;
             then:
-              - if:
-                  condition:
-                    - lambda: |-
-                        return id(vehicle_connected).has_state() &&
-                               id(vehicle_connected).state;
-                  then:
-                    - script.execute: set_mode_now
-                    - lambda: |-
-                        id(recent_touch) = true;
-                  else:
-                    - script.execute:
-                        id: show_hint
-                        text: "No vehicle connected"
-                        level: 1
+              - script.execute: set_mode_now
+              - lambda: |-
+                  id(recent_touch) = true;
   - platform: touchscreen
     id: button_h_plus
     x_min: 40
