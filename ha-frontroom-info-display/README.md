@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.7.1-blue)
+![Version](https://img.shields.io/badge/version-1.8.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -154,10 +154,11 @@ Vier Zonen, durch Linien in HA-Blau getrennt:
 
 | Zone (x / y) | Ziel |
 | :--- | :--- |
+| `0…320` / `0…80` | `weather_page` |
 | `0…320` / `160…240` | `ev_page` |
 | `0…160` / `80…160` | `energy_page` |
 | `160…320` / `80…160` | `bat_page` |
-| `280…320` / `0…40` | `main_page` — nur auf `ev_page`, `bat_page` und `energy_page`, wo das Zurück-Symbol gezeichnet wird |
+| `280…320` / `0…40` | `main_page` — nur auf `ev_page`, `bat_page`, `energy_page` und `weather_page`, wo das Zurück-Symbol gezeichnet wird |
 
 > **Grundsatz:** Eine Berührungsfläche ist nur dann aktiv, wenn das zugehörige
 > Bedienelement in diesem Moment auch dargestellt wird. Wo die Seitenbindung
@@ -266,6 +267,42 @@ P_Haus  = P_ein − Netzeinspeisung − Batterieladung − Wallbox − Heizstab 
 
 Messfehler und nicht erfasste Verbraucher landen damit vollständig im Wert für
 das Haus, der dadurch auch negativ werden kann.
+
+### `weather_page` - Vorhersage (seit V1.8.0)
+
+Oben links das Symbol der **aktuellen** Lage, mittig `Forecast`, rechts der
+Zurück-Pfeil. Darunter **fünf Tage** in Spalten zu 64 px: Wochentag,
+Wetterlagen-Symbol 32 × 32, Höchstwert, Tiefstwert und die Regenmenge.
+
+**Die Spalten beginnen mit morgen, nicht mit heute.** Der laufende Tag ist am
+Abend grösstenteils vorbei, und die aktuelle Lage steht ohnehin auf der
+Übersicht. Gefiltert wird auf der HA-Seite über das Datum, nicht über den
+Index — fällt der heutige Eintrag bei MeteoSwiss irgendwann weg, stimmt die
+Anzeige trotzdem.
+
+Unten die **Temperaturkurve der nächsten 48 Stunden** über die volle Breite,
+mit den stündlichen Regenmengen als Balken vom Boden her und einer senkrechten
+Marke an jeder Mitternacht. Sie beginnt bewusst bei der **aktuellen** Stunde
+und deckt damit Abend und Nacht ab, die in den Tagesspalten fehlen. Die
+Temperaturskala passt sich dem Zeitraum an;
+liegen weniger als vier Grad zwischen Höchst- und Tiefstwert, wird auf vier
+Grad aufgezogen, damit ein flacher Tag nicht als Zickzack erscheint.
+
+Zwei Entscheidungen, die die Anzeige von einer Tabelle unterscheiden:
+
+* **Ein trockener Tag zeigt keine Regenzeile.** Unter einem halben Millimeter
+  bleibt das Feld leer statt «0.0 mm» auszugeben.
+* **Die Regenskala hat zwei Millimeter als Untergrenze.** Ohne sie stünde ein
+  Nieselregen so hoch wie ein Gewitter.
+
+Eine **Stundenzeile mit Symbolen ist nicht möglich**: Die Stundenvorhersage von
+MeteoSwiss enthält kein `condition`, nur Temperatur und Niederschlag. Deshalb
+eine Kurve. Ihr `templow` ist auch **kein Tagestief**, sondern der untere Rand
+des Vertrauensbands — es unterschreitet das Tagestief der Tagesvorhersage. Das
+Gerät abonniert es deshalb nicht; die HA-Entität liefert es als Attribut `hlow`
+für den Fall, dass daraus einmal ein gefülltes Band werden soll.
+
+Fehlt die Vorhersage, steht `No forecast data` statt einer leeren Seite.
 
 ---
 
@@ -381,7 +418,7 @@ ergänzt, denkt am besten gleich an diesen Punkt.
 
 ### Vom Gerät konsumiert
 
-Das Display abonniert 27 Entitäten aus Home Assistant. Seit V1.3.0 steht kein
+Das Display abonniert 28 Entitäten aus Home Assistant. Seit V1.3.0 steht kein
 Entitätsname mehr im Code — jeder hängt an einer Substitution am Kopf der YAML.
 Die Vorgabewerte stehen in Abschnitt 6.
 
@@ -389,21 +426,87 @@ Die Vorgabewerte stehen in Abschnitt 6.
 | :--- | :--- |
 | PV & Netz | `ent_pv_power`, `ent_grid_power` |
 | Hausbatterie | `ent_battery_soc`, `ent_battery_power` |
-| Wetter | `ent_weather`, `ent_outdoor_temperature`, `ent_rain`, `ent_rain_frequency` |
+| Wetter | `ent_weather`, `ent_outdoor_temperature`, `ent_rain`, `ent_rain_frequency`, `ent_forecast` |
 | Fahrzeug | `ent_vehicle_soc`, `ent_vehicle_range`, `ent_vehicle_target_soc`, `ent_vehicle_name`, `ent_vehicle_title`, `ent_vehicle_detection` |
 | Wallbox & evcc | `ent_evcc_mode`, `ent_evcc_connected`, `ent_evcc_charging`, `ent_evcc_charge_power`, `ent_evcc_solar_share_30d` |
 | Ladeplan | `ent_plan_enabled`, `ent_plan_soc`, `ent_plan_time`, `ent_plan_automation` |
 | Wärmepumpe & Heizstab | `ent_heatpump_power_electric`, `ent_heatpump_power_heat`, `ent_heater_power`, `ent_heater_percent` |
 
-`ent_plan_automation` ist der einzige Eintrag, der kein Entitätsergebnis
-abonniert, sondern das Attribut `current` der Home-Assistant-Automation
-«Wallbox: Fahrzeug angesteckt». Es ist grösser als 0, solange die Automation
-nach dem Anstecken auf die Fahrzeugbestätigung wartet und den Lademodus
-deshalb auf `OFF` hält.
+`ent_plan_automation` abonniert keinen Entitätszustand, sondern das Attribut
+`current` der Home-Assistant-Automation «Wallbox: Fahrzeug angesteckt». Es ist
+grösser als 0, solange die Automation nach dem Anstecken auf die
+Fahrzeugbestätigung wartet und den Lademodus deshalb auf `OFF` hält.
+
+`ent_forecast` liest **ausschliesslich Attribute** — vier Stück: `days`,
+`hours`, `hrain` und `hstart`. Der Grund ist die 255-Zeichen-Grenze, die in
+Home Assistant nur für den *Zustand* einer Entität gilt, nicht für ihre
+Attribute. Die 48 Stundenwerte passen dort bequem, und eine einzige Entität
+genügt statt zwölf. Wie der Sensor entsteht, steht in Abschnitt 5 unter
+«Voraussetzung in Home Assistant».
 
 Ein `time`-Sensor der Plattform `homeassistant` liefert die Zeitbasis für den
 Ladeplan. Ohne HA-Verbindung ist damit auch das Setzen eines Plans nicht
 möglich.
+
+### Voraussetzung in Home Assistant: der Vorhersage-Sensor
+
+Die Vorhersageseite braucht **eine Entität, die es von Haus aus nicht gibt**.
+Sie entsteht als trigger-basierter Template-Sensor in `/config/templates.yaml`
+und trägt die ganze Vorhersage in ihren Attributen:
+
+```yaml
+- triggers:
+    - trigger: time_pattern
+      minutes: "/30"
+    - trigger: homeassistant
+      event: start
+    - trigger: event
+      event_type: event_template_reloaded
+  actions:
+    - action: weather.get_forecasts
+      target: {entity_id: weather.egnach}
+      data: {type: daily}
+      response_variable: tage
+    - action: weather.get_forecasts
+      target: {entity_id: weather.egnach}
+      data: {type: hourly}
+      response_variable: stunden
+  sensor:
+    - name: "Wetter Vorhersage Display"
+      state: "{{ now().isoformat(timespec='seconds') }}"
+      attributes:
+        days:  "SUN|partlycloudy|23|12|0.0;MON|…"   # fünf Tage, ab morgen
+        hours: "21.0;20.1;19.1;…"                   # 48 Stundenwerte
+        hlow:  "19.4;18.2;17.0;…"                   # unterer Rand des Bands
+        hrain: "0.0;0.0;0.0;…"                      # 48 Regenmengen in mm
+        hstart: 19                                  # Ortszeit-Stunde des ersten Werts
+```
+
+Vier Dinge daran sind nicht beliebig:
+
+* **Er muss YAML sein.** `weather.get_forecasts` ist eine Aktion, und ein
+  Vorlagen-Helfer aus der Oberfläche kann keine Aktion aufrufen. In
+  `configuration.yaml` steht `template: !include templates.yaml` — ein
+  einzelner Include auf **eine** Datei; ein zweiter `template:`-Schlüssel wäre
+  ein Duplikat und liesse Home Assistant nicht mehr starten. Der Block gehört
+  also als weiterer Listeneintrag in diese Datei, nicht in ein eigenes Paket.
+* **Trennzeichen der Zahlenreihen ist `;`, nicht `,`.** Eine kommagetrennte
+  Reihe erkennt die Vorlagen-Auswertung als Python-Tupel und liefert eine
+  Liste aus; am Gerät käme dann `[21, 20.1, …]` an statt der rohen Reihe. Bei
+  `days` verhindern das schon die `|`.
+* **`hstart` ist nötig, weil die Stundenvorhersage in UTC kommt.** Ohne die
+  Ortszeit-Stunde des ersten Werts wüsste das Gerät nicht, wo in der Kurve der
+  Tag wechselt.
+* **Der Auslöser `event_template_reloaded`** füllt den Sensor sofort nach jedem
+  `template.reload`. Ohne ihn stünde er bis zur nächsten halben Stunde auf
+  `unknown`.
+
+Nach dem Einfügen: `homeassistant.check_config`, dann `template.reload` — ein
+Neustart ist nicht nötig.
+
+**Ausserdem muss `precipitation_unit` von `weather.egnach` auf `mm` stehen.**
+Die MeteoSwiss-Integration liefert sonst Zoll, und die Anzeige wäre um den
+Faktor 25.4 daneben, ohne dass es auffiele.
 
 ---
 
@@ -421,7 +524,7 @@ verdrahtet.
 | :--- | :--- | :--- |
 | `device_name` | `ha-frontroom-info-display` | `name` und `friendly_name`, zugleich der mDNS-Name |
 | `project_name` | `tsgwiro1.ha-frontroom-info-display` | `project:`-Block |
-| `fw_version` | `1.7.1` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
+| `fw_version` | `1.8.0` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
 | `device_timezone` | `Europe/Zurich` | IANA-Name oder POSIX-TZ-Zeichenkette. **Ohne Angabe nimmt ESPHome die Zeitzone des bauenden Rechners** — der Ladeplan ginge dann mit einer fremden Ortszeit an evcc |
 
 **evcc**
@@ -525,10 +628,28 @@ nochmals achtmal kleiner, opfert aber die Kantenglättung. Wer eine Vorlage
 ersetzt, prüft mit einem Blick auf die Farbwerte, ob sie wirklich einfarbig ist:
 ein einziger farbiger Bildpunkt verlangt `RGB565`.
 
-Die Schriften werden über `gfonts` (Lato in fünf Schnitten und sechs Grössen)
-zur Buildzeit heruntergeladen und brauchen keine lokalen Dateien. Die
+Die Lato-Schnitte werden über `gfonts` (fünf Schnitte in sechs Grössen) zur
+Buildzeit heruntergeladen und brauchen keine lokalen Dateien. Die
 `glyphs:`-Listen sind bewusst knapp gehalten; fehlt ein Zeichen in einem
-`printf`, bleibt es in der Anzeige leer.
+`printf`, bleibt es in der Anzeige leer — deshalb kennt `lato10` seit V1.8.0
+auch Punkt und Gradzeichen.
+
+**Die Wettersymbole sind seit V1.8.0 eine Schriftart, kein Bildersatz.**
+`fonts/materialdesignicons-webfont.ttf` liegt im Repo (Stand v7.4.47 aus dem
+offiziellen Webfont-Repository, Lizenz daneben), damit der Bau ohne Netz
+auskommt. Die Schrift `mdi32` bindet daraus fünfzehn Glyphen bei `size: 32`
+und `bpp: 4` ein:
+
+| | Flash | Schärfe | Farbe |
+| :--- | ---: | :--- | :--- |
+| 15 Bilder 32 × 32 `RGB565` | 30.7 KB | bikubisch skaliert | mehrfarbig |
+| 15 Glyphen `mdi32`, `bpp: 4` | **5.6 KB** | direkt auf 32 px gerendert | eine je Symbol |
+
+Der Preis ist die letzte Spalte: Ein Glyph trägt genau eine Farbe. Sie wird
+deshalb nach der Wetterlage gewählt — gelb bei Sonne und Gewitter, blau bei
+Niederschlag, grau bei Wolke, Nebel und Wind, weiss bei Schnee und teilweise
+bewölkt, orange für alles Unbekannte. Aus zwei Metern trennt das die Fälle
+besser als die Binnenzeichnung eines 32-px-Bildes.
 
 **Benötigte Secrets:** `frontroom_api_key`, `frontroom_ota_key`,
 `frontroom_fallback_ap_ssid`, `frontroom_fallback_ap_password` sowie

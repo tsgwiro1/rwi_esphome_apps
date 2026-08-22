@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.7.1"
+  fw_version: "1.8.0"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -39,6 +39,7 @@ substitutions:
   ent_outdoor_temperature: sensor.outdoor_temperature
   ent_rain: binary_sensor.raining
   ent_rain_frequency: sensor.weather_station_frequency
+  ent_forecast: sensor.wetter_vorhersage_display
 
 # ---- Entitaeten: evcc, Wallbox und Fahrzeug ----------------
   ent_evcc_mode: select.evcc_mode
@@ -491,6 +492,19 @@ binary_sensor:
       then:
         - lambda: |-
             id(touch_lock) = false;
+  # Der obere Streifen der Uebersicht - Wetteranimation, Lage und
+  # Aussentemperatur. Er war bisher unbelegt.
+  - platform: touchscreen
+    id: button_weather
+    x_min: 0
+    x_max: 320
+    y_min: 0
+    y_max: 80
+    page_id: main_page
+    on_press:
+      - display.page.show: weather_page
+      - lambda: |-
+          id(recent_touch) = true;
   - platform: touchscreen
     id: button_bat
     x_min: 160
@@ -540,6 +554,7 @@ binary_sensor:
                       - display.is_displaying_page: ev_page
                       - display.is_displaying_page: bat_page
                       - display.is_displaying_page: energy_page
+                      - display.is_displaying_page: weather_page
                   then:
                     - display.page.show: main_page
   - platform: touchscreen
@@ -793,6 +808,13 @@ sensor:
     entity_id: ${ent_plan_automation}
     attribute: current
     id: plan_check_running
+  # Ortszeit-Stunde des ersten Stundenwerts der Vorhersage. Ohne sie waere
+  # nicht zu wissen, wo in der Kurve der Tag wechselt - Home Assistant
+  # liefert die Stundenvorhersage in UTC.
+  - platform: homeassistant
+    entity_id: ${ent_forecast}
+    attribute: hstart
+    id: forecast_hstart
 
 # Define all the string sensors used
 text_sensor:
@@ -825,6 +847,23 @@ text_sensor:
   - platform: homeassistant
     entity_id: ${ent_vehicle_title}
     id: vehicle_title
+
+  # Die ganze Vorhersage steckt in den Attributen einer einzigen Entitaet.
+  # Der Zustand einer HA-Entitaet ist auf 255 Zeichen begrenzt, Attribute
+  # sind es nicht - und ESPHome kann ein Attribut direkt abonnieren. Statt
+  # eines Sensors je Wert also drei gepackte Zeichenketten.
+  - platform: homeassistant
+    entity_id: ${ent_forecast}
+    attribute: days
+    id: forecast_days
+  - platform: homeassistant
+    entity_id: ${ent_forecast}
+    attribute: hours
+    id: forecast_hours
+  - platform: homeassistant
+    entity_id: ${ent_forecast}
+    attribute: hrain
+    id: forecast_rain
 
 switch:
   # restore_mode: DISABLED ist wesentlich. Die Vorgabe ALWAYS_OFF laesst
@@ -902,7 +941,7 @@ font:
       weight: 400
     id: lato10
     size: 10
-    glyphs: "0123456789:% -ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    glyphs: "0123456789:%°. -ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
   - file:
       type: gfonts
       family: Lato
@@ -938,6 +977,32 @@ font:
     id: lato50
     size: 50
     glyphs: ":0123456789%"
+  # Material Design Icons als Schrift statt als Bilder. Ein Glyph kostet bei
+  # bpp 4 rund 380 B, die fuenfzehn Wetterlagen zusammen 5.6 KB - ein Fuenftel
+  # dessen, was dieselben Symbole als 32 x 32 in RGB565 belegen wuerden.
+  # FreeType rendert direkt auf 32 px, es wird also nichts skaliert, und die
+  # Farbe kommt beim Zeichnen statt aus dem Bild. Die Datei liegt im Repo,
+  # damit der Bau ohne Netz auskommt.
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi32
+    size: 32
+    bpp: 4
+    glyphs:
+      - "\U000F0599"   # weather-sunny            sunny
+      - "\U000F0594"   # weather-night            clear-night
+      - "\U000F0595"   # weather-partly-cloudy    partlycloudy
+      - "\U000F0590"   # weather-cloudy           cloudy
+      - "\U000F0591"   # weather-fog              fog
+      - "\U000F0597"   # weather-rainy            rainy
+      - "\U000F0596"   # weather-pouring          pouring
+      - "\U000F0598"   # weather-snowy            snowy
+      - "\U000F067F"   # weather-snowy-rainy      snowy-rainy
+      - "\U000F0592"   # weather-hail             hail
+      - "\U000F0593"   # weather-lightning        lightning
+      - "\U000F067E"   # weather-lightning-rainy  lightning-rainy
+      - "\U000F059D"   # weather-windy            windy
+      - "\U000F059E"   # weather-windy-variant    windy-variant
+      - "\U000F05D6"   # alert-circle-outline     exceptional und Unbekanntes
 
 # Create a Home Assistant blue color
 color:
@@ -983,6 +1048,14 @@ color:
     red: 20%
     green: 20%
     blue: 20%
+  # GRAY ist mit 20 % fast schwarz und taugt nur fuer Linien. Der Tiefstwert
+  # der Vorhersage braucht ein Grau, das man auch liest.
+  - id: LIGHTGRAY
+    hex: b4b4b4
+  # Regenbalken unter der Temperaturkurve. Dunkel genug, dass die Kurve
+  # darueber stehen bleibt.
+  - id: RAINBLUE
+    hex: 003c6e
 
 # Define all the images used. Store the images in the images folder within the esphome folder (esphome/images/)
 image:
@@ -1780,6 +1853,141 @@ display:
           c = id(battery_power).state > 0 ? LIGHTGREEN : LIGHTRED;
           if (ok_bat && p_I_Bat + p_O_Bat > 0) it.printf(85,210,id(lato14), c, BLACK, TextAlign::TOP_RIGHT, "%.0f W", p_I_Bat + p_O_Bat);
 
+
+          // **** Hinweisbalken **** (siehe main_page)
+          if (id(hint_left) > 0) {
+            Color hbg = id(hint_level) == 2 ? RED : HA_BLUE;
+            it.filled_rectangle(0, 196, 320, 44, hbg);
+            it.printf(160, 218, id(lato30), BLACK, hbg, TextAlign::CENTER, "%s", id(hint_text).c_str());
+          }
+
+      - id: weather_page
+        lambda: |-
+          auto txt = [](text_sensor::TextSensor *s) {
+            return s->has_state() && !s->state.empty() &&
+                   s->state != "unknown" && s->state != "unavailable";
+          };
+          // Zu jeder Wetterlage ein Glyph aus dem MDI-Satz. Eine unbekannte
+          // Lage bekommt das Ausrufezeichen - eine leere Spalte saehe aus wie
+          // ein Fehler der Anzeige, und genau das soll sie nicht.
+          auto icon_of = [](const std::string &c) -> const char * {
+            if (c == "sunny")            return "\U000F0599";
+            if (c == "clear-night")      return "\U000F0594";
+            if (c == "partlycloudy")     return "\U000F0595";
+            if (c == "cloudy")           return "\U000F0590";
+            if (c == "fog")              return "\U000F0591";
+            if (c == "rainy")            return "\U000F0597";
+            if (c == "pouring")          return "\U000F0596";
+            if (c == "snowy")            return "\U000F0598";
+            if (c == "snowy-rainy")      return "\U000F067F";
+            if (c == "hail")             return "\U000F0592";
+            if (c == "lightning")        return "\U000F0593";
+            if (c == "lightning-rainy")  return "\U000F067E";
+            if (c == "windy")            return "\U000F059D";
+            if (c == "windy-variant")    return "\U000F059E";
+            return "\U000F05D6";
+          };
+          // Ein Glyph traegt genau eine Farbe. Deshalb faerbt hier die Lage
+          // das ganze Symbol - aus zwei Metern trennt das die Faelle besser
+          // als die Binnenzeichnung eines 32-px-Bildes.
+          auto color_of = [&](const std::string &c) -> Color {
+            if (c == "sunny" || c == "lightning" || c == "lightning-rainy") return YELLOW;
+            if (c == "clear-night" || c == "rainy" || c == "pouring" ||
+                c == "hail" || c == "snowy-rainy")                          return HA_BLUE;
+            if (c == "cloudy" || c == "fog" || c == "windy" ||
+                c == "windy-variant")                                       return LIGHTGRAY;
+            if (c == "partlycloudy" || c == "snowy")                        return WHITE;
+            return ORANGE;
+          };
+          // Trennzeichen ist ";", nicht ",". Eine kommagetrennte Zahlenreihe
+          // erkennt die Vorlagen-Auswertung von Home Assistant als Tupel und
+          // liefert sie als Liste aus - hier kaeme dann "[21, 20.1, ...]" an.
+          auto split = [](const std::string &s, char sep, std::string *out, int max) -> int {
+            int n = 0;
+            size_t p = 0;
+            while (n < max) {
+              size_t q = s.find(sep, p);
+              out[n++] = s.substr(p, q == std::string::npos ? std::string::npos : q - p);
+              if (q == std::string::npos) break;
+              p = q + 1;
+            }
+            return n;
+          };
+          //** Kopf ***********************************
+          if (txt(id(weather_condition))) {
+            // weather_condition laeuft durch to_upper, die Vorhersage nicht.
+            std::string c = id(weather_condition).state;
+            for (auto &ch : c) if (ch >= 'A' && ch <= 'Z') ch += 32;
+            it.printf(20, 2, id(mdi32), color_of(c), TextAlign::TOP_CENTER, "%s", icon_of(c));
+          }
+          it.image(280, 0, id(back_icon));
+          it.printf(160, 0, id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Forecast");
+          it.line(0, 42, 320, 42, HA_BLUE);
+          //** Fuenf Tage *****************************
+          std::string tag[5];
+          int nd = txt(id(forecast_days)) ? split(id(forecast_days).state, ';', tag, 5) : 0;
+          for (int i = 0; i < nd; i++) {
+            std::string f[5];
+            if (split(tag[i], '|', f, 5) < 5) continue;
+            int cx = 32 + i * 64;
+            if (i) it.line(i * 64, 46, i * 64, 144, GRAY);
+            it.printf(cx, 44, id(lato14), HA_BLUE, TextAlign::TOP_CENTER, "%s", f[0].c_str());
+            it.printf(cx, 60, id(mdi32), color_of(f[1]), TextAlign::TOP_CENTER, "%s", icon_of(f[1]));
+            it.printf(cx, 96, id(lato20), WHITE, TextAlign::TOP_CENTER, "%s°", f[2].c_str());
+            it.printf(cx, 118, id(lato14), LIGHTGRAY, TextAlign::TOP_CENTER, "%s°", f[3].c_str());
+            // Ein trockener Tag bleibt leer. "0.0 mm" waere eine Tabellenzeile
+            // statt einer Anzeige, und unter einem halben Millimeter merkt es
+            // ohnehin niemand.
+            float r = strtof(f[4].c_str(), nullptr);
+            if (r >= 0.5f) it.printf(cx, 134, id(lato10), HA_BLUE, TextAlign::TOP_CENTER, "%.1f mm", r);
+          }
+          if (nd == 0) it.printf(160, 88, id(lato24), LIGHTGRAY, TextAlign::TOP_CENTER, "No forecast data");
+          it.line(0, 148, 320, 148, HA_BLUE);
+          //** Stundenkurve, 48 h *********************
+          std::string hs[48], hr[48];
+          int nh = txt(id(forecast_hours)) ? split(id(forecast_hours).state, ';', hs, 48) : 0;
+          int nr = txt(id(forecast_rain))  ? split(id(forecast_rain).state,  ';', hr, 48) : 0;
+          if (nh >= 2) {
+            const int X0 = 28, X1 = 314, Y0 = 158, Y1 = 234, RH = 34;
+            float t[48], lo = 1000.0f, hi = -1000.0f;
+            for (int i = 0; i < nh; i++) {
+              t[i] = strtof(hs[i].c_str(), nullptr);
+              if (t[i] < lo) lo = t[i];
+              if (t[i] > hi) hi = t[i];
+            }
+            // Ein flacher Tag darf die Kurve nicht zum Rauschen aufblasen.
+            if (hi - lo < 4.0f) hi = lo + 4.0f;
+            auto px = [&](int i) { return X0 + i * (X1 - X0) / (nh - 1); };
+            auto py = [&](float v) { return (int) (Y1 - (v - lo) * (Y1 - Y0) / (hi - lo)); };
+            int h0 = id(forecast_hstart).has_state() && !std::isnan(id(forecast_hstart).state)
+                       ? (int) id(forecast_hstart).state : -1;
+            if (h0 >= 0) {
+              for (int i = 0; i < nh; i++)
+                if ((h0 + i) % 24 == 0) it.line(px(i), Y0 - 6, px(i), Y1 + 2, GRAY);
+            }
+            // Zwei Millimeter sind das Minimum der Regenskala. Ohne diese
+            // Untergrenze stuende ein Nieselregen so hoch wie ein Gewitter.
+            float rmax = 2.0f;
+            for (int i = 0; i < nr; i++) {
+              float r = strtof(hr[i].c_str(), nullptr);
+              if (r > rmax) rmax = r;
+            }
+            for (int i = 0; i < nr && i < nh; i++) {
+              float r = strtof(hr[i].c_str(), nullptr);
+              if (r > 0) {
+                int h = (int) (r / rmax * RH) + 1;
+                it.filled_rectangle(px(i) - 2, Y1 - h, 5, h, RAINBLUE);
+              }
+            }
+            // Zweimal gezeichnet: it.line() kennt keine Strichstaerke, und ein
+            // einzelnes Pixel verliert sich aus zwei Metern.
+            for (int i = 1; i < nh; i++) {
+              it.line(px(i - 1), py(t[i - 1]), px(i), py(t[i]), ORANGE);
+              it.line(px(i - 1), py(t[i - 1]) - 1, px(i), py(t[i]) - 1, ORANGE);
+            }
+            it.printf(2, Y0 - 6,  id(lato10), LIGHTGRAY, "%.0f°", hi);
+            it.printf(2, Y1 - 11, id(lato10), LIGHTGRAY, "%.0f°", lo);
+          }
 
           // **** Hinweisbalken **** (siehe main_page)
           if (id(hint_left) > 0) {

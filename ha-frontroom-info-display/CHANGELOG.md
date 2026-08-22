@@ -2,6 +2,69 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.8.0] - 2026-08-22
+
+### Neu
+
+* **Sechste Seite: die Wettervorhersage.** Ein Tipper auf den oberen Streifen
+  der Übersicht — Animation, Wetterlage und Aussentemperatur, bisher tote
+  Fläche — öffnet `weather_page`: fünf Tage in Spalten mit Symbol, Höchst- und
+  Tiefstwert und der Regenmenge, darunter die Temperaturkurve der nächsten
+  48 Stunden mit den Regenmengen als Balken und einer senkrechten Marke an
+  jeder Mitternacht. Zurück geht es über den Pfeil oben rechts oder nach zwei
+  Minuten von selbst.
+
+  **Die Tagesspalten beginnen mit morgen.** Der heutige Tag ist am Abend
+  grösstenteils vorbei, und was gerade draussen ist, steht ohnehin auf der
+  Übersicht. Die Stundenkurve darunter läuft weiterhin ab der aktuellen
+  Stunde — sie deckt damit den Abend und die Nacht ab, die in den Spalten
+  fehlen.
+
+  **Ein trockener Tag bleibt leer** statt «0.0 mm» zu zeigen, und die
+  Regenskala hat zwei Millimeter als Untergrenze — sonst stünde ein
+  Nieselregen so hoch wie ein Gewitter.
+
+* **Die Symbole kommen aus einer Schriftart statt aus Bildern.** Die fünfzehn
+  Wetterlagen von Home Assistant liegen als Glyphen des MDI-Satzes in `mdi32`
+  (Grösse 32, `bpp: 4`) und kosten zusammen **5.6 KB** — ein Fünftel dessen,
+  was dieselben Symbole als 32 × 32 in `RGB565` belegt hätten. FreeType
+  rendert direkt auf die Zielgrösse, es wird also nichts skaliert, und die
+  Farbe entsteht beim Zeichnen: gelb bei Sonne und Gewitter, blau bei
+  Niederschlag, grau bei Wolke, Nebel und Wind. Eine unbekannte Lage bekommt
+  das Ausrufezeichen statt einer leeren Spalte.
+
+  Die Datei `fonts/materialdesignicons-webfont.ttf` liegt im Repo, damit der
+  Bau ohne Netz auskommt. Sie ist der Stand v7.4.47 aus dem offiziellen
+  Webfont-Repository; die Lizenz liegt daneben.
+
+### Geändert
+
+* `lato10` kennt neu **Punkt und Gradzeichen**. Ohne sie wären «6.6 mm» und
+  «26°» mit Lücken statt der Zeichen erschienen — ein fehlender Glyph wird
+  stillschweigend übersprungen.
+* Zwei Farben ergänzt: `LIGHTGRAY` für den Tiefstwert (`GRAY` ist mit 20 %
+  fast schwarz und taugt nur für Linien) und `RAINBLUE` für die Regenbalken.
+
+### Auf der Home-Assistant-Seite nötig
+
+* Der Sensor **`sensor.wetter_vorhersage_display`** in `/config/templates.yaml`,
+  trigger-basiert, alle 30 Minuten sowie beim Start und nach jedem
+  `template.reload`. Er trägt die ganze Vorhersage in **Attributen**: `days`,
+  `hours`, `hlow`, `hrain` und `hstart`. Der *Zustand* einer HA-Entität ist auf
+  255 Zeichen begrenzt, Attribute sind es nicht — und ESPHome kann ein Attribut
+  direkt abonnieren. Eine Entität genügt damit statt zwölf.
+
+  **Trennzeichen der Zahlenreihen ist `;`, nicht `,`.** Eine kommagetrennte
+  Reihe erkennt die Vorlagen-Auswertung von Home Assistant als Tupel und
+  liefert eine Liste aus; am Gerät käme dann `[21, 20.1, …]` an.
+
+  Er muss als YAML entstehen: `weather.get_forecasts` ist eine Aktion, und ein
+  Vorlagen-Helfer aus der Oberfläche kann keine Aktion aufrufen.
+
+* **`precipitation_unit` von `weather.egnach` auf `mm`** gestellt. Die
+  Integration lieferte Zoll — die 0.52 vom 28. August waren 13 mm, nicht ein
+  halber Millimeter.
+
 ## [1.7.1] - 2026-08-22
 
 ### Behoben
