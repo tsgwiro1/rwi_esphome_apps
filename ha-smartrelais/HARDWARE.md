@@ -78,7 +78,7 @@ Die Belegung steht im Siebdruck der Unterseite: `L`, `N`, `OUT`.
 | :---: | :--- | :--- |
 | 2 | Steuer-LED | über `R3` (150 Ω) an `GPIO21` |
 | 1, 3, 4 | Steuer-LED | GND |
-| 5 | Zero-Cross | **freigebogen, kein Kontakt zur Platine** |
+| 5 | Gate | **freigebogen, kein Kontakt zur Platine** |
 | 6 | Triac | L nach Sicherung |
 | 8 | Triac | Lastausgang `J1-3` |
 
@@ -110,13 +110,23 @@ Schaltlitze für 230 V AC, Widerstand 150 Ω in Bauform `R3`, Multimeter.
 
 ### 5.1 Steuerstrom — `R3` auf 150 Ω
 
-Das SSR braucht 10–15 mA; der Schaltplanwert 220 Ω liefert bei 3.3 V zu wenig.
+Der Schaltplanwert 220 Ω liefert an 3.3 V nur rund 9 mA. Der garantierte
+Auslösestrom `IFT` des AQH3213A beträgt maximal 10 mA — damit zündet das SSR
+nicht zuverlässig.
+
 `R3` mit **150 Ω** bestücken → rund 14 mA.
 
-### 5.2 Zero-Cross isolieren — Pin 5 freibiegen
+> [!NOTE]
+> Das Datenblatt empfiehlt `IF` = 15 bis 25 mA. Die 14 mA liegen über `IFT`,
+> aber unter dieser Empfehlung — die Reserve für Temperatur, Alterung und
+> Exemplarstreuung fehlt weitgehend. Aus 3.3 V ist das nicht zu beheben, ohne
+> den GPIO stärker zu belasten; Rev 2.0 löst es über 5 V, siehe Abschnitt 9.
 
-Das Layout legt Pin 5 in den Laststromkreis und übersteuert damit die interne
-Logik.
+### 5.2 Gate isolieren — Pin 5 freibiegen
+
+Pin 5 ist das Gate des Triacs. Das Layout legt es auf denselben Knoten wie
+Pin 6, was das Datenblatt ausdrücklich untersagt: *„The No. 5 terminal is
+connected to the gate. Do not directly connect No. 5 and 6 terminals."*
 
 **Vor dem Einlöten von `U3`:** Pin 5 um 90 Grad nach aussen biegen, dann die
 übrigen sieben Pins verlöten. Pin 5 darf weder Pad noch Lötzinn berühren.
@@ -152,10 +162,59 @@ wirkungslos.
 **230 V** auf `J1`, `F1`, `R1`, `R2`, `C3`, der Lastseite von `U3` und der
 Primärseite von `U2`.
 
-**Steuerstrom.** Mit `R3` = 150 Ω an 3.3 V fliessen rund 14 mA aus `GPIO21`.
+**Steuerstrom.** Mit `R3` = 150 Ω an 3.3 V fliessen rund 14 mA aus `GPIO21` —
+unter den vom Datenblatt empfohlenen 15 bis 25 mA, siehe 5.1.
 
 **`C3` nur gegen einen X2-Typ tauschen**, nie gegen einen gewöhnlichen
 Folienkondensator.
+
+### Reststrom im Aus-Zustand
+
+`C3` liegt parallel zum Triac. Im Aus-Zustand fliesst dadurch ein kapazitiver
+Strom durch die Last:
+
+```
+Xc = 1 / (2π · 50 Hz · 10 nF) ≈ 318 kΩ
+I  = 230 V / 318 kΩ ≈ 0.7 mA
+```
+
+LED-Leuchtmittel können davon glimmen oder blitzen, weil der Treiber sich
+langsam auflädt; Glühlampen zeigen nichts. Der Sperrstrom des SSR ist dagegen
+unerheblich (`IDRM` maximal 100 µA bei 600 V).
+
+`C3` deswegen nicht entfernen — die AQ-H-Familie hat laut Datenblatt keinen
+internen Snubber.
+
+**Abhilfe gehört an die Last, nicht auf die Platine.** Ein Bauteil je Lastkreis
+genügt, alle Leuchtmittel liegen ohnehin parallel.
+
+| Variante | Aufbau parallel zur Last | Restspannung | Verlust im Ein-Zustand |
+| :--- | :--- | ---: | ---: |
+| Dummy-Widerstand | 47 kΩ | ~34 V | 1.1 W |
+| RC-Glied (besser) | 0.22 µF X2 + 100 Ω in Serie | ~10 V | 25 mW |
+
+Bauteile für das RC-Glied:
+
+* **Kondensator** 0.22 µF, Klasse **X2**, 275 VAC, dU/dt ≥ 100 V/µs
+* **Widerstand** 100 Ω, 1 W, Metalloxid oder Draht, netzspannungsfest
+
+Nachweis gegen die Grenzwerte des AQH3213A:
+
+| Grösse | Rechnung | Grenzwert |
+| :--- | :--- | :--- |
+| Stossstrom bei Zündung (`VZC` ≤ 50 V) | 50 V / 100 Ω = 0.5 A | 6 A (50 % von `ITSM`) |
+| Stossstrom bei Fehlzündung im Scheitel | 325 V / 100 Ω = 3.3 A | 6 A |
+| dU/dt am Kondensator | 325 V / (100 Ω · 0.22 µF) = 15 V/µs | 100 V/µs |
+| Dauerlast am Widerstand | (15.9 mA)² · 100 Ω = 25 mW | 1 W |
+
+Alle Werte liegen innerhalb der Spezifikation. **Eine Funktionsgarantie ist das
+nicht:** Ob die Restspannung das jeweilige Leuchtmittel ruhig hält, hängt an
+dessen Treiber, und eine kapazitive Zusatzlast kann das Abschaltverhalten des
+Triacs beeinflussen — das Datenblatt verlangt dafür eine Prüfung an der realen
+Anlage.
+
+Vor Arbeiten an der Last die Sicherung entfernen. Die Last steht wegen dieses
+Reststroms auch im Aus-Zustand unter Spannung.
 
 ---
 
@@ -189,9 +248,12 @@ Boardmass, Lochbild und `J1` bleiben gleich. Der ESP32 trägt den LED-Strom nich
 mehr, und `R8` hält das SSR aus, solange `GPIO21` beim Boot hochohmig ist. **Die
 Firmware bleibt unverändert**, REL ist weiterhin aktiv HIGH.
 
+180 Ω an 5 V ergeben rund 21 mA und liegen damit im empfohlenen Fenster von 15
+bis 25 mA. Rev 2.0 ist also die einzige der beiden Varianten, die den
+Steuerstrom nach Datenblatt einhält.
+
 Vor einer Fertigung zu prüfen:
 
-* LED-Strom gegen das Datenblatt — 180 Ω an 5 V ergibt rund 21 mA statt 14 mA.
 * Schaltet der SI2302DS bei 3.3 V Gate-Pegel sicher durch?
 * Trennabstände und Kriechstrecken um die neu bestückte Unterseite.
 * Bestückung beidseitig einplanen.
