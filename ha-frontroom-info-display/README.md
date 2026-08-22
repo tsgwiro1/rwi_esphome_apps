@@ -134,7 +134,10 @@ Vier Zonen, durch Linien in HA-Blau getrennt:
 
 * **Oben:** animiertes Wetter-GIF, Wetterlage als Text, Aussentemperatur, und
   der Zustand des Regensensors (`WET` mit Sensorfrequenz oder `DRY`). Ohne
-  gültigen Regenwert steht dort `---`.
+  gültigen Regenwert steht dort `---`. Das GIF ist **Dekoration und zeigt die
+  Wetterlage nicht an** — `next_frame()` läuft unabhängig von
+  `id(weather_condition)`, die Lage steht im Text daneben. Warum das so bleibt,
+  steht in Abschnitt 6 unter «Farbtiefe und Zeichengeschwindigkeit».
 * **Mitte links:** PV-Erzeugung und Netzleistung. Netzeinspeisung wird grün,
   Netzbezug rot dargestellt.
 * **Mitte rechts:** Hausbatterie mit SoC-abhängigem Symbol (fünf Stufen in
@@ -651,6 +654,42 @@ Niederschlag, grau bei Wolke, Nebel und Wind, weiss bei Schnee und teilweise
 bewölkt, orange für alles Unbekannte. Aus zwei Metern trennt das die Fälle
 besser als die Binnenzeichnung eines 32-px-Bildes.
 
+### Farbtiefe und Zeichengeschwindigkeit
+
+Am 2026-08-22 durchgemessen, weil ein Symbolsatz mit einer Animation je
+Wetterlage zur Debatte stand. Drei Werte für `color_palette`, jeweils am
+laufenden Gerät über mehrere Minuten:
+
+| `color_palette` | Puffer | Schleifenzeit | Farben | Ergebnis |
+| :--- | ---: | ---: | :--- | :--- |
+| **`8BIT`** | 76 800 B | **133–142 ms** | 256 fest, RGB332 | in Betrieb |
+| `NONE` (16 Bit) | 153 600 B | — | 65 536 | Puffer nicht zuteilbar |
+| `IMAGE_ADAPTIVE` | 76 800 B | 623–712 ms | 256 aus den Bildern | unbrauchbar |
+
+**`NONE` scheitert am Speicher.** Der grösste zusammenhängende Heap-Block ist
+110 592 B, der 16-Bit-Puffer bräuchte 153 600 B — es fehlen 43 008 B, und das
+Board hat kein PSRAM. Die Anzeige meldet dann `display is marked FAILED` und
+bleibt schwarz; das Gerät selbst bleibt über OTA erreichbar.
+
+**`IMAGE_ADAPTIVE` scheitert an der Rechenzeit.** `color_to_index8_palette888`
+sucht **je gezeichnetem Bildpunkt linear über alle 256 Paletteneinträge**,
+während RGB332 eine Schiebeoperation ist. Bei 660 ms braucht die Schleife
+länger als das Aktualisierungsintervall von 500 ms — die Anzeige käme sich
+selbst nicht mehr nach.
+
+**`8BIT` ist auf diesem Board also nicht die bequeme Vorgabe, sondern der
+einzige brauchbare Modus.** Das hat eine Folge, die man beim Zeichnen kennen
+muss: RGB332 hat acht Rot-, acht Grün- und nur **vier Blaustufen**
+(0, 85, 170, 255). Gelb und Weiss kommen exakt heraus, `HA_BLUE` und
+`LIGHTGREEN` verschieben sich sichtbar, und `GRAY` verliert seinen Blauanteil
+ganz. **Flache, kräftige Farben überleben, Verläufe nicht.**
+
+Deshalb bleibt das Wetter-GIF, wie es ist: Ein Satz vollfarbiger Animationen je
+Wetterlage wäre zwar vom Flash her machbar, käme aber in vier Blaustufen aufs
+Glas. Der einzige verbliebene Hebel für mehr Tempo wäre ein verkleinertes
+Schmutzrechteck (`auto_clear_enabled: false` und selektives Neuzeichnen) — die
+Animationsfläche sind 6.4 % des Schirms.
+
 **Benötigte Secrets:** `frontroom_api_key`, `frontroom_ota_key`,
 `frontroom_fallback_ap_ssid`, `frontroom_fallback_ap_password` sowie
 `wifi_ssid` / `wifi_password`. Das eingebundene Diagnose-Paket benötigt
@@ -735,11 +774,3 @@ gilt also mit dem Vorgabewert von einer Minute. Neustartfest sind nur die drei
 Ladeplan-Werte, und die ändern sich ausschliesslich auf Tastendruck - eine
 Dauerbelastung des NVS entsteht daraus nicht.
 
----
-
-## 8. Bekannte Punkte
-
-* **Wetteranimation ist reine Dekoration.** `weather_animation.next_frame()`
-  läuft bei jedem Seitenaufbau weiter, unabhängig von
-  `id(weather_condition)`. Das GIF zeigt also nicht die aktuelle Wetterlage -
-  die steht nur im Text daneben.
