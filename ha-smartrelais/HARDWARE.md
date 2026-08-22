@@ -121,6 +121,10 @@ nicht zuverlässig.
 > aber unter dieser Empfehlung — die Reserve für Temperatur, Alterung und
 > Exemplarstreuung fehlt weitgehend. Aus 3.3 V ist das nicht zu beheben, ohne
 > den GPIO stärker zu belasten; Rev 2.0 löst es über 5 V, siehe Abschnitt 9.
+>
+> Der Auslösestrom steigt zur Kälte hin (Kennlinie 3: ~4.7 mA bei 25 °C,
+> ~6.6 mA bei −30 °C). Bei Raumtemperatur ist die Reserve ausreichend; für einen
+> unbeheizten Aufstellort reichen 150 Ω an 3.3 V nicht.
 
 ### 5.2 Gate isolieren — Pin 5 freibiegen
 
