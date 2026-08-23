@@ -12,10 +12,15 @@ esp32:
     type: esp-idf
     advanced:
       minimum_chip_revision: "3.0"
+      # Seit dem Kabel-Flash vom 2026-08-23 traegt das Geraet einen aktuellen
+      # Bootloader und kann SRAM1 als IRAM mitbenutzen - 40 kB, die vorher
+      # brachlagen. ESPHome weist im Log selbst darauf hin, sobald der
+      # Bootloader es hergibt.
+      sram1_as_iram: true
 
 # HIER überschreiben wir die Grenzen für den starken ESP32
 substitutions:
-  fw_version: "1.0.1"
+  fw_version: "1.1.0"
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
   diag_min_heap_critical: "40000" # 40kb ist kritisch
 
@@ -51,6 +56,9 @@ spi:
 
 # Define the rotate variable. This indicates if the pages should be rotated or not
 globals:
+  # Bewusst ohne restore_value: nach einem Neustart soll die Rotation wieder
+  # laufen. Das Anhalten per Langdruck ist ein Eingriff fuer den Moment, kein
+  # Dauerzustand - wer das Geraet neu startet, will den Normalbetrieb.
   - id: rotate
     type: bool
     initial_value: "true"
@@ -60,9 +68,29 @@ time:
   - platform: homeassistant
     id: esptime
 
+# Tastendruecke sind Ereignisse, keine Zustaende. Als binary_sensor erzeugte
+# jeder Druck zwei Zustandswechsel in Home Assistant; eine event-Entitaet meldet
+# einen Vorgang mit Typ. Die GPIO-Sensoren selbst tragen keinen Namen mehr und
+# bleiben damit geraeteintern.
+event:
+  - platform: template
+    id: button_left
+    name: "Button Left"
+    device_class: button
+    event_types:
+      - "press"
+      - "long_press"
+  - platform: template
+    id: button_right
+    name: "Button Right"
+    device_class: button
+    event_types:
+      - "press"
+      - "long_press"
+
 # Define binary sensors
 binary_sensor:
-  - platform: gpio          # Short Press button 0
+  - platform: gpio          # Taster links, kurz: eine Seite zurueck
     pin:
       number: GPIO0
       inverted: true
@@ -70,61 +98,61 @@ binary_sensor:
       mode:
         input: true
         pullup: true
-    name: "Short Press Button 0"
     id: short_press_button_0
     on_click:
       min_length: 1ms
       max_length: 1000ms
       then:
+        - event.trigger:
+            id: button_left
+            event_type: "press"
         - display.page.show_previous: my_display
-        - component.update: my_display 
-  - platform: gpio         # Long Press button 0
+        - component.update: my_display
+  - platform: gpio          # Taster links, lang: Beleuchtung umschalten
     pin:
       number: GPIO0
       inverted: true
       allow_other_uses: true
-    id: button_2
+    id: long_press_button_0
     on_click:
       min_length: 1001ms
       max_length: 5000ms
       then:
-        - switch.toggle: backlight
-  - platform: gpio          # Short Press button 1
+        - event.trigger:
+            id: button_left
+            event_type: "long_press"
+        - light.toggle: backlight
+  - platform: gpio          # Taster rechts, kurz: eine Seite vor
     pin:
       number: GPIO35
       inverted: true
       allow_other_uses: true
-    name: "Short Press Button 1"
     id: short_press_button_1
     on_click:
       min_length: 1ms
       max_length: 1000ms
       then:
+        - event.trigger:
+            id: button_right
+            event_type: "press"
         - display.page.show_next: my_display
         - component.update: my_display
-  - platform: gpio          # Long Press button 1
+  - platform: gpio          # Taster rechts, lang: Rotation an/aus
     pin:
       number: GPIO35
       inverted: true
       allow_other_uses: true
-    name: "Long Press Button 1"
     id: long_press_button_1
     on_click:
       min_length: 1001ms
       max_length: 5000ms
       then:
-        - if:
-            condition:
-              lambda: |-
-                return id(rotate);
-            then:
-              globals.set:
-                id: rotate
-                value: "false" 
-            else:
-              globals.set:
-                id: rotate
-                value: "true"
+        - event.trigger:
+            id: button_right
+            event_type: "long_press"
+        - globals.set:
+            id: rotate
+            value: !lambda "return !id(rotate);"
   - platform: homeassistant
     entity_id: binary_sensor.raining
     id: raining
@@ -133,29 +161,32 @@ binary_sensor:
     id: grigio_charging
   - platform: homeassistant
     entity_id: binary_sensor.evcc_loadpoint_connected
-    id: grigio_connected
+    id: vehicle_connected
+  # Laeuft evccs Fahrzeugerkennung gerade, ist noch nicht entschieden, wer am
+  # Kabel haengt. Ohne diese Abfrage hiesse ein noch leerer Name faelschlich
+  # «Gastfahrzeug».
+  - platform: homeassistant
+    entity_id: binary_sensor.evcc_vehicle_detection
+    id: vehicle_detection
 
 
-# Allow dimmable control of the backlight (pin GPIO4) - Currently not working
+# GPIO4 traegt die Hintergrundbeleuchtung und wird genau einmal belegt: als
+# ledc-Ausgang hinter dem dimmbaren Licht. Bis V1.0.1 griffen zusaetzlich der
+# backlight_pin des Displays und ein GPIO-Schalter auf denselben Pin zu - drei
+# Komponenten schrieben unkoordiniert, und die Dimmung blieb wirkungslos.
+# restore_mode haelt die Beleuchtung nach einem Neustart an; ohne das bliebe der
+# Schirm dunkel, weil das Display den Pin nicht mehr selbst einschaltet.
 output:
   - platform: ledc
-    pin: 
-      number: GPIO4
-      allow_other_uses: true
+    pin: GPIO4
     id: gpio4
 
 light:
   - platform: monochromatic
     output: gpio4
     name: "Backlight"
-
-switch:
-  - platform: gpio
-    pin: 
-      number: GPIO4
-      allow_other_uses: true
     id: backlight
-    internal: true
+    restore_mode: RESTORE_DEFAULT_ON
 
 # Define all the numeric sensors used
 sensor:
@@ -189,8 +220,14 @@ text_sensor:
   - platform: homeassistant
     entity_id: weather.egnach #sensor.openweathermap_condition
     id: weather_condition
-    filters:
-      - to_upper:
+  # evcc kennt Grigio als db:1. Jeder andere - oder leere - Wert bedeutet, dass
+  # ein fremdes Auto am Kabel haengt.
+  - platform: homeassistant
+    entity_id: sensor.evcc_vehicle_name
+    id: vehicle_name
+  - platform: homeassistant
+    entity_id: sensor.evcc_vehicle_title
+    id: vehicle_title
 
 # Define fonts. Use either Google fonts or stored fonts. Stored fonts are stored in esphome/fonts/
 font:
@@ -218,6 +255,52 @@ font:
       weight: 900
     id: latoblackheading1
     size: 50
+  # Material Design Icons als Schrift statt als Bilder. FreeType rendert direkt
+  # auf die Zielgroesse, es wird also nichts skaliert, und die Farbe kommt beim
+  # Zeichnen statt aus der Datei. Die TTF liegt im Repo, damit der Bau ohne Netz
+  # auskommt. Lizenz Apache 2.0, siehe fonts/LICENSE-materialdesignicons.txt.
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi80
+    size: 80
+    bpp: 4
+    glyphs:
+      - "\U000F0B6C"   # car-electric             Seite Fahrzeug
+      - "\U000F05F1"   # ev-station               Seite Wallbox
+      - "\U000F0D9B"   # solar-panel              Seite PV-Leistung
+      - "\U000F008E"   # battery-outline          Hausbatterie   0 -  9 %
+      - "\U000F007A"   # battery-10                             10 - 19 %
+      - "\U000F007B"   # battery-20                             20 - 29 %
+      - "\U000F007C"   # battery-30                             30 - 39 %
+      - "\U000F007D"   # battery-40                             40 - 49 %
+      - "\U000F007E"   # battery-50                             50 - 59 %
+      - "\U000F007F"   # battery-60                             60 - 69 %
+      - "\U000F0080"   # battery-70                             70 - 79 %
+      - "\U000F0081"   # battery-80                             80 - 89 %
+      - "\U000F0082"   # battery-90                             90 - 99 %
+      - "\U000F0079"   # battery                                    100 %
+      - "\U000F0599"   # weather-sunny            sunny
+      - "\U000F0594"   # weather-night            clear-night
+      - "\U000F0595"   # weather-partly-cloudy    partlycloudy
+      - "\U000F0590"   # weather-cloudy           cloudy
+      - "\U000F0591"   # weather-fog              fog
+      - "\U000F0597"   # weather-rainy            rainy
+      - "\U000F0596"   # weather-pouring          pouring
+      - "\U000F0598"   # weather-snowy            snowy
+      - "\U000F067F"   # weather-snowy-rainy      snowy-rainy
+      - "\U000F0592"   # weather-hail             hail
+      - "\U000F0593"   # weather-lightning        lightning
+      - "\U000F067E"   # weather-lightning-rainy  lightning-rainy
+      - "\U000F059D"   # weather-windy            windy
+      - "\U000F059E"   # weather-windy-variant    windy-variant
+      - "\U000F05D6"   # alert-circle-outline     exceptional und Unbekanntes
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi30
+    size: 30
+    bpp: 4
+    glyphs:
+      - "\U000F050F"   # thermometer              Aussentemperatur
+      - "\U000F058C"   # water                    nass
+      - "\U000F058D"   # water-off                trocken
 
 # Define colors
 color:
@@ -253,139 +336,146 @@ color:
     red: 100%
     green: 27%
     blue: 0%
-
-# Define all the images used. Store the images in the images folder within the esphome folder (esphome/images/)
-image:
-  - file: "pic/thermometer_icon.png"
-    id: thermometer_icon
-    resize: 30x30
-    type: RGB
-  - file: "pic/solarpanel-icon.png"
-    id: solarpanel_icon
-    resize: 80x80
-    type: RGB
-  - file: "pic/b100.png"
-    id: b100_icon
-    resize: 80x80
-    type: RGB
-  - file: "pic/b80.png"
-    id: b80_icon
-    resize: 80x80
-    type: RGB
-  - file: "pic/b60.png"
-    id: b60_icon
-    resize: 80x80
-    type: RGB
-  - file: "pic/b40.png"
-    id: b40_icon
-    resize: 80x80
-    type: RGB
-  - file: "pic/b20.png"
-    id: b20_icon
-    resize: 80x80
-    type: RGB
-  - file: "pic/rain_ws.png"
-    id: rain_icon
-    resize: 30x30
-    type: RGB
-  - file: "pic/dry.png"
-    id: dry_icon
-    resize: 30x30
-    type: RGB
-  - file: "pic/tesla.png"
-    id: tesla_icon
-    resize: 80x80
-    type: RGB
-  - file: "pic/wallbox.png"
-    id: wallbox_icon
-    resize: 80x80
-    type: RGB
-
-# Define animations
-animation:
-  - file: "pic/weather.gif"
-    id: weather_animation
-    resize: 80x80
-    type: RGB
+  # Traegt die Wetterlage: blau bei Niederschlag, grau bei Wolke und Nebel.
+  - id: SKYBLUE
+    hex: 51c0f2
+  - id: CLOUDGRAY
+    hex: b4b4b4
 
 # Set up the display. This is the main part of the code
+# Seit V1.1.0 ohne backlight_pin: die Beleuchtung haengt allein am ledc-Ausgang,
+# siehe den Kommentar bei output. Bilder gibt es keine mehr - alle Symbole sind
+# Glyphen aus mdi80 und mdi30.
 display:
   - platform: st7789v
     model: TTGO_TDISPLAY_135x240
-    backlight_pin: 
-      number: GPIO4
-      allow_other_uses: true
+    # Das Modell bringt GPIO4 als backlight_pin selbst mit. false schaltet ihn
+    # ab, damit der ledc-Ausgang den Pin allein besitzt und die Dimmung wirkt.
+    backlight_pin: false
     cs_pin: GPIO5
     dc_pin: GPIO16
     reset_pin: GPIO23
     rotation: 270°
     update_interval: 1s
     id: my_display
-    pages:                # Define the pages 
-#      - id: showtime
-#        lambda: |-
-#          it.strftime(45, 20, id(latoblack), "%d-%m-%Y", id(esptime).now());
-#          it.strftime(25, 55, id(latoblackheading1), "%H:%M:%S", id(esptime).now());
-      - id: showtesla
+    pages:                # Define the pages
+      - id: showtime
         lambda: |-
-          it.printf(0,0,id(latoblack), WHITE, "GRIGIO");
-          it.image(0, 40, id(tesla_icon));
-          if (id(grigio_connected).has_state() && id(grigio_soc).has_state()) {
-            if (id(grigio_connected).state == true) {
-              if (id(grigio_soc).state >= 60) it.printf(95, 40, id(latoblack), GREEN, "%5.0f %%", id(grigio_soc).state);
-              else if (id(grigio_soc).state >= 40) it.printf(95, 40, id(latoblack), LIGHTGREEN, "%5.0f %%", id(grigio_soc).state);
-              else if (id(grigio_soc).state >= 20) it.printf(95, 40, id(latoblack), ORANGE, "%5.0f %%", id(grigio_soc).state);
-              else it.printf(95, 40, id(latoblack), LIGHTRED, "%5.0f %%", id(grigio_soc).state);
+          if (id(esptime).now().is_valid()) {
+            it.strftime(45, 20, id(latoblack), WHITE, "%d-%m-%Y", id(esptime).now());
+            it.strftime(25, 55, id(latoblackheading1), WHITE, "%H:%M:%S", id(esptime).now());
+          } else {
+            it.printf(60, 55, id(latoblack), WHITE, "NO TIME");
+          }
+      - id: showvehicle
+        lambda: |-
+          // Vier Lagen, in dieser Reihenfolge: noch nichts bekannt, nichts
+          // angesteckt, Erkennung laeuft, Fahrzeug steht fest. Die Reihenfolge
+          // ist wichtig - ein leerer Fahrzeugname waehrend der Erkennung ist
+          // kein Gastfahrzeug, sondern ein noch offenes Ergebnis.
+          bool connected = id(vehicle_connected).has_state() && id(vehicle_connected).state;
+          bool detecting = id(vehicle_detection).has_state() && id(vehicle_detection).state;
+          bool is_grigio = id(vehicle_name).state == "db:1";
+          if (!id(vehicle_connected).has_state()) {
+            it.printf(0, 0, id(latoblack), WHITE, "VEHICLE");
+            it.printf(0, 40, id(mdi80), WHITE, "\U000F0B6C");
+            it.printf(95, 65, id(lato), WHITE, "LOADING...");
+          } else if (!connected && !detecting) {
+            it.printf(0, 0, id(latoblack), WHITE, "VEHICLE");
+            it.printf(0, 40, id(mdi80), CLOUDGRAY, "\U000F0B6C");
+            it.printf(100, 60, id(latobold), WHITE, "NOT");
+            it.printf(80, 90, id(latobold), WHITE, "CONNECTED");
+          } else if (detecting) {
+            it.printf(0, 0, id(latoblack), CLOUDGRAY, "VEHICLE");
+            it.printf(0, 40, id(mdi80), CLOUDGRAY, "\U000F0B6C");
+            it.printf(95, 60, id(latobold), CLOUDGRAY, "DETECTING");
+            it.printf(95, 90, id(latobold), CLOUDGRAY, "...");
+          } else if (is_grigio) {
+            it.printf(0, 0, id(latoblack), WHITE, "GRIGIO");
+            it.printf(0, 40, id(mdi80), WHITE, "\U000F0B6C");
+            if (id(grigio_soc).has_state()) {
+              Color soc_color = LIGHTRED;
+              if (id(grigio_soc).state >= 60) soc_color = GREEN;
+              else if (id(grigio_soc).state >= 40) soc_color = LIGHTGREEN;
+              else if (id(grigio_soc).state >= 20) soc_color = ORANGE;
+              it.printf(95, 40, id(latoblack), soc_color, "%5.0f %%", id(grigio_soc).state);
+            } else {
+              it.printf(95, 40, id(latoblack), WHITE, "   -- %%");
+            }
+            if (id(grigio_range).has_state()) {
               it.printf(95, 80, id(latoblack), WHITE, "%5.0f km", id(grigio_range).state);
             } else {
-              it.printf(100,60,id(latobold), WHITE,"NOT");
-              it.printf(80,90,id(latobold), WHITE,"CONNECTED");              
-            } 
+              it.printf(95, 80, id(latoblack), WHITE, "   -- km");
+            }
           } else {
-            it.printf(95, 65, id(lato), WHITE, "LOADING...");
-          }            
+            // Fremdes Auto. evcc liefert dafuer weder Ladestand noch
+            // Reichweite - die Seite sagt deshalb nur, wer da steht.
+            std::string t = id(vehicle_title).state;
+            for (auto &ch : t) ch = toupper(ch);
+            if (t.empty()) t = "GUEST VEHICLE";
+            auto *tfont = t.size() > 7 ? id(latobold) : id(latoblack);
+            it.printf(0, 0, tfont, ORANGE, "%s", t.c_str());
+            it.printf(0, 40, id(mdi80), ORANGE, "\U000F0B6C");
+            it.printf(95, 50, id(latobold), ORANGE, "GUEST");
+            it.printf(95, 80, id(lato), CLOUDGRAY, "no data");
+          }
       - id: showcharger
         lambda: |-
-          it.printf(0,0,id(latoblack), WHITE, "WALLBOX");
-          it.image(0, 40, id(wallbox_icon));
-          if (id(grigio_connected).has_state()) {
-            if (id(grigio_connected).state == true) {
+          it.printf(0, 0, id(latoblack), WHITE, "WALLBOX");
+          // Gruen, solange wirklich Strom fliesst - sonst weiss. Die Abfrage
+          // steht bewusst vor der Torbedingung «verbunden», damit die Farbe
+          // allein am Ladezustand haengt.
+          bool charging = id(grigio_charging).has_state() && id(grigio_charging).state;
+          it.printf(0, 40, id(mdi80), charging ? GREEN : WHITE, "\U000F05F1");
+          if (id(vehicle_connected).has_state()) {
+            if (id(vehicle_connected).state == true) {
               if (id(grigio_charging).state == true) {
                 it.printf(95, 45, id(latobold), WHITE, "CHARGING");
-                it.printf(95, 80, id(latoblack), WHITE, "%.0f W", id(wallbox_charge_power).state);
+                if (id(wallbox_charge_power).has_state()) {
+                  it.printf(95, 80, id(latoblack), WHITE, "%.0f W", id(wallbox_charge_power).state);
+                } else {
+                  it.printf(95, 80, id(latoblack), WHITE, "-- W");
+                }
               } else {
                 it.printf(110, 60, id(latobold), WHITE, "READY");
               }
             } else {
-              it.printf(100,60,id(latobold), WHITE,"NOT");
-              it.printf(80,90,id(latobold), WHITE,"CONNECTED");
-            }   
+              it.printf(100, 60, id(latobold), WHITE, "NOT");
+              it.printf(80, 90, id(latobold), WHITE, "CONNECTED");
+            }
           } else {
             it.printf(95, 65, id(lato), WHITE, "LOADING...");
           }
       - id: shownettopower
         lambda: |-
-          it.printf(0,0,id(latoblack), WHITE, "SOLAR POWER");
-          it.image(0, 40, id(solarpanel_icon));
+          it.printf(0, 0, id(latoblack), WHITE, "SOLAR POWER");
+          it.printf(0, 40, id(mdi80), WHITE, "\U000F0D9B");
           if (id(solar_input).has_state()) {
-            if (id(solar_input).state > -1000) {
-              it.printf(95, 60, id(latoblack), WHITE, "%.0f W", id(solar_input).state);     
-            } else {
-              it.printf(95, 60, id(latobold), WHITE, "%.0f W", id(solar_input).state);
-            }    
+            it.printf(95, 60, id(latoblack), WHITE, "%.0f W", id(solar_input).state);
           } else {
             it.printf(95, 65, id(lato), WHITE, "LOADING...");
           }
       - id: showbattery
         lambda: |-
-          it.printf(0,0,id(latoblack), WHITE, "BATTERY");
+          it.printf(0, 0, id(latoblack), WHITE, "BATTERY");
           if (id(solar_battery_soc).has_state()) {
-              if (id(solar_battery_soc).state >= 80) it.image(0, 40, id(b100_icon));
-              else if (id(solar_battery_soc).state >= 60) it.image(0, 40, id(b80_icon));
-              else if (id(solar_battery_soc).state >= 40) it.image(0, 40, id(b60_icon));
-              else if (id(solar_battery_soc).state >= 20) it.image(0, 40, id(b40_icon));
-              else it.image(0, 40, id(b20_icon));
-              it.printf(95, 40, id(latoblack), WHITE, "%5.0f %%", id(solar_battery_soc).state);
+            // Elf Symbole in Zehnerschritten. Der Index ist der Zehnerschritt
+            // selbst, die Reihe deckt sich mit der Glyphenliste in mdi80.
+            static const char *const BAT[11] = {
+              "\U000F008E", "\U000F007A", "\U000F007B", "\U000F007C",
+              "\U000F007D", "\U000F007E", "\U000F007F", "\U000F0080",
+              "\U000F0081", "\U000F0082", "\U000F0079"};
+            int soc = (int) (id(solar_battery_soc).state + 0.5f);
+            if (soc < 0) soc = 0;
+            if (soc > 100) soc = 100;
+            Color bat_color = LIGHTRED;
+            if (soc >= 80) bat_color = GREEN;
+            else if (soc >= 60) bat_color = LIGHTGREEN;
+            else if (soc >= 40) bat_color = YELLOW;
+            else if (soc >= 20) bat_color = ORANGE;
+            it.printf(0, 40, id(mdi80), bat_color, "%s", BAT[soc / 10]);
+            it.printf(95, 40, id(latoblack), WHITE, "%5.0f %%", id(solar_battery_soc).state);
+            if (id(solar_battery_power).has_state()) {
               if (id(solar_battery_power).state > 0) {
                 it.printf(95, 80, id(latoblack), LIGHTGREEN, "%5.0f W", id(solar_battery_power).state);
               } else if (id(solar_battery_power).state < 0) {
@@ -393,66 +483,60 @@ display:
               } else {
                 it.printf(95, 80, id(latoblack), WHITE, "%5.0f W", id(solar_battery_power).state);
               }
-          } else {
-            it.printf(95, 65, id(lato), WHITE, "LOADING...");
-          }         
-      - id: show_weather
-        lambda: |-
-          id(weather_animation).next_frame();
-          it.image(0, 0, id(weather_animation), COLOR_ON, COLOR_OFF);
-          if (id(weather_condition).state == "CLOUDY" ||
-              id(weather_condition).state == "RAINY" ||
-              id(weather_condition).state == "FOG" ||
-              id(weather_condition).state == "HAIL" ||
-              id(weather_condition).state == "SNOWY" ||
-              id(weather_condition).state == "SUNNY" ||
-              id(weather_condition).state == "WINDY" ) {
-            it.printf(110,0,id(latoblack), WHITE,"%s",id(weather_condition).state.c_str()); 
-          }
-          if (id(weather_condition).state == "LIGHTNING" ||
-              id(weather_condition).state == "POURING" ) {
-            it.printf(110,0,id(latobold), WHITE,"%s",id(weather_condition).state.c_str()); 
-          }
-          if (id(weather_condition).state == "PARTLYCLOUDY") {
-            it.printf(110,0,id(latoblack), WHITE,"PARTLY"); 
-            it.printf(110,35,id(latoblack), WHITE,"CLOUDY"); 
-          }
-          if (id(weather_condition).state == "SNOWY-RAINY") {
-            it.printf(110,0,id(latoblack), WHITE,"SNOWY");
-            it.printf(110,35,id(latoblack), WHITE,"RAIN");
-          }
-          if (id(weather_condition).state == "CLEAR-NIGHT") {
-            it.printf(110,0,id(latoblack), WHITE,"CLEAR");
-            it.printf(110,35,id(latoblack), WHITE,"NIGHT");
-          }
-          if (id(weather_condition).state == "LIGHTNING-RAINY") {
-            it.printf(110,0,id(latobold), WHITE,"LIGHTNING"); 
-            it.printf(110,35,id(latobold), WHITE,"RAINY"); 
-          }
-          if (id(weather_condition).state == "WINDY-VARIANT") {
-            it.printf(110,0,id(latoblack), WHITE,"WINDY");
-          }
-          if (id(weather_condition).state == "EXCEPTIONAL") {
-            it.printf(110,0,id(latobold), WHITE,"EXCEPTIONAL");
-          }
-          it.image(0, 100, id(thermometer_icon));
-          if (id(outside_temperature).has_state()) {
-            it.printf(35,100,id(latobold), WHITE,"%.1f °C", id(outside_temperature).state);
-          } else {
-            it.printf(35,100,id(latobold), WHITE,"--.- °C");
-          }
-          if (id(raining).has_state()) {
-            if (id(raining).state == true) {
-              it.image(120, 100, id(rain_icon));
-              it.printf(155, 88,id(latobold), WHITE,"WET");
-              it.printf(155, 112, id(lato), WHITE, "%.0f Hz", id(rain_freq).state);
             } else {
-              it.image(120, 104, id(dry_icon));
-              it.printf(160,100,id(latobold), WHITE,"DRY");
+              it.printf(95, 80, id(latoblack), WHITE, "   -- W");
             }
           } else {
-              it.image(120, 104, id(dry_icon));
-              it.printf(160,100,id(latobold), WHITE,"---");
+            it.printf(95, 65, id(lato), WHITE, "LOADING...");
+          }
+      - id: show_weather
+        lambda: |-
+          // Die fuenfzehn Zustaende, die weather.egnach liefern kann, jeweils mit
+          // Glyph, Beschriftung und Farbe. Der Vergleich laeuft auf dem
+          // Originalzustand in Kleinbuchstaben - bis V1.0.1 wurde er per
+          // to_upper-Filter gross gezogen und gegen Konstanten geprueft, wobei
+          // drei davon nie zutrafen.
+          std::string c = id(weather_condition).state;
+          const char *glyph = "\U000F05D6";
+          std::string line1 = "UNKNOWN";
+          std::string line2 = "";
+          Color glyph_color = CLOUDGRAY;
+          if      (c == "sunny")           { glyph = "\U000F0599"; line1 = "SUNNY";     glyph_color = YELLOW; }
+          else if (c == "clear-night")     { glyph = "\U000F0594"; line1 = "CLEAR";     line2 = "NIGHT"; }
+          else if (c == "partlycloudy")    { glyph = "\U000F0595"; line1 = "PARTLY";    line2 = "CLOUDY"; }
+          else if (c == "cloudy")          { glyph = "\U000F0590"; line1 = "CLOUDY"; }
+          else if (c == "fog")             { glyph = "\U000F0591"; line1 = "FOG"; }
+          else if (c == "rainy")           { glyph = "\U000F0597"; line1 = "RAINY";     glyph_color = SKYBLUE; }
+          else if (c == "pouring")         { glyph = "\U000F0596"; line1 = "POURING";   glyph_color = SKYBLUE; }
+          else if (c == "snowy")           { glyph = "\U000F0598"; line1 = "SNOWY";     glyph_color = SKYBLUE; }
+          else if (c == "snowy-rainy")     { glyph = "\U000F067F"; line1 = "SNOWY";     line2 = "RAIN"; glyph_color = SKYBLUE; }
+          else if (c == "hail")            { glyph = "\U000F0592"; line1 = "HAIL";      glyph_color = SKYBLUE; }
+          else if (c == "lightning")       { glyph = "\U000F0593"; line1 = "LIGHTNING"; glyph_color = YELLOW; }
+          else if (c == "lightning-rainy") { glyph = "\U000F067E"; line1 = "LIGHTNING"; line2 = "RAINY"; glyph_color = YELLOW; }
+          else if (c == "windy")           { glyph = "\U000F059D"; line1 = "WINDY"; }
+          else if (c == "windy-variant")   { glyph = "\U000F059E"; line1 = "WINDY"; }
+          else if (c == "exceptional")     { glyph = "\U000F05D6"; line1 = "EXCEPT.";   glyph_color = ORANGE; }
+          it.printf(0, 0, id(mdi80), glyph_color, "%s", glyph);
+          // Ab acht Zeichen passt der Text bei latoblack nicht mehr neben das
+          // Symbol, dann traegt ihn der schmalere latobold.
+          auto *wfont = (line1.size() > 7 || line2.size() > 7) ? id(latobold) : id(latoblack);
+          it.printf(110, 0, wfont, WHITE, "%s", line1.c_str());
+          if (!line2.empty()) it.printf(110, 35, wfont, WHITE, "%s", line2.c_str());
+          it.printf(0, 100, id(mdi30), WHITE, "\U000F050F");
+          if (id(outside_temperature).has_state()) {
+            it.printf(35, 100, id(latobold), WHITE, "%.1f °C", id(outside_temperature).state);
+          } else {
+            it.printf(35, 100, id(latobold), WHITE, "--.- °C");
+          }
+          if (id(raining).has_state() && id(raining).state == true) {
+            it.printf(120, 100, id(mdi30), SKYBLUE, "\U000F058C");
+            it.printf(155, 88, id(latobold), WHITE, "WET");
+            if (id(rain_freq).has_state()) {
+              it.printf(155, 112, id(lato), WHITE, "%.0f Hz", id(rain_freq).state);
+            }
+          } else {
+            it.printf(120, 100, id(mdi30), WHITE, "\U000F058D");
+            it.printf(160, 100, id(latobold), WHITE, id(raining).has_state() ? "DRY" : "---");
           }
 
 # Define the cycle interval of the pages.
@@ -463,5 +547,26 @@ interval:
         condition:
           lambda: 'return id(rotate);'
         then:
-          - display.page.show_next: my_display
+          - lambda: |-
+              // Haengt nichts am Kabel und laeuft auch keine Erkennung, haben
+              // Fahrzeug- und Wallbox-Seite nichts zu sagen: beide meldeten nur
+              // «NOT CONNECTED». Dann werden sie uebersprungen.
+              //
+              // Die Schleife ist noetig, weil die beiden Seiten nebeneinander
+              // liegen - ein einzelner Extraschritt bliebe auf der zweiten
+              // stehen. Die Zaehlgrenze deckt die Seitenzahl ab und verhindert,
+              // dass ein kuenftiger Umbau hier endlos dreht.
+              //
+              // «Noch unbekannt» zaehlt bewusst nicht als «nichts angesteckt»:
+              // solange has_state() falsch ist, bleiben beide in der Rotation.
+              id(my_display).show_next_page();
+              bool connected = id(vehicle_connected).has_state() && id(vehicle_connected).state;
+              bool detecting = id(vehicle_detection).has_state() && id(vehicle_detection).state;
+              if (id(vehicle_connected).has_state() && !connected && !detecting) {
+                for (int i = 0; i < 6; i++) {
+                  auto *page = id(my_display).get_active_page();
+                  if (page != id(showvehicle) && page != id(showcharger)) break;
+                  id(my_display).show_next_page();
+                }
+              }
           - component.update: my_display 
