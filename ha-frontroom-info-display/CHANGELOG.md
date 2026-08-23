@@ -2,6 +2,24 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.8.1] - 2026-08-23
+
+### Behoben
+
+* **Eine volle Hausbatterie sieht jetzt auch voll aus.** Die Übersicht kannte
+  fünf Batteriegrafiken, die höchste davon war zu vier Fünfteln gefüllt — bei
+  100 % stand also ein sichtbarer Rest Leerraum im Symbol, während daneben
+  «100 %» zu lesen war. Dazu kommt jetzt `pic/bat100.png` als sechste Stufe.
+  Sie greift ab **99.5 %**, also genau dann, wenn die gerundete Zahl daneben
+  100 % anzeigt — Bild und Zahl können nicht mehr auseinanderlaufen.
+
+* **Die Kennungen der Batteriesymbole nennen wieder ihren eigenen Füllstand.**
+  `b100_icon` zeigte auf `bat80.png`, `b80_icon` auf `bat60.png` und so weiter
+  — jede Kennung war um eine Stufe verschoben. Angezeigt wurde trotzdem das
+  Richtige, weil die Schwellen zur Verschiebung passten, aber die sechste Stufe
+  liess sich so nicht einhängen. Die Liste heisst jetzt `b0_icon` bis
+  `b100_icon` und benennt die Datei, auf die sie zeigt.
+
 ## [1.8.0] - 2026-08-22
 
 ### Neu

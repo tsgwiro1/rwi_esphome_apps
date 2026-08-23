@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.8.0"
+  fw_version: "1.8.1"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -1079,29 +1079,36 @@ image:
     id: energy_icon
     resize: 40x40
     type: RGB565
+  # Die Ladestufen der Hausbatterie. Die Kennung nennt den Fuellstand der
+  # Grafik, nicht die Schwelle -- b100 ist voll, b0 leer.
   - platform: file
-    file: "pic/bat80.png"
+    file: "pic/bat100.png"
     id: b100_icon
     resize: 70x70
     type: RGB565
   - platform: file
-    file: "pic/bat60.png"
+    file: "pic/bat80.png"
     id: b80_icon
     resize: 70x70
     type: RGB565
   - platform: file
-    file: "pic/bat40.png"
+    file: "pic/bat60.png"
     id: b60_icon
     resize: 70x70
     type: RGB565
   - platform: file
-    file: "pic/bat20.png"
+    file: "pic/bat40.png"
     id: b40_icon
     resize: 70x70
     type: RGB565
   - platform: file
-    file: "pic/bat0.png"
+    file: "pic/bat20.png"
     id: b20_icon
+    resize: 70x70
+    type: RGB565
+  - platform: file
+    file: "pic/bat0.png"
+    id: b0_icon
     resize: 70x70
     type: RGB565
   - platform: file
@@ -1475,11 +1482,14 @@ display:
           }
           //** BATTERY *******************************
           if (ok(id(battery_soc))) {
-              if (id(battery_soc).state >= 80) it.image(170, 85, id(b100_icon));
-              else if (id(battery_soc).state >= 60) it.image(170, 85, id(b80_icon));
-              else if (id(battery_soc).state >= 40) it.image(170, 85, id(b60_icon));
-              else if (id(battery_soc).state >= 20) it.image(170, 85, id(b40_icon));
-              else it.image(170, 85, id(b20_icon));
+              // Die Schwelle 99.5 passt zur gerundeten Zahl daneben: sobald
+              // dort 100 % steht, ist die Batterie auch im Bild voll.
+              if (id(battery_soc).state >= 99.5) it.image(170, 85, id(b100_icon));
+              else if (id(battery_soc).state >= 80) it.image(170, 85, id(b80_icon));
+              else if (id(battery_soc).state >= 60) it.image(170, 85, id(b60_icon));
+              else if (id(battery_soc).state >= 40) it.image(170, 85, id(b40_icon));
+              else if (id(battery_soc).state >= 20) it.image(170, 85, id(b20_icon));
+              else it.image(170, 85, id(b0_icon));
               it.printf(230, 94, id(lato20), WHITE, "%5.0f %%", id(battery_soc).state);
               if (!ok(id(battery_power))) {
                 it.printf(230, 126, id(lato20), WHITE, "  ---");

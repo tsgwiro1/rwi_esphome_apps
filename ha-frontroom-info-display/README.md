@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.8.0-blue)
+![Version](https://img.shields.io/badge/version-1.8.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -527,7 +527,7 @@ verdrahtet.
 | :--- | :--- | :--- |
 | `device_name` | `ha-frontroom-info-display` | `name` und `friendly_name`, zugleich der mDNS-Name |
 | `project_name` | `tsgwiro1.ha-frontroom-info-display` | `project:`-Block |
-| `fw_version` | `1.8.0` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
+| `fw_version` | `1.8.1` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
 | `device_timezone` | `Europe/Zurich` | IANA-Name oder POSIX-TZ-Zeichenkette. **Ohne Angabe nimmt ESPHome die Zeitzone des bauenden Rechners** — der Ladeplan ginge dann mit einer fremden Ortszeit an evcc |
 
 **evcc**
@@ -598,8 +598,8 @@ Autors und werden in jeder anderen Installation abweichen:
 ### Assets
 
 
-**Die Bilddateien liegen seit V1.1.0 im Ordner `pic/` neben dieser Datei** — 33
-Symbole und ein Wetter-GIF, zusammen 148 KB. Die Konfiguration ist damit ohne
+**Die Bilddateien liegen seit V1.1.0 im Ordner `pic/` neben dieser Datei** — 34
+Symbole und ein Wetter-GIF, zusammen 152 KB. Die Konfiguration ist damit ohne
 weiteres Zutun baubar; ESPHome löst die Pfade `pic/…` relativ zur YAML auf.
 
 Alle Symbole stammen aus [Material Design Icons](https://pictogrammers.com/library/mdi/)
@@ -609,6 +609,13 @@ der Ring gegenüber `close-circle-outline` verstärkt, damit er zum Zurück-Pfei
 auf demselben Platz passt; das Wetter-GIF ist aus
 `white-balance-sunny`, `cloud` und den Tropfen von `weather-pouring`
 zusammengesetzt.
+
+**Die sechs Ladestufen der Hausbatterie** `bat0.png` bis `bat100.png` gehören
+zusammen und müssen es bleiben: gleicher Umriss, gleicher Anschluss, nur die
+Füllhöhe und die Farbe wandern von Rot nach Grün. `bat100.png` ist deshalb aus
+`bat80.png` entstanden, indem die achtzehn Zeilen Hohlraum durch eine gefüllte
+Zeile ersetzt wurden — nicht neu gerendert. Wer eine Stufe ersetzt, ersetzt
+alle sechs.
 
 **Zur Bildgrösse:** `resize:` passt eine Vorlage unter Wahrung ihres
 Seitenverhältnisses in den angegebenen Kasten ein — eine hochkant-Vorlage füllt
@@ -623,7 +630,7 @@ bestimmt den Platz je Bildpunkt. Seit V1.4.1 steht deshalb nicht mehr überall
 | `type:` | Bytes je Bildpunkt | verwendet für |
 | :--- | :---: | :--- |
 | `GRAYSCALE` | 1 | die 23 einfarbigen Symbole |
-| `RGB565` | 2 | die 13 farbigen Bilder samt Wetteranimation |
+| `RGB565` | 2 | die 14 farbigen Bilder samt Wetteranimation |
 
 Bei einem grauen Symbol ist `GRAYSCALE` verlustfrei — ESPHome liefert
 `Color(gray, gray, gray)`, also denselben Bildpunkt wie zuvor. `BINARY` wäre
