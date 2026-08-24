@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.8.1-blue)
+![Version](https://img.shields.io/badge/version-1.9.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -219,10 +219,17 @@ Bilder von 60 × 60 px. Die Flächen liegen deckungsgleich darauf:
 | Wert | Schrittweite | Umlauf / Grenzen |
 | :--- | :---: | :--- |
 | Stunde | 1 | 0…23, umlaufend |
-| Minute | 10 | 0…50, umlaufend |
+| Minute | 10 | 0…50, umlaufend; rastet auf den nächsten Zehner in Laufrichtung ein |
 | Ziel-SoC | 5 | 0…100 %, geklemmt |
 
-Alle drei Werte sind neustartfest (`restore_value: yes`, Vorgaben 03:30 / 65 %).
+Uhrzeit und Ziel-SoC sind seit V1.9.0 **Entitäten des Geräts** und damit auch
+in Home Assistant einstellbar, die Stunde als Teil der Uhrzeit. Sie sind
+neustartfest (`restore_value: true`, Vorgaben 03:30 / 65 %) und bleiben ein
+reiner Entwurf: **eine Änderung in HA schickt nichts an evcc** und rührt einen
+laufenden Plan nicht an. Wirksam wird sie erst beim nächsten Senden von dieser
+Seite. Die Minuten-Taste rastet deshalb auf den nächsten Zehner ein — über HA
+lässt sich jede Minute setzen, und eine krumme wäre sonst mit den Tasten nicht
+mehr zu glätten.
 Jede Berührung setzt einen **10-Sekunden-Timer** zurück. Läuft er ab, wird der
 Plan an evcc gesendet und die Anzeige springt auf die Übersicht - eine
 gesonderte Bestätigungsfläche gibt es nicht.
@@ -322,6 +329,15 @@ Skripte decken die Funktionen ab:
 | `send_plan_request` | `POST /api/vehicles/${evcc_vehicle}/plan/soc/<soc>/<zeitstempel>` |
 | `delete_plan_request` | `DELETE /api/vehicles/${evcc_vehicle}/plan/soc` |
 
+**Ein gesendeter Plan wird immer gespeichert, aber nicht immer wirksam.** Der
+Plan hängt bei evcc am **Fahrzeug**, nicht am Ladepunkt; `plan/soc` legt ihn
+dort ab, unabhängig vom aktuellen Ladestand. Aktiv wird er erst, wenn das Ziel
+über dem aktuellen SoC liegt — erst dann meldet evcc ein `effectivePlanId`
+ungleich null, und genau daran hängen der Schalter «EVCC Planladung» und die
+Plananzeige des Displays. Ein Plan auf 55 %, gesendet bei 79 % SoC, steht
+deshalb in evcc, das Display zeigt aber keinen aktiven Plan. Das ist richtig so
+und kein Fehler der Übertragung.
+
 **Zeitstempel des Ladeplans:** Aus Stunde, Minute und der aktuellen Zeit von
 Home Assistant wird im Lambda ein ISO-8601-Zeitstempel in UTC gebildet. Liegt
 die eingestellte Uhrzeit noch in der Zukunft, gilt sie für heute, sonst für
@@ -395,6 +411,8 @@ Bedeutung, da ohnehin nur `http://` aufgerufen wird.
 | **Display Backlight** | `light` (monochromatic) | Helligkeit der Hintergrundbeleuchtung, `restore_mode: ALWAYS_ON` |
 | **EVCC Schnellladen** | `switch` (template) | EIN spiegelt evcc-Modus `NOW`; Einschalten setzt `NOW`, Ausschalten `PV` |
 | **EVCC Planladung** | `switch` (template) | EIN spiegelt einen aktiven Ladeplan; Einschalten öffnet die Eingabeseite am Display — nur bei angestecktem Fahrzeug —, Ausschalten löscht den Plan |
+| **Ladeplan Ziel-SoC** | `number` (template, 0…100 %, Schritt 5) | Der Ziel-SoC für das **nächste** Senden. Reine Vorbelegung — das Setzen schickt nichts an evcc |
+| **Ladeplan Uhrzeit** | `datetime` (template, `type: time`) | Die Uhrzeit für das **nächste** Senden, ebenfalls ohne Wirkung auf einen laufenden Plan |
 | **Letzter Hinweis** | `text_sensor` (template, Kategorie *Diagnose*) | Der zuletzt am Display gezeigte Hinweis. Bleibt stehen, damit ein in HA abgelehnter Schalter dort eine Begründung hat |
 | **Touch Kalibrierlog** | `switch` (template, Kategorie *Konfiguration*) | Gibt bei jeder Berührung Bildschirm- und Rohkoordinaten ins Log aus. Für die Kalibrierung eines neuen Panels, siehe [HARDWARE.md](HARDWARE.md), Abschnitt 8. Nach einem Neustart immer aus |
 
@@ -414,7 +432,9 @@ ergänzt, denkt am besten gleich an diesen Punkt.
 > **Achtung beim Schalter «EVCC Planladung»:** Einschalten *setzt keinen Plan*,
 > sondern öffnet nur die Eingabeseite am Display und startet den
 > 10-Sekunden-Timer. Wer den Schalter in HA einschaltet und nicht ans Display
-> geht, sendet nach zehn Sekunden die zuletzt gespeicherten Werte. Ohne
+> geht, sendet nach zehn Sekunden die Werte, die in «Ladeplan Ziel-SoC» und
+> «Ladeplan Uhrzeit» stehen — seit V1.9.0 also genau die, die sich vorher in HA
+> setzen lassen. Ohne
 > angestecktes oder mit einem fremden Fahrzeug wird der Schalter abgelehnt; der
 > Grund steht dann am Display und im Sensor «Letzter Hinweis». Der Schalter
 > fällt danach auf den tatsächlichen evcc-Zustand zurück.
@@ -527,7 +547,7 @@ verdrahtet.
 | :--- | :--- | :--- |
 | `device_name` | `ha-frontroom-info-display` | `name` und `friendly_name`, zugleich der mDNS-Name |
 | `project_name` | `tsgwiro1.ha-frontroom-info-display` | `project:`-Block |
-| `fw_version` | `1.8.1` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
+| `fw_version` | `1.9.0` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
 | `device_timezone` | `Europe/Zurich` | IANA-Name oder POSIX-TZ-Zeichenkette. **Ohne Angabe nimmt ESPHome die Zeitzone des bauenden Rechners** — der Ladeplan ginge dann mit einer fremden Ortszeit an evcc |
 
 **evcc**
@@ -583,7 +603,7 @@ Autors und werden in jeder anderen Installation abweichen:
 
 | Substitution | Vorgabe | Bedeutung |
 | :--- | :--- | :--- |
-| `plan_default_hour` / `_minute` / `_soc` | `3` / `30` / `65` | Startwerte der Ladeplan-Seite vor der ersten Eingabe |
+| `plan_default_time` / `plan_default_soc` | `03:30:00` / `65` | Startwerte der Ladeplan-Entitäten vor der ersten Eingabe |
 | `plan_send_timeout` | `10` | Sekunden ohne Berührung, dann wird der Plan gesendet |
 | `page_return_timeout` | `2min` | Rücksprung auf die Übersicht |
 | `hint_seconds` | `4` | Sekunden, so lange steht ein Hinweisbalken |
@@ -777,7 +797,9 @@ Abonnent im Haus.
   vollständig auf dem ESP32 und löst keinerlei Verkehr aus.
 
 **Flash-Verschleiss:** `preferences.flash_write_interval` ist nicht gesetzt,
-gilt also mit dem Vorgabewert von einer Minute. Neustartfest sind nur die drei
-Ladeplan-Werte, und die ändern sich ausschliesslich auf Tastendruck - eine
-Dauerbelastung des NVS entsteht daraus nicht.
+gilt also mit dem Vorgabewert von einer Minute. Neustartfest sind nur die
+beiden Ladeplan-Entitäten. Sie ändern sich auf Tastendruck am Display oder von
+Hand in Home Assistant, in beiden Fällen also selten - eine Dauerbelastung des
+NVS entsteht daraus nicht. Wer sie an eine Automation hängt, die häufig
+schreibt, ändert das.
 

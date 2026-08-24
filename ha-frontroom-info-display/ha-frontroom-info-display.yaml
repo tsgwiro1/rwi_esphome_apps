@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.8.1"
+  fw_version: "1.9.0"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -71,8 +71,7 @@ substitutions:
   touch_mirror_y: "true"
 
 # ---- Verhalten ---------------------------------------------
-  plan_default_hour: "3"          # Vorgabewerte der Ladeplan-Seite
-  plan_default_minute: "30"
+  plan_default_time: "03:30:00"   # Vorgabewerte der Ladeplan-Seite
   plan_default_soc: "65"
   plan_send_timeout: "10"         # s ohne Beruehrung, dann wird gesendet
   page_return_timeout: "2min"     # Ruecksprung auf die Uebersicht
@@ -183,7 +182,7 @@ script:
             // eingestellte Uhrzeit heute schon hinter uns, gilt sie fuer morgen.
             auto t_now = id(esptime).now();
             int32_t today = t_now.hour * 3600 + t_now.minute * 60 + t_now.second;
-            int32_t plan = id(plan_time_hour) * 3600 + id(plan_time_minute) * 60;
+            int32_t plan = id(plan_time).hour * 3600 + id(plan_time).minute * 60;
             time_t ts = t_now.timestamp - today + plan + (plan > today ? 0 : 86400);
             // Faellt eine Zeitumstellung zwischen diese Mitternacht und die
             // geplante Uhrzeit, liegt das Ergebnis eine Stunde daneben.
@@ -193,7 +192,7 @@ script:
             char tstr[21];
             ESPTime::from_epoch_utc(ts).strftime(tstr, sizeof(tstr), "%Y-%m-%dT%H:%M:%SZ");
             char soc[4];
-            snprintf(soc, sizeof(soc), "%d", id(plan_soc));
+            snprintf(soc, sizeof(soc), "%d", (int) id(plan_soc).state);
             return ((std::string) "${evcc_url}/api/vehicles/${evcc_vehicle}/plan/soc/" + soc + "/" + tstr);
           on_response:
             - lambda: 'id(evcc_plan_answer)->execute(response->status_code, 1);'
@@ -324,18 +323,6 @@ globals:
     type: int
     restore_value: no
     initial_value: '0' 
-  - id: plan_time_hour
-    type: int
-    restore_value: yes
-    initial_value: '${plan_default_hour}'
-  - id: plan_time_minute
-    type: int
-    restore_value: yes
-    initial_value: '${plan_default_minute}'
-  - id: plan_soc
-    type: int
-    restore_value: yes
-    initial_value: '${plan_default_soc}'
   # Hinweisbalken: Text, Stufe (1 = orange, 2 = rot) und Restlaufzeit in
   # Sekunden. Gesetzt wird ausschliesslich ueber das Skript show_hint.
   - id: hint_text
@@ -639,10 +626,9 @@ binary_sensor:
         - lambda: |-
             id(recent_touch) = true;
             id(plan_setup_timeout_timer) = id(plan_setup_timeout);
-            id(plan_time_hour) += 1;
-            if (id(plan_time_hour) > 23) {
-              id(plan_time_hour) = 0;
-            }
+            int h = id(plan_time).hour + 1;
+            if (h > 23) { h = 0; }
+            id(plan_time).make_call().set_time(h, id(plan_time).minute, 0).perform();
         - component.update: my_display
   - platform: touchscreen
     id: button_h_minus
@@ -656,10 +642,9 @@ binary_sensor:
         - lambda: |-
             id(recent_touch) = true;
             id(plan_setup_timeout_timer) = id(plan_setup_timeout);
-            id(plan_time_hour) -= 1;
-            if (id(plan_time_hour) < 0) {
-              id(plan_time_hour) = 23;
-            }
+            int h = (int) id(plan_time).hour - 1;
+            if (h < 0) { h = 23; }
+            id(plan_time).make_call().set_time(h, id(plan_time).minute, 0).perform();
         - component.update: my_display            
   - platform: touchscreen
     id: button_min_plus
@@ -673,10 +658,12 @@ binary_sensor:
         - lambda: |-
             id(recent_touch) = true;
             id(plan_setup_timeout_timer) = id(plan_setup_timeout);
-            id(plan_time_minute) += 10;
-            if (id(plan_time_minute) > 59) {
-              id(plan_time_minute) = 0;
-            }
+            // Auf den naechsten Zehner nach oben. Bei einem glatten Wert ist
+            // das der Zehnerschritt von frueher; eine in HA gesetzte krumme
+            // Minute wird dabei geglaettet statt mitgeschleppt.
+            int m = (id(plan_time).minute / 10) * 10 + 10;
+            if (m > 59) { m = 0; }
+            id(plan_time).make_call().set_time(id(plan_time).hour, m, 0).perform();
         - component.update: my_display
   - platform: touchscreen
     id: button_min_minus
@@ -690,10 +677,11 @@ binary_sensor:
         - lambda: |-
             id(recent_touch) = true;
             id(plan_setup_timeout_timer) = id(plan_setup_timeout);
-            id(plan_time_minute) -= 10;
-            if (id(plan_time_minute) < 0) {
-              id(plan_time_minute) = 50;
-            }
+            // Spiegelbild nach unten: 40 wird zu 30, 37 ebenfalls zu 30.
+            int base = (id(plan_time).minute / 10) * 10;
+            int m = (id(plan_time).minute == base) ? base - 10 : base;
+            if (m < 0) { m = 50; }
+            id(plan_time).make_call().set_time(id(plan_time).hour, m, 0).perform();
         - component.update: my_display
   - platform: touchscreen
     id: button_soc_plus
@@ -707,10 +695,9 @@ binary_sensor:
         - lambda: |-
             id(recent_touch) = true;
             id(plan_setup_timeout_timer) = id(plan_setup_timeout);
-            id(plan_soc) += 5;
-            if (id(plan_soc) > 100) {
-              id(plan_soc) = 100;
-            }
+        - number.increment:
+            id: plan_soc
+            cycle: false
         - component.update: my_display
   - platform: touchscreen
     id: button_soc_minus
@@ -724,10 +711,9 @@ binary_sensor:
         - lambda: |-
             id(recent_touch) = true;
             id(plan_setup_timeout_timer) = id(plan_setup_timeout);
-            id(plan_soc) -= 5;
-            if (id(plan_soc) < 0) {
-              id(plan_soc) = 0;
-            }
+        - number.decrement:
+            id: plan_soc
+            cycle: false
         - component.update: my_display
 
 # Define all the numeric sensors used
@@ -864,6 +850,34 @@ text_sensor:
     entity_id: ${ent_forecast}
     attribute: hrain
     id: forecast_rain
+
+# Der Entwurf des naechsten Ladeplans. Frueher waren das drei Globals im NVS
+# und damit nur am Geraet einstellbar; als Entitaeten stehen sie zugleich in
+# Home Assistant. Gesendet wird dadurch nichts -- sie sind die Vorbelegung der
+# Ladeplan-Seite, wirksam erst mit dem Absenden von dort.
+number:
+  - platform: template
+    name: "Ladeplan Ziel-SoC"
+    id: plan_soc
+    icon: "mdi:battery-charging-80"
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: ${plan_default_soc}
+
+datetime:
+  - platform: template
+    name: "Ladeplan Uhrzeit"
+    id: plan_time
+    type: time
+    icon: "mdi:clock-outline"
+    optimistic: true
+    restore_value: true
+    initial_value: "${plan_default_time}"
 
 switch:
   # restore_mode: DISABLED ist wesentlich. Die Vorgabe ALWAYS_OFF laesst
@@ -1712,10 +1726,10 @@ display:
           it.image(0, 0, id(clock_icon));
           it.image(280, 0, id(close_icon));
           it.printf(160,0,id(lato30), HA_BLUE, BLACK, TextAlign::TOP_CENTER, "Charge Plan");
-          it.printf(70,96,id(lato50), WHITE, BLACK, TextAlign::TOP_CENTER, "%02d", id(plan_time_hour));
+          it.printf(70,96,id(lato50), WHITE, BLACK, TextAlign::TOP_CENTER, "%02d", id(plan_time).hour);
           it.printf(110,96,id(lato50), WHITE, BLACK, TextAlign::TOP_CENTER, ":");
-          it.printf(150,96,id(lato50), WHITE, BLACK, TextAlign::TOP_CENTER, "%02d", id(plan_time_minute));
-          it.printf(250,96,id(lato50), WHITE, BLACK, TextAlign::TOP_CENTER, "%d%%", id(plan_soc));
+          it.printf(150,96,id(lato50), WHITE, BLACK, TextAlign::TOP_CENTER, "%02d", id(plan_time).minute);
+          it.printf(250,96,id(lato50), WHITE, BLACK, TextAlign::TOP_CENTER, "%d%%", (int) id(plan_soc).state);
           id(button_h_plus).state    ? it.image(40, 40, id(button_arrow_up_pressed))     : it.image(40, 40, id(button_arrow_up)); 
           id(button_min_plus).state  ? it.image(120, 40, id(button_arrow_up_pressed))    : it.image(120, 40, id(button_arrow_up)); 
           id(button_soc_plus).state  ? it.image(220, 40, id(button_arrow_up_pressed))    : it.image(220, 40, id(button_arrow_up)); 

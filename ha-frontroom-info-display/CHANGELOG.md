@@ -2,6 +2,47 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.9.0] - 2026-08-24
+
+### Neu
+
+* **Der Ladeplan-Entwurf ist jetzt auch von Home Assistant aus einstellbar.**
+  Ziel-SoC und Uhrzeit waren bisher Globals im NVS des Geräts und liessen sich
+  nur über die Auf-/Ab-Flächen der Ladeplan-Seite ändern. Sie sind jetzt
+  Entitäten des Geräts und erscheinen damit von selbst in Home Assistant:
+
+  | Entität | Typ |
+  | :--- | :--- |
+  | **Ladeplan Ziel-SoC** | `number` (template, 0…100 %, Schritt 5) |
+  | **Ladeplan Uhrzeit** | `datetime` mit `type: time` |
+
+  **An evcc geht dadurch nichts.** Die beiden Werte sind der Entwurf für das
+  nächste Senden; wirksam wird er erst über den Taster, den Schalter «EVCC
+  Planladung» oder die Ladeplan-Seite. Ein laufender Plan bleibt von einer
+  Änderung unberührt. Damit lässt sich der Wert in Ruhe in HA setzen und am
+  Display nur noch bestätigen.
+
+  Der Weg zu evcc bleibt der eine bestehende, samt der
+  Bestätigungsüberwachung aus V1.6.0 — es kommt kein zweiter, unbeaufsichtigter
+  Auslöser dazu.
+
+### Geändert
+
+* **Die Minuten-Tasten rasten auf den nächsten Zehner in Laufrichtung ein.**
+  Aus 06:37 macht *auf* neu 06:40 und *ab* 06:30. Bei einem glatten Wert ist
+  das unverändert der Zehnerschritt von früher; nötig wurde es, weil sich über
+  Home Assistant jetzt jede beliebige Minute setzen lässt und sich eine krumme
+  sonst nie mehr glätten liesse.
+
+* **Die Substitutionen `plan_default_hour` und `plan_default_minute` sind zu
+  `plan_default_time` zusammengefasst** (`"03:30:00"`), weil die
+  `datetime`-Entität eine vollständige Uhrzeit als Startwert erwartet.
+
+**Beim ersten Start nach dem Update stehen Ziel-SoC und Uhrzeit einmalig auf
+den Vorgaben** 65 % und 03:30 — die alten Globals und die neuen Entitäten
+belegen verschiedene NVS-Schlüssel, der gespeicherte Entwurf wandert also nicht
+mit.
+
 ## [1.8.1] - 2026-08-23
 
 ### Behoben
