@@ -1,6 +1,6 @@
 # ha-weather-station - Wetterstation mit beheiztem Regensensor
 
-![Version](https://img.shields.io/badge/version-2.2.0-blue)
+![Version](https://img.shields.io/badge/version-2.2.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -165,7 +165,7 @@ Alle Werte sind als Eingabefeld (`mode: box`) ausgeführt, in der Kategorie *Kon
 | **Rain Threshold Dry** | 0.5…1.0 | 0.954 | Ausschaltschwelle als Anteil der Trockenfrequenz |
 | **Rain Off Delay [min]** | 0…60 | 3 | Trockenzeit, bis «Regen Shed» zurückgesetzt wird |
 | **Rain Hold Time [min]** | 0…180 | 45 | Nachlaufzeit von «Regen kürzlich» |
-| **Rain Slope Threshold [Hz/min]** | −5000…0 | −1000 | Frequenzabfall, ab dem eine Benetzung erkannt wird (0 = aus) |
+| **Rain Slope Threshold [Hz⁄min]** | −5000…0 | −1000 | Frequenzabfall, ab dem eine Benetzung erkannt wird (0 = aus) |
 | **Calibration delay [min]** | 1…120 | 30 | Wartezeit nach dem Trockenwerden bis zur Kalibrierung |
 | **Range for Calibration** | 0.01…0.2 | 0.04 | Maximal zulässige Drift für eine Kalibrierung |
 | **SHT Heater Time [min]** | 1…30 | 5 | Heizdauer des SHT31-Wartungszyklus |

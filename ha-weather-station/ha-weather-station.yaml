@@ -50,7 +50,7 @@ preferences:
   flash_write_interval: 10min
 
 substitutions:
-  fw_version: "2.2.0"
+  fw_version: "2.2.1"
   # ESP32
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
@@ -339,8 +339,11 @@ number:
   # Messreihe stammt der Vorgabewert -1000 Hz/min; er liegt oberhalb des
   # stärksten im Trockenen beobachteten Abfalls und unterhalb der bei
   # Benetzung üblichen Werte. 0 schaltet die Flankenerkennung ab.
+  # Der Bruchstrich U+2044 im Namen ist Absicht: ESPHome setzt ihn ohnehin
+  # anstelle eines "/" ein, weil der Schrägstrich Pfadtrenner ist. Ihn hier
+  # zu schreiben hält den Namen und damit Entity-ID und Verlauf stabil.
   - platform: template
-    name: "Rain Slope Threshold [Hz/min]"
+    name: "Rain Slope Threshold [Hz⁄min]"
     id: rain_slope_limit
     optimistic: true
     min_value: -5000

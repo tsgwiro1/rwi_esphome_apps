@@ -2,6 +2,14 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [2.2.1] - 2026-08-29
+
+### Geändert
+
+* **Der Schrägstrich im Namen von `Rain Slope Threshold [Hz/min]` ist durch den Bruchstrich U+2044 ersetzt.** ESPHome nimmt diese Ersetzung seit jeher selbst vor, weil der Schrägstrich als Pfadtrenner reserviert ist, und warnt seit 2026.8.1 darüber; ab **ESPHome 2027.7.0 wird daraus ein Fehler**. In Home Assistant stand der Bruchstrich damit ohnehin schon - der angezeigte Name, die Entity-ID und der gespeicherte Reglerwert bleiben deshalb unverändert, und der Verlauf der Entität bleibt erhalten. Die Änderung macht nur explizit, was vorher stillschweigend geschah.
+
+Keine funktionale Änderung.
+
 ## [2.2.0] - 2026-08-29
 
 Die Feuchtemessung ist gegen das SHT3x-Datenblatt und die Sensirion Application Notes durchgesehen worden.
