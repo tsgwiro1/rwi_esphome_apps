@@ -2,6 +2,31 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [2.2.0] - 2026-08-29
+
+Die Feuchtemessung ist gegen das SHT3x-Datenblatt und die Sensirion Application Notes durchgesehen worden.
+
+### Achtung beim Update
+
+**`1.3 SHT Defog Status` und `1.4 SHT Defog Cycle Active` heissen neu `1.3 SHT Wartungsstatus` und `1.4 SHT Wartungszyklus aktiv`.** Die ESPHome-Integration legt sie damit als neue Entitäten an; die bisherigen verschwinden samt Verlauf und die Entity-IDs ändern sich. Vor der Umbenennung wurde geprüft, dass weder Automation, Skript, Szene, Helper noch Dashboard auf sie zugreift.
+
+**Der SHT31-Heizzyklus wird nicht mehr von der Luftfeuchte ausgelöst, sondern läuft nach Zeitplan.** Sensirion nennt für diesen Heizer zwei Zwecke: Plausibilitätsprüfung (Datenblatt 4.10) und das Rückgängigmachen kontaminationsbedingter Drift (Handling Instructions 3). Kondensat gehört nicht dazu, und das Kriechen oberhalb 80 %RH bildet sich im Normalbereich von selbst zurück (Datenblatt 1.1, bis +3 %RH nach 60 h). Die Schwelle von 98 % löste in 31 Tagen genau einen Zyklus aus, und dieser korrigierte nichts.
+
+### Hinzugefügt
+
+* **`SHT Maintenance Interval [d]`** (Default 7, 0 = aus) steuert den Zyklus. Bei Regen wartet er, weil der Heizungssollwert über den Taupunkt an der Feuchte hängt.
+* **`Temperature SHT31`** - die bisher ungenutzte Temperatur des Feuchtesensors, mit derselben Sperre während des Zyklus wie die Feuchte.
+* **`1.7 Temperature Delta SHT31 - AM2315`** (K, Diagnose, 60-s-Takt). Beide dienen einer Beobachtung: Die Taupunktrechnung mischt Temperatur und Feuchte zweier Sensoren, was nur zulässig ist, solange beide dieselbe Temperatur haben. Da der Taupunkt der Sollwert der Sensorheizung ist, wirkt ein Versatz bis in die Regelung.
+
+### Geändert
+
+* **Taupunkt mit den Magnus-Konstanten des Sensorherstellers** (17.62 und 243.12 statt 17.67 und 243.5). Der Unterschied beträgt am Betriebspunkt rund 0.01 K; die Konstanten sind aber die Referenz, gegen die das Datenblatt geschrieben ist.
+* **Feuchte wird vor der Rechnung geklemmt**, wie in jedem Sensirion-Beispielcode. Bei 0 % wäre der Logarithmus nicht definiert, über 100 % ergäbe sich ein Taupunkt über der Lufttemperatur und damit ein zu hoher Heizungssollwert.
+* **`SHT Recovery Time` startet neu bei 12 min statt 3.** Gemessen am Zyklus vom 22.08.2026 klingt der Heizeffekt mit einer Zeitkonstante von rund 4.5 min ab; bei 3 min lag der erste wieder publizierte Wert gut 1 %RH zu tief, bei 12 min bleiben rund 0.1 %RH. Ein bereits eingestellter Wert bleibt erhalten.
+* **Der Status** meldet `Heizt (Wartungszyklus)` statt `Heizt (Kondensationsschutz)`. Auch die internen IDs im Code sprechen nicht mehr von «Defog».
+
+Keine Änderung an der Heizungsregelung oder der Regenerkennung.
+
 ## [2.1.0] - 2026-08-29
 
 ### Hinzugefügt

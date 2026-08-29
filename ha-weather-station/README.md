@@ -1,6 +1,6 @@
 # ha-weather-station - Wetterstation mit beheiztem Regensensor
 
-![Version](https://img.shields.io/badge/version-2.1.0-blue)
+![Version](https://img.shields.io/badge/version-2.2.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -26,11 +26,11 @@ Mit der Verwendung dieses Codes oder Nachbau der Hardware erklärst du dich dami
 
 ## 1. Funktionsprinzip
 
-* **Messwerte:** Temperatur (AM2315), Luftfeuchte (SHT31) und Luftdruck (BMP280) werden über einen gemeinsamen I²C-Bus erfasst. Der Taupunkt wird nach der Magnus-Formel aus AM2315-Temperatur und SHT31-Feuchte berechnet.
+* **Messwerte:** Temperatur (AM2315), Luftfeuchte (SHT31) und Luftdruck (BMP280) werden über einen gemeinsamen I²C-Bus erfasst. Der Taupunkt wird nach der Magnus-Formel mit den Konstanten des Sensorherstellers aus AM2315-Temperatur und SHT31-Feuchte berechnet.
 * **Regenerkennung:** Der Regensensor liefert eine Frequenz, die mit zunehmender Nässe **sinkt**. Erkannt wird nicht gegen einen festen Absolutwert, sondern gegen die gelernte Trockenfrequenz des Sensors. Zusätzlich erkennt eine Flankenauswertung Benetzungen am Tempo des Frequenzabfalls, auch wenn die Absolutschwelle gar nicht erreicht wird. Das Ergebnis wird in zwei Entitäten gemeldet: «ist der Sensor jetzt nass» und «hat es in den letzten Minuten geregnet» (siehe Abschnitt 2).
 * **Beheizter Sensor:** Ein nativer ESPHome-PID-Regler hält den Regensensor über einem einstellbaren Sollwert (wahlweise Taupunkt oder Umgebungstemperatur, plus Überhöhung). So trocknet er nach Regen ab und beschlägt in feuchten Nächten nicht.
 * **Selbstkalibrierung:** Die Trockenfrequenz wird nur unter kontrollierten Bedingungen nachgeführt (siehe Abschnitt 2). Dadurch bleibt die Auslöseschwelle über die Lebensdauer des Sensors stabil.
-* **Anti-Kondensation am SHT31:** Übersteigt die Luftfeuchte 98 %, startet ein Heizzyklus über den internen Heizer des SHT31. Während des Zyklus werden die Messwerte verworfen, damit die aufgeheizten (und damit falschen) Feuchtewerte nicht in Home Assistant landen.
+* **Wartungszyklus für den SHT31:** Alle **SHT Maintenance Interval** Tage (Default 7) läuft der interne Heizer des SHT31 für **SHT Heater Time** und treibt angelagerte Verunreinigungen aus. Sensirion nennt für diesen Heizer genau zwei Zwecke - Plausibilitätsprüfung und das Rückgängigmachen kontaminationsbedingter Drift -, beides wiederkehrende Wartung und kein Ereignis. Deshalb ein Zeitintervall und keine Feuchteschwelle. Während des Zyklus und für **SHT Recovery Time** danach werden die Messwerte verworfen; HA hält so lange den letzten Stand, statt die aufgeheizten und damit zu trockenen Werte zu übernehmen. Bei Regen wartet der Zyklus, weil der Heizungssollwert am Taupunkt und damit an der Feuchte hängt.
 * **Lokale Autonomie:** Regenerkennung, Heizungsregelung und Kalibrierung laufen vollständig auf dem ESP32. Ein WLAN- oder HA-Ausfall unterbricht die Logik nicht, er wird nur über die Status-LED und die Diagnose gemeldet.
 
 ---
@@ -168,18 +168,20 @@ Alle Werte sind als Eingabefeld (`mode: box`) ausgeführt, in der Kategorie *Kon
 | **Rain Slope Threshold [Hz/min]** | −5000…0 | −1000 | Frequenzabfall, ab dem eine Benetzung erkannt wird (0 = aus) |
 | **Calibration delay [min]** | 1…120 | 30 | Wartezeit nach dem Trockenwerden bis zur Kalibrierung |
 | **Range for Calibration** | 0.01…0.2 | 0.04 | Maximal zulässige Drift für eine Kalibrierung |
-| **SHT Heater Time [min]** | 1…30 | 5 | Heizdauer des SHT31-Defog-Zyklus |
-| **SHT Recovery Time [min]** | 1…30 | 3 | Abkühlzeit, in der keine Werte publiziert werden |
+| **SHT Heater Time [min]** | 1…30 | 5 | Heizdauer des SHT31-Wartungszyklus |
+| **SHT Recovery Time [min]** | 1…30 | 12 | Abkühlzeit, in der keine Werte publiziert werden |
+| **SHT Maintenance Interval [d]** | 0…30 | 7 | Abstand zwischen zwei Wartungszyklen (0 = aus) |
 | **Barometer Elevation Correction** | −200…200 hPa | 0.0 | Höhenkorrektur des Luftdrucks |
 
 ### Messwerte (Read-Only in HA)
 
 * **Temperature Shed (`sensor.temperature_shed`):** Umgebungstemperatur vom AM2315.
-* **Humidity Shed (`sensor.humidity_shed`):** Relative Luftfeuchte vom SHT31. Während eines Defog-Zyklus werden keine Werte publiziert, HA hält den letzten Stand.
+* **Humidity Shed (`sensor.humidity_shed`):** Relative Luftfeuchte vom SHT31. Während eines Wartungszyklus werden keine Werte publiziert, HA hält den letzten Stand.
 * **Barometic Pressure Shed (`sensor.barometic_pressure_shed`):** Luftdruck vom BMP280 inkl. Höhenkorrektur.
 * **Dew Point Shed (`sensor.dew_point_shed`):** Berechneter Taupunkt (Magnus-Formel).
 * **Regen Shed (`binary_sensor.raining`):** Ist der Sensor jetzt nass? `device_class: moisture`.
 * **Regen kürzlich:** Hat es innerhalb der *Rain Hold Time* geregnet - gemessen oder über die Flanke erkannt? `device_class: moisture`.
+* **Temperature SHT31:** Temperatur des SHT31, gemessen im selben Chip wie die Luftfeuchte. Wird nur beobachtet und geht in keine Rechnung ein (siehe Abschnitt 8). Während eines Wartungszyklus werden keine Werte publiziert.
 * **Weather Station Frequency (`sensor.weather_station_frequency`):** Aktuelle Sensorfrequenz, sekündlich gemessen und über 60 s gemittelt.
 * **Weather Station Sensor Heater (`sensor.weather_station_sensor_heater`):** Isttemperatur der Sensorheizung, über 60 s gemittelt.
 * **Rain Sensor Heater PID (`climate.ha_weather_station_rain_sensor_heater_pid`):** Der PID-Regler als Climate-Entität, inkl. Soll-/Isttemperatur und Betriebszustand.
@@ -193,10 +195,11 @@ Die Kategorie 1.x ist projektlokal, 2.x bis 6.x kommen aus `common/diagnostics.y
 * **1.0 Weather Station Dry Frequency:** Aktuell gelernte Trockenfrequenz - die Referenz der gesamten Regenerkennung.
 * **1.1 Dry Frequency Calibration Status:** Klartext-Grund, warum gerade (nicht) kalibriert wird.
 * **1.2 Dry Frequency Calibration Active:** EIN, solange die Trockenfrequenz nachgeführt wird.
-* **1.3 SHT Defog Status:** `Normalbetrieb`, `Heizt (Kondensationsschutz)` oder `Abkühlphase`.
-* **1.4 SHT Defog Cycle Active:** EIN während des gesamten Defog-Zyklus (Heiz- **und** Abkühlphase).
+* **1.3 SHT Wartungsstatus:** `Normalbetrieb`, `Heizt (Wartungszyklus)` oder `Abkühlphase`.
+* **1.4 SHT Wartungszyklus aktiv:** EIN während des gesamten Zyklus (Heiz- **und** Abkühlphase).
 * **1.5 Heizung Störung** (`device_class: problem`): EIN, wenn der NTC-Wert das Plausibilitätsfenster verlässt und die Heizung deshalb zwangsweise aus ist. Im Normalbetrieb kippt der Zustand nie - eignet sich daher direkt als Auslöser für eine Benachrichtigung in Home Assistant.
 * **1.6 Weather Station Frequency Slope:** Steigung der Sensorfrequenz in Hz/min - die Grösse, gegen die *Rain Slope Threshold* prüft. Vor dem Nachjustieren der Schwelle gehört dieser Wert einige trockene Tage lang beobachtet.
+* **1.7 Temperature Delta SHT31 - AM2315:** Temperaturunterschied zwischen den beiden Sensoren. Entscheidungsgrundlage für die Taupunktrechnung (siehe Abschnitt 8).
 
 ---
 
@@ -223,14 +226,15 @@ Die Entitäten sind bewusst darauf ausgelegt, wenig zu senden. Die Regelung läu
 | Sensor Frequency, Temperature Rainsensor | 60 s (Mittelwert) | je 1'440 |
 | 1.0 Dry Frequency | 300 s | 288 |
 | 1.6 Frequency Slope | 60 s | 1'440 |
+| Temperature SHT31, 1.7 Temperature Delta | 60 s | je 1'440 |
 | 1.1 Calibration Status, 1.2 Calibration Active | nur bei Änderung | wenige |
-| Regen Shed, Regen kürzlich, 1.4 SHT Defog Cycle Active | nur bei Flankenwechsel | wenige |
+| Regen Shed, Regen kürzlich, 1.4 SHT Wartungszyklus aktiv | nur bei Flankenwechsel | wenige |
 
 Drei Entwurfsentscheidungen dahinter:
 
 * **Der PID-Regler bestimmt seine eigene Meldungsrate.** ESPHomes `PIDClimate` publiziert bei jeder Änderung der Isttemperatur, und der Regler rechnet genau dann, wenn sein Eingangssensor einen Wert liefert. `send_every` an `heater_temp_fast` steuert deshalb beides zugleich. Der ADC tastet weiterhin mit 10 Hz ab, publiziert aber nur alle 2 s einen Mittelwert - bei einer Aufheizrate von rund 0.1 K/s bewegt sich die Temperatur zwischen zwei Abtastungen um 0.2 K, für eine träge Heizung völlig ausreichend.
 * **Der PID wird nur bei echter Änderung angefasst.** Jeder `ClimateCall::perform()` löst intern ein `publish_state()` **und** ein `save_state_()` ins NVS aus. Die Hauptschleife setzt Modus und Sollwert daher nur noch, wenn der Modus wechselt oder sich der Sollwert um mindestens 0.1 K verschiebt.
-* **Statusmeldungen werden entprellt.** `BinarySensor::publish_state` und `TextSensor::publish_state` senden in ESPHome ohne Vergleich mit dem Vorwert. Kalibrierstatus, Regenstatus und Defog-Status führen deshalb in der Firmware selbst Buch und melden nur Änderungen.
+* **Statusmeldungen werden entprellt.** `BinarySensor::publish_state` und `TextSensor::publish_state` senden in ESPHome ohne Vergleich mit dem Vorwert. Kalibrierstatus, Regenstatus und Wartungsstatus führen deshalb in der Firmware selbst Buch und melden nur Änderungen.
 
 Nicht angefasst ist das gemeinsame `common/diagnostics.yaml` (Kategorien 2.x bis 6.x, zusammen rund 12'000 Meldungen/Tag), weil es von allen Projekten geteilt wird. Wer dort sparen will, sollte es projektübergreifend entscheiden.
 
@@ -238,6 +242,8 @@ Nicht angefasst ist das gemeinsame `common/diagnostics.yaml` (Kategorien 2.x bis
 
 ## 8. Bekannte Punkte
 
-* **SHT31-Defog ohne Begrenzung:** Bei anhaltendem Nebel triggert der Zyklus unmittelbar neu, was auf ca. 62 % Einschaltdauer des internen Sensorheizers führt. Der Heizer ist laut Datenblatt nicht für Dauerbetrieb vorgesehen; ein Zykluszähler oder eine Mindestpause wäre sinnvoll. Vor einer Änderung lohnt ein Blick in den Verlauf von `1.4 SHT Defog Cycle Active` - tritt der Fall selten auf, ist der Aufwand nicht gerechtfertigt.
+* **Taupunkt aus zwei Sensoren:** Die Rechnung nimmt die Temperatur vom AM2315 und die Feuchte vom SHT31. Eine relative Feuchte gilt aber nur bei der Temperatur, bei der sie gemessen wurde - laut Sensirion kostet 1 K Versatz bei hoher Feuchte bis zu 5 %RH, im Taupunkt rund 0.9 K. Da der Taupunkt der Sollwert der Sensorheizung ist, wirkt der Fehler bis in die Regelung. Wie gross er tatsächlich ist, misst seit V2.2.0 `1.7 Temperature Delta SHT31 - AM2315`. Fällt die Differenz ins Gewicht, wird der Taupunkt auf Temperatur **und** Feuchte des SHT31 umgestellt.
+* **Der Wartungszyklus zählt ab dem Systemstart.** Die Firmware misst den Abstand über die Laufzeit, nicht über die Uhrzeit - jeder Neustart und jedes OTA setzt den Zähler zurück. Wird das Gerät häufiger als alle sieben Tage neu gestartet, läuft der Zyklus nie. Ein Nachziehen bräuchte eine echte Zeitquelle (`time:`), die das Projekt bisher nicht einbindet.
+* **Kondensat auf dem SHT31 wird nicht behandelt.** Der interne Heizer würde Kondensat verdampfen, ist dafür aber nicht spezifiziert, und die Feuchteschwelle von 98 % traf den Fall nicht: In 31 Tagen löste sie genau einen Zyklus aus, und dieser korrigierte nichts - die Feuchte stand davor und nach voller Erholung auf demselben Wert. Wer echten Kondensationsschutz will, müsste auf «Feuchte klebt über mehrere Minuten bei rund 100 %» auslösen statt auf das Überschreiten einer Schwelle.
 * **Schreibweise `Barometic`** statt `Barometric` im Entitätsnamen. Eine Korrektur ändert die Entity-ID in Home Assistant und kostet den bisherigen Verlauf, ist deshalb kein reiner Kosmetik-Fix.
 * **Climate-Entität als grösster verbleibender Sender:** Wer die ~43'000 Meldungen/Tag auch noch loswerden will, kann `climate` auf `internal: true` setzen. Funktional kostet das nichts - die Hauptschleife überschreibt jede manuelle Änderung ohnehin innerhalb von 10 s -, man verliert aber die Sicht auf Soll-/Isttemperatur und Reglerzustand in HA. Alternativ lässt sich die Entität in HAs `recorder` ausschliessen, dann bleibt sie sichtbar, landet aber nicht mehr in der Datenbank.

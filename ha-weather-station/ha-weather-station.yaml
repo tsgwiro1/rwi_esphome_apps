@@ -14,9 +14,9 @@ esphome:
           id(cal_status).publish_state("Initialisiere...");
           id(cal_active).publish_state(false);
 
-          // 2. SHT Defog-Sensoren initialisieren
-          id(sht_defog_status).publish_state("Normalbetrieb");
-          id(sht_defog_active).publish_state(false);
+          // 2. SHT-Wartungssensoren initialisieren
+          id(sht_service_status).publish_state("Normalbetrieb");
+          id(sht_service_active).publish_state(false);
 
           // 3. Regen-Status einmalig setzen (danach nur noch bei Flankenwechsel)
           id(rain_binary).publish_state(id(is_raining));
@@ -50,7 +50,7 @@ preferences:
   flash_write_interval: 10min
 
 substitutions:
-  fw_version: "2.1.0"
+  fw_version: "2.2.0"
   # ESP32
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
@@ -270,6 +270,10 @@ number:
     mode: box
     entity_category: config
 
+  # 12 min statt der urspruenglichen 3: Nach dem Zyklus vom 22.08.2026
+  # gemessen klingt der Heizeffekt mit einer Zeitkonstante von rund 4.5 min ab.
+  # Bei 3 min lag der erste wieder publizierte Wert gut 1 %RH zu tief, bei
+  # 12 min bleiben rund 0.1 %RH - die Wiederholbarkeit des Sensors.
   - platform: template
     name: "SHT Recovery Time [min]"
     id: sht_recovery_time
@@ -277,7 +281,24 @@ number:
     min_value: 1
     max_value: 30
     step: 1
-    initial_value: 3
+    initial_value: 12
+    restore_value: true
+    mode: box
+    entity_category: config
+
+  # Abstand zwischen zwei Wartungszyklen des SHT31-Heizers. Sensirion nennt
+  # zwei Zwecke fuer diesen Heizer: Plausibilitaetspruefung (Datenblatt 4.10)
+  # und das Austreiben von Verunreinigungen (Handling Instructions 3). Beides
+  # ist eine wiederkehrende Wartung, kein Ereignis - deshalb ein Zeitintervall
+  # und keine Feuchteschwelle. 0 schaltet den Zyklus ab.
+  - platform: template
+    name: "SHT Maintenance Interval [d]"
+    id: sht_cycle_days
+    optimistic: true
+    min_value: 0
+    max_value: 30
+    step: 1
+    initial_value: 7
     restore_value: true
     mode: box
     entity_category: config
@@ -367,8 +388,8 @@ script:
       - delay: 50ms
       - output.turn_off: led_activity
 
-  # 2. SHT31 Anti-Kondensations-Zyklus
-  - id: sht_defog_cycle
+  # 2. SHT31 Wartungszyklus (Heizer)
+  - id: sht_service_cycle
     mode: single 
     then:
       # Zyklus startet
@@ -376,8 +397,8 @@ script:
           id: sht_heating_active
           value: 'true'
       - lambda: |-
-          id(sht_defog_status).publish_state("Heizt (Kondensationsschutz)");
-          id(sht_defog_active).publish_state(true);
+          id(sht_service_status).publish_state("Heizt (Wartungszyklus)");
+          id(sht_service_active).publish_state(true);
           
       # ESPHome Native I2C Write via C++ Lambda (Heizung EIN)
       - lambda: |-
@@ -388,7 +409,7 @@ script:
       - delay: !lambda "return id(sht_heat_time).state * 60000;"
       
       # Heizung geht aus, Abkühlphase beginnt
-      - lambda: 'id(sht_defog_status).publish_state("Abkühlphase");'
+      - lambda: 'id(sht_service_status).publish_state("Abkühlphase");'
       
       # ESPHome Native I2C Write via C++ Lambda (Heizung AUS)
       - lambda: |-
@@ -403,8 +424,8 @@ script:
           id: sht_heating_active
           value: 'false'
       - lambda: |-
-          id(sht_defog_status).publish_state("Normalbetrieb");
-          id(sht_defog_active).publish_state(false);
+          id(sht_service_status).publish_state("Normalbetrieb");
+          id(sht_service_active).publish_state(false);
 
 # --------------------------------------------------------
 # LOGIK-SCHLEIFEN (Regen, Heizung, LEDs)
@@ -677,7 +698,23 @@ interval:
             last_status_msg = status_msg;
           }
 
-      # --- 3. ACTIVITY FLASH ---
+          // --- 3. SHT31-WARTUNGSZYKLUS ---
+          // Nicht waehrend Regen: der Taupunkt haengt an der Feuchte, und
+          // waehrend des Zyklus haelt HA den letzten Wert. Bei Regen wird der
+          // Sollwert der Sensorheizung also aus einem eingefrorenen Taupunkt
+          // gebildet - das laesst sich vermeiden, indem der Zyklus wartet.
+          static uint32_t last_sht_cycle = millis();
+          float cycle_days = id(sht_cycle_days).state;
+          if (cycle_days > 0 && !id(sht_heating_active) && !id(is_raining)) {
+            uint32_t period_ms = (uint32_t)(cycle_days * 24.0f * 3600.0f * 1000.0f);
+            if (millis() - last_sht_cycle > period_ms) {
+              last_sht_cycle = millis();
+              ESP_LOGI("sht", "Wartungszyklus gestartet (Intervall %.0f d)", cycle_days);
+              id(sht_service_cycle).execute();
+            }
+          }
+
+      # --- 4. ACTIVITY FLASH ---
       - script.execute: flash_activity
 
 climate:
@@ -709,21 +746,42 @@ sensor:
   # LUFTFEUCHTIGKEIT (SHT31)
   # --------------------------------------------------------
   - platform: sht3xd
+    # Die Temperatur des SHT31 wird nur beobachtet, nicht verwendet. Sie
+    # beantwortet die Frage, ob die Taupunktrechnung Feuchte und Temperatur
+    # zweier verschiedener Sensoren mischen darf: eine relative Feuchte gilt
+    # nur bei der Temperatur, bei der sie gemessen wurde. Laut Sensirion
+    # kostet 1 K Versatz bei hoher Feuchte bis zu 5 %RH.
+    temperature:
+      name: "Temperature SHT31"
+      id: temp_sht
+      state_class: measurement
+      filters:
+        - lambda: |-
+            // Während des Wartungszyklus heizt sich der Chip selbst auf; der
+            // Wert beschreibt dann den Heizer, nicht die Luft.
+            if (id(sht_heating_active)) {
+              return {};
+            }
+            return x;
     humidity:
       name: "Humidity Shed"
       id: hum_shed
       state_class: measurement
       filters:
         - lambda: |-
-            // 1. Sperre aktiv? -> Wert verwerfen, HA hält alte Linie
+            // Waehrend des Wartungszyklus wird verworfen, HA haelt die alte
+            // Linie. Bis V2.1.0 startete hier zusaetzlich ein Zyklus, sobald
+            // die Feuchte 98 % ueberschritt. Diese Schwelle ist entfallen:
+            // Der Heizer ist laut Datenblatt 4.10 fuer die
+            // Plausibilitaetspruefung gedacht, laut Handling Instructions 3
+            // gegen kontaminationsbedingte Drift - nicht gegen Kondensat. Das
+            // Kriechen oberhalb 80 %RH (Datenblatt 1.1, bis +3 %RH nach 60 h)
+            // bildet sich im Normalbereich von selbst zurueck. Der eine so
+            // ausgeloeste Zyklus am 22.08.2026 hat denn auch nichts
+            // korrigiert: Feuchte davor und nach voller Erholung gleich.
             if (id(sht_heating_active)) {
-              return {}; 
+              return {};
             }
-            // 2. Extrem feucht? -> Zyklus starten
-            if (x > 98.0) {
-              id(sht_defog_cycle).execute(); 
-            }
-            // 3. Normalbetrieb -> Wert weitergeben
             return x;
 
   # --------------------------------------------------------
@@ -748,7 +806,25 @@ sensor:
     device_class: temperature
     state_class: measurement
     lambda: |-
-      return (243.5 * (log(id(hum_shed).state/100) + ((17.67 * id(temp_shed).state) / (243.5 + id(temp_shed).state))) / (17.67 - (log(id(hum_shed).state/100) + ((17.67 * id(temp_shed).state) / (243.5 + id(temp_shed).state)))));
+      // Magnus-Formel mit den Konstanten ueber Wasser aus Sensirions
+      // «Introduction to Humidity» (m 17.62, Tn 243.12 °C, gueltig -45…60 °C
+      // mit unter 0.6 % Unsicherheit). Zuvor standen hier 17.67 und 243.5;
+      // der Unterschied betraegt am Betriebspunkt rund 0.01 K, die Konstanten
+      // des Sensorherstellers sind aber die passende Referenz.
+      float t  = id(temp_shed).state;
+      float rh = id(hum_shed).state;
+      if (std::isnan(t) || std::isnan(rh)) {
+        return NAN;
+      }
+      // Klemmen wie in jedem Sensirion-Beispielcode: bei 0 % waere der
+      // Logarithmus nicht definiert, ueber 100 % ergaebe sich ein Taupunkt
+      // ueber der Lufttemperatur - und damit ein zu hoher Heizungssollwert.
+      if (rh < 0.01f)   rh = 0.01f;
+      if (rh > 100.0f)  rh = 100.0f;
+      const float m  = 17.62f;
+      const float tn = 243.12f;
+      float h = logf(rh / 100.0f) + (m * t) / (tn + t);
+      return (tn * h) / (m - h);
 
   # --------------------------------------------------------
   # REGENSENSOR FREQUENZEN (Pin 32)
@@ -801,6 +877,23 @@ sensor:
     update_interval: 60s
     entity_category: diagnostic
     lambda: 'return id(rain_slope);'
+
+  # Die Messgrösse der Beobachtung: solange diese Differenz klein bleibt, ist
+  # die gemischte Taupunktrechnung unbedenklich. Der Fehler im Taupunkt liegt
+  # bei rund dem 0.9-fachen dieses Werts und geht über den Sollwert direkt in
+  # die Heizungsregelung.
+  - platform: template
+    name: "1.7 Temperature Delta SHT31 - AM2315"
+    unit_of_measurement: "K"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: |-
+      if (std::isnan(id(temp_sht).state) || std::isnan(id(temp_shed).state)) {
+        return NAN;
+      }
+      return id(temp_sht).state - id(temp_shed).state;
 
   # --------------------------------------------------------
   # HEIZUNG TEMPERATUR (NTC Pin 36) - 3-Stufen-Umrechnung
@@ -885,14 +978,14 @@ binary_sensor:
     device_class: running
 
   # --------------------------------------------------------
-  # DIAGNOSTIC SENSOR FÜR DEN SHT ZYKLUS
+  # DIAGNOSTIC SENSOR FÜR DEN SHT-WARTUNGSZYKLUS
   # --------------------------------------------------------
   - platform: template
-    name: "1.4 SHT Defog Cycle Active"
-    id: sht_defog_active
+    name: "1.4 SHT Wartungszyklus aktiv"
+    id: sht_service_active
     entity_category: diagnostic
     device_class: running
-    # Kein lambda: Der Zustand kippt genau zweimal pro Defog-Zyklus und wird
+    # Kein lambda: Der Zustand kippt genau zweimal pro Wartungszyklus und wird
     # direkt im Skript publiziert - ein 60-s-Polling waere reine Wiederholung.
 
   # --------------------------------------------------------
@@ -918,11 +1011,11 @@ text_sensor:
     icon: mdi:information-outline
 
   # --------------------------------------------------------
-  # DIAGNOSTIC SENSOR FÜR SHT DEFOG STATUS
+  # DIAGNOSTIC SENSOR FÜR DEN SHT-WARTUNGSSTATUS
   # -------------------------------------------------------- 
   - platform: template
-    name: "1.3 SHT Defog Status"
-    id: sht_defog_status
+    name: "1.3 SHT Wartungsstatus"
+    id: sht_service_status
     entity_category: diagnostic
     icon: mdi:water-thermometer
 
