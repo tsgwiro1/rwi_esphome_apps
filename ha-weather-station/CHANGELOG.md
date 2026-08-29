@@ -2,6 +2,24 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [2.0.0] - 2026-08-29
+
+### Achtung beim Update
+
+**Trigger point Rain** und **Rain trigger hysteresis** entfallen. Die ESPHome-Integration entfernt sie beim ersten Reconnect selbst aus der Entitätenregistry, von Hand ist nichts aufzuräumen. Die neuen Regler starten so, dass das Erkennungsverhalten unverändert bleibt - keine Nachjustierung nötig. Automatisierungen und Dashboards, die die alten Entitäten ansprechen, müssen dagegen auf `Rain Threshold Wet` bzw. `Rain Threshold Dry` umgestellt werden.
+
+### Hinzugefügt
+
+* **`Regen kürzlich`** (`device_class: moisture`) neben `Regen Shed`, mit der neuen Haltezeit **Rain Hold Time** (Default 45 min). `Regen Shed` beantwortet «ist der Sensor jetzt nass?», `Regen kürzlich` «hat es in den letzten Minuten geregnet?». Grund: Der beheizte Sensor trocknet zwischen zwei Schauern in Minuten ab, ein Regenereignis zerfällt dadurch in mehrere Meldungen. An zwei Regentagen nachgemessen und mit Schwellen oder einem längeren *Rain Off Delay* nicht behebbar.
+
+### Geändert
+
+* **`Trigger point Rain` und `Rain trigger hysteresis` ersetzt durch `Rain Threshold Wet` und `Rain Threshold Dry`** - zwei unabhängige Anteile der Trockenfrequenz. Bisher hing die Ausschaltschwelle über die Hysterese am Einschaltpunkt: Wer empfindlicher stellte, schob sie mit nach oben, bis sie über der Trockenfrequenz lag und das Gerät nie mehr auf «trocken» zurückgekommen wäre. Diese Kopplung hat die Empfindlichkeit blockiert. Nebeneffekt: Auch die Ausschaltschwelle folgt nun dem Temperaturgang, der die Trockenfrequenz über den Tag verschiebt.
+* **Startwerte 0.926 und 0.954** bilden die bewährte Einstellung 0.94/0.03 nach; die Abweichung liegt weit unter dem Rauschen.
+* **Mindestabstand der Schwellen** (`wet_band_min`, 0.01). Liegt `Rain Threshold Dry` näher an `Rain Threshold Wet` oder darunter, hebt die Firmware ihn an und warnt im Log - ohne Band gäbe es keine Hysterese mehr.
+
+Keine Änderung an der Heizungsregelung, der Selbstkalibrierung oder den Melderaten. Getestet mit ESPHome 2026.7.4 (RAM 28.4 %, Flash 54.5 %), per OTA geflasht und im Betrieb geprüft.
+
 ## [1.1.0] - 2026-08-29
 
 ### Hinzugefügt

@@ -1,6 +1,6 @@
 # ha-weather-station - Wetterstation mit beheiztem Regensensor
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -27,7 +27,7 @@ Mit der Verwendung dieses Codes oder Nachbau der Hardware erklärst du dich dami
 ## 1. Funktionsprinzip
 
 * **Messwerte:** Temperatur (AM2315), Luftfeuchte (SHT31) und Luftdruck (BMP280) werden über einen gemeinsamen I²C-Bus erfasst. Der Taupunkt wird nach der Magnus-Formel aus AM2315-Temperatur und SHT31-Feuchte berechnet.
-* **Regenerkennung:** Der Regensensor liefert eine Frequenz, die mit zunehmender Nässe **sinkt**. Erkannt wird nicht gegen einen festen Absolutwert, sondern gegen die gelernte Trockenfrequenz des Sensors.
+* **Regenerkennung:** Der Regensensor liefert eine Frequenz, die mit zunehmender Nässe **sinkt**. Erkannt wird nicht gegen einen festen Absolutwert, sondern gegen die gelernte Trockenfrequenz des Sensors. Das Ergebnis wird in zwei Entitäten gemeldet: «ist der Sensor jetzt nass» und «hat es in den letzten Minuten geregnet» (siehe Abschnitt 2).
 * **Beheizter Sensor:** Ein nativer ESPHome-PID-Regler hält den Regensensor über einem einstellbaren Sollwert (wahlweise Taupunkt oder Umgebungstemperatur, plus Überhöhung). So trocknet er nach Regen ab und beschlägt in feuchten Nächten nicht.
 * **Selbstkalibrierung:** Die Trockenfrequenz wird nur unter kontrollierten Bedingungen nachgeführt (siehe Abschnitt 2). Dadurch bleibt die Auslöseschwelle über die Lebensdauer des Sensors stabil.
 * **Anti-Kondensation am SHT31:** Übersteigt die Luftfeuchte 98 %, startet ein Heizzyklus über den internen Heizer des SHT31. Während des Zyklus werden die Messwerte verworfen, damit die aufgeheizten (und damit falschen) Feuchtewerte nicht in Home Assistant landen.
@@ -37,21 +37,36 @@ Mit der Verwendung dieses Codes oder Nachbau der Hardware erklärst du dich dami
 
 ## 2. Regenerkennung & Selbstkalibrierung
 
-### Schwellen mit Hysterese
+### Zwei Schwellen, beide relativ zur Trockenfrequenz
 
-Die Auslöseschwelle wird bei jedem Durchlauf relativ zur gelernten Trockenfrequenz `freq_dry` gebildet:
+Ein- und Ausschaltschwelle werden bei jedem Durchlauf getrennt aus der gelernten Trockenfrequenz `freq_dry` gebildet:
 
 ```
-trigger_point = freq_dry × Trigger point Rain      (Default 0.94, also 94 % der Trockenfrequenz)
-hyst          = trigger_point × Rain trigger hysteresis ÷ 2
-rain_start    = trigger_point − hyst               (Einschaltschwelle)
-rain_stop     = trigger_point + hyst               (Ausschaltschwelle)
+rain_start = freq_dry × Rain Threshold Wet    (Default 0.926 - Einschaltschwelle)
+rain_stop  = freq_dry × Rain Threshold Dry    (Default 0.954 - Ausschaltschwelle)
 ```
 
 * **Regen EIN:** Sobald die Frequenz unter `rain_start` fällt, wird sofort auf «Regen» geschaltet - ohne Verzögerung, damit z. B. eine Bewässerung rechtzeitig abbricht.
 * **Regen AUS:** Erst wenn die Frequenz für die volle Dauer von **Rain Off Delay** (Default 3 min) über `rain_stop` bleibt. Jeder Messwert im Nassbereich setzt diesen Timer zurück. Das verhindert Flattern bei Nieselregen und während des Abtrocknens.
 
-> ⚠️ **Die beiden Regler hängen zusammen und müssen gegenläufig bewegt werden.** Die Hysterese bezieht sich auf den *Trigger point*, nicht auf die Trockenfrequenz. Wer nur den Trigger point erhöht, schiebt `rain_stop` mit nach oben - ab etwa 0.94 bei Hysterese 0.12 liegt es **über** der Trockenfrequenz, und das Gerät käme nie mehr auf «trocken» zurück. Empfindlicher wird die Erkennung deshalb nur, wenn man den Trigger point anhebt **und** die Hysterese gleichzeitig verengt. Nach oben begrenzt wird das Ganze vom Rauschen: die Basislinie streut über zehn Tage um rund 2 % der Trockenfrequenz, weiter als etwa 0.94 lässt sich `rain_start` daher nicht schieben.
+Beide Regler sind voneinander unabhängig; der Abstand zwischen ihnen **ist** die Hysterese. Liegt `Rain Threshold Dry` weniger als 0.01 über `Rain Threshold Wet`, hebt die Firmware ihn auf diesen Abstand an und schreibt eine Warnung ins Log - ohne Band flatterte der Zustand im Rauschen.
+
+### Warum die Schwellen so stehen
+
+Nach oben begrenzt das Rauschen der Basislinie, gemessen über eine Beobachtungsreihe von zehn Tagen: näher an die Trockenfrequenz heran gäbe es Fehlalarme. Nach unten kostet jede Reserve Vorwarnzeit - die frühere, deutlich unempfindlichere Einstellung meldete den Regenbeginn rund eine halbe Stunde später, ebenfalls gemessen.
+
+Der Abstand der beiden Schwellen ist die Hysterese und liegt bei etwa dem Fünffachen der Rauschbreite. Enger heisst Flattern beim Abtrocknen, weiter heisst, dass der Sensor länger als nötig als nass gilt. Beide müssen unter 1.0 bleiben: auf oder über der Trockenfrequenz käme das Gerät nie mehr auf «trocken» zurück und die Selbstkalibrierung stünde still.
+
+> Bis V1.1.0 hing die Ausschaltschwelle über eine Hysterese am Einschaltpunkt statt an der Trockenfrequenz. Wer empfindlicher stellte, schob sie mit nach oben, bis sie über der Trockenfrequenz lag - diese Kopplung hat die Empfindlichkeit blockiert.
+
+### Zwei Fragen, zwei Entitäten
+
+Der beheizte Sensor trocknet zwischen zwei Schauern in Minuten ab, ein Regenereignis zerfällt dadurch in mehrere Meldungen. Das ist physikalisch echt - an zwei Regentagen nachgemessen - und mit Schwellen oder einem längeren *Rain Off Delay* nicht zu beheben.
+
+* **Regen Shed** - ist der Sensor **jetzt** nass? Schaltet innert 10 s ein, nach *Rain Off Delay* wieder aus. Für alles, was sofort reagieren muss.
+* **Regen kürzlich** - hat es **in den letzten Minuten** geregnet? Geht mit derselben Flanke ein, fällt aber erst nach *Rain Hold Time* ununterbrochener Trockenheit. Für Storen, Fenster, Bewässerung - alles, was ein Regenereignis als Ganzes braucht.
+
+Die Haltezeit zählt ab der letzten gemessenen Nässe, nicht ab dem Abschalten von *Regen Shed*. Ihr Vorgabewert ist eine Annahme, kein Messergebnis: er überbrückt die kurzen Trockenpausen eines Regentags, ohne getrennte Schauer zusammenzukleben. Höher stellen heisst eher «der Boden ist noch feucht», tiefer schneller freigeben; auf 0 verhält sich die Entität wie *Regen Shed*.
 
 ### Wann kalibriert wird
 
@@ -80,7 +95,7 @@ Die Quelle ist über **Heater Source** umschaltbar. `Dew Point` (Default) hält 
 
 * **Sollwert gültig** - liefert die Quelle (Taupunkt bzw. Umgebungstemperatur) `NaN`, etwa direkt nach dem Booten, wird nicht auf einen undefinierten Sollwert geregelt.
 * **Istwert plausibel** (`ntc_min_plausible`, −30 °C) - ein defekter Fühler meldet kein `NaN`, sondern eine plausibel aussehende Zahl: sowohl bei Kurzschluss (über `log(0)`) als auch bei offener Leitung (über den sehr grossen Widerstand) landet die Rechnung bei rund −273 °C. **Beide Fehlerfälle laufen nach unten**, die untere Grenze fängt daher beide ab. Ohne diese Prüfung bildet der Regler aus dem scheinbar eiskalten Sensor einen riesigen Fehler und fährt die Heizung dauerhaft auf volle Leistung.
-* **Keine Übertemperatur** (`heater_cutout_temp`, 60 °C) - das Kunststoffteil, in dem der Sensor sitzt, verträgt nicht mehr. Die Heizleistung auf dem Keramiksubstrat reicht im Normalfall ohnehin nicht so weit; wird der Wert dennoch erreicht, stimmt etwas nicht. Die Schwelle liegt bewusst 10 K über der einstellbaren Obergrenze von **Heater Max Temperature** (50 °C), damit ein regulärer Sollwert sie nie auslöst.
+* **Keine Übertemperatur** (`heater_cutout_temp`, 60 °C) - die zulässige Höchsttemperatur des Sensors. Sie liegt 10 K über der einstellbaren Obergrenze von **Heater Max Temperature** (50 °C), ein regulärer Sollwert löst sie also nie aus. Wird sie trotzdem erreicht, liegt ein Fehler vor und die Heizung bleibt aus.
 
 Die beiden Fühler-Fälle werden über `1.5 Heizung Störung` gemeldet; im Kalibrierstatus sind alle drei im Klartext unterschieden.
 
@@ -138,9 +153,10 @@ Alle Werte sind als Eingabefeld (`mode: box`) ausgeführt, in der Kategorie *Kon
 | **Heater Temperature Elevation** | 0…50 K | 10 | Überhöhung über die Bezugsgrösse |
 | **Heater Min Temperature** | 0…50 °C | 10 | Untere Klemmung des Sollwerts |
 | **Heater Max Temperature** | 0…50 °C | 50 | Obere Klemmung des Sollwerts (bewusst unter der Übertemperatur-Abschaltung) |
-| **Trigger point Rain** | 0.1…1.0 | 0.94 | Auslöseschwelle als Anteil der Trockenfrequenz |
-| **Rain trigger hysteresis** | 0.01…0.5 | 0.03 | Breite des Hysteresebands |
-| **Rain Off Delay [min]** | 0…60 | 3 | Trockenzeit, bis «Regen» zurückgesetzt wird |
+| **Rain Threshold Wet** | 0.5…1.0 | 0.926 | Einschaltschwelle als Anteil der Trockenfrequenz |
+| **Rain Threshold Dry** | 0.5…1.0 | 0.954 | Ausschaltschwelle als Anteil der Trockenfrequenz |
+| **Rain Off Delay [min]** | 0…60 | 3 | Trockenzeit, bis «Regen Shed» zurückgesetzt wird |
+| **Rain Hold Time [min]** | 0…180 | 45 | Nachlaufzeit von «Regen kürzlich» |
 | **Calibration delay [min]** | 1…120 | 30 | Wartezeit nach dem Trockenwerden bis zur Kalibrierung |
 | **Range for Calibration** | 0.01…0.2 | 0.04 | Maximal zulässige Drift für eine Kalibrierung |
 | **SHT Heater Time [min]** | 1…30 | 5 | Heizdauer des SHT31-Defog-Zyklus |
@@ -153,7 +169,8 @@ Alle Werte sind als Eingabefeld (`mode: box`) ausgeführt, in der Kategorie *Kon
 * **Humidity Shed (`sensor.humidity_shed`):** Relative Luftfeuchte vom SHT31. Während eines Defog-Zyklus werden keine Werte publiziert, HA hält den letzten Stand.
 * **Barometic Pressure Shed (`sensor.barometic_pressure_shed`):** Luftdruck vom BMP280 inkl. Höhenkorrektur.
 * **Dew Point Shed (`sensor.dew_point_shed`):** Berechneter Taupunkt (Magnus-Formel).
-* **Regen Shed (`binary_sensor.raining`):** Niederschlagserkennung, `device_class: moisture`.
+* **Regen Shed (`binary_sensor.raining`):** Ist der Sensor jetzt nass? `device_class: moisture`.
+* **Regen kürzlich:** Hat es innerhalb der *Rain Hold Time* geregnet? `device_class: moisture`.
 * **Weather Station Frequency (`sensor.weather_station_frequency`):** Aktuelle Sensorfrequenz, sekündlich gemessen und über 60 s gemittelt.
 * **Weather Station Sensor Heater (`sensor.weather_station_sensor_heater`):** Isttemperatur der Sensorheizung, über 60 s gemittelt.
 * **Rain Sensor Heater PID (`climate.ha_weather_station_rain_sensor_heater_pid`):** Der PID-Regler als Climate-Entität, inkl. Soll-/Isttemperatur und Betriebszustand.
@@ -196,7 +213,7 @@ Die Entitäten sind bewusst darauf ausgelegt, wenig zu senden. Die Regelung läu
 | Sensor Frequency, Temperature Rainsensor | 60 s (Mittelwert) | je 1'440 |
 | 1.0 Dry Frequency | 300 s | 288 |
 | 1.1 Calibration Status, 1.2 Calibration Active | nur bei Änderung | wenige |
-| Regen Shed, 1.4 SHT Defog Cycle Active | nur bei Flankenwechsel | wenige |
+| Regen Shed, Regen kürzlich, 1.4 SHT Defog Cycle Active | nur bei Flankenwechsel | wenige |
 
 Drei Entwurfsentscheidungen dahinter:
 

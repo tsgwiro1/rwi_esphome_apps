@@ -20,6 +20,7 @@ esphome:
 
           // 3. Regen-Status einmalig setzen (danach nur noch bei Flankenwechsel)
           id(rain_binary).publish_state(id(is_raining));
+          id(rain_recent).publish_state(id(rain_recent_state));
 
           // 4. Heizungs-Störung initialisieren
           id(heater_fault).publish_state(false);
@@ -49,7 +50,7 @@ preferences:
   flash_write_interval: 10min
 
 substitutions:
-  fw_version: "1.1.0"
+  fw_version: "2.0.0"
   # ESP32
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
@@ -69,6 +70,13 @@ substitutions:
   #        Muss über 'Heater Max Temperature' liegen (dort auf 50 °C begrenzt),
   #        damit ein regulärer Sollwert die Abschaltung nie auslöst - 10 K Reserve.
   ntc_min_plausible: "-30.0"
+
+  # Mindestabstand der beiden Nass-Schwellen als Anteil der Trockenfrequenz.
+  # 0.01 entspricht rund 327 Hz und liegt damit über dem gemessenen Rauschen
+  # (184 Hz Standardabweichung, Einbruch p90 518 Hz innerhalb einer trockenen
+  # Stunde). Wird die Ausschaltschwelle näher an die Einschaltschwelle gelegt,
+  # hebt die Logik sie auf diesen Abstand an.
+  wet_band_min: "0.01"
   heater_cutout_temp: "60.0"
 
 packages:
@@ -200,32 +208,40 @@ number:
     mode: box
     entity_category: config
 
-  # ACHTUNG: Die beiden folgenden Werte hängen zusammen und müssen gegenläufig
-  # bewegt werden. rain_stop = Trigger point × (1 + Hysterese/2) bezieht sich auf
-  # den Trigger point, nicht auf die Trockenfrequenz. Ab Trigger point ≈ 0.94 mit
-  # Hysterese 0.12 wandert rain_stop ÜBER die Trockenfrequenz - das Gerät käme
-  # nie mehr auf «trocken» zurück. Die alte Vorgabe 0.80/0.12 verlangte einen
-  # Frequenzeinbruch von 15.4 %, bevor Regen gemeldet wurde.
+  # Die beiden Nass-Schwellen sind unabhängige Anteile der Trockenfrequenz und
+  # dürfen einzeln bewegt werden. Bis V1.1.0 hiessen sie «Trigger point Rain»
+  # und «Rain trigger hysteresis»; dort hing die Ausschaltschwelle über die
+  # Hysterese am Trigger point statt an freq_dry und wanderte bei empfindlicher
+  # Einstellung über die Trockenfrequenz hinaus - das Gerät wäre nie mehr auf
+  # «trocken» zurückgekommen. Genau das hat die Empfindlichkeit blockiert.
+  #
+  # Die Startwerte bilden die bewährte Einstellung 0.94/0.03 exakt nach:
+  # 0.94 × (1 - 0.03/2) = 0.926 und 0.94 × (1 + 0.03/2) = 0.954.
+  #
+  # Untergrenze 0.5: darunter wäre die Schwelle so tief, dass sie nur noch bei
+  # stehendem Wasser anspricht. Das Rauschen liegt bei rund 2 % von freq_dry -
+  # ein Abstand der beiden Schwellen unter wet_band_min ist deshalb sinnlos
+  # und wird in der Logik angehoben.
   - platform: template
-    name: "Trigger point Rain"
-    id: rain_trigger
+    name: "Rain Threshold Wet"
+    id: wet_on
     optimistic: true
-    min_value: 0.1
+    min_value: 0.5
     max_value: 1.0
-    step: 0.01
-    initial_value: 0.94
+    step: 0.001
+    initial_value: 0.926
     restore_value: true
     mode: box
     entity_category: config
 
   - platform: template
-    name: "Rain trigger hysteresis"
-    id: rain_hysteresis
+    name: "Rain Threshold Dry"
+    id: wet_off
     optimistic: true
-    min_value: 0.01
-    max_value: 0.5
-    step: 0.01
-    initial_value: 0.03
+    min_value: 0.5
+    max_value: 1.0
+    step: 0.001
+    initial_value: 0.954
     restore_value: true
     mode: box
     entity_category: config
@@ -278,6 +294,24 @@ number:
     mode: box
     entity_category: config
 
+  # Haltezeit der zweiten Regen-Entität «Regen kürzlich». Der beheizte Sensor
+  # trocknet zwischen zwei Schauern in Minuten ab - an den Regentagen vom
+  # 21.08. und 28.08.2026 lag die Frequenz in den Lücken (28-227 min) im
+  # Stundenmittel exakt auf Vorregen-Niveau. Die Zerhackung ist also echt und
+  # mit Schwellen nicht behebbar; wer «hat es kürzlich geregnet?» beantworten
+  # will, braucht diese zweite Entität.
+  - platform: template
+    name: "Rain Hold Time [min]"
+    id: rain_hold_min
+    optimistic: true
+    min_value: 0
+    max_value: 180
+    step: 5
+    initial_value: 45
+    restore_value: true
+    mode: box
+    entity_category: config
+
 # --------------------------------------------------------
 # GLOBALE VARIABLEN (Unsichtbares "Gedächtnis")
 # --------------------------------------------------------
@@ -287,6 +321,9 @@ globals:
     restore_value: true
     initial_value: '32000.0'
   - id: is_raining
+    type: bool
+    initial_value: 'false'
+  - id: rain_recent_state
     type: bool
     initial_value: 'false'
   - id: time_since_dry
@@ -461,10 +498,20 @@ interval:
           if (std::isnan(f) || f <= 0) {
             status_msg = "Warte auf Sensorwerte";
           } else {
-            float trigger_point = id(freq_dry) * id(rain_trigger).state;
-            float hyst = trigger_point * id(rain_hysteresis).state / 2.0;
-            float rain_start = trigger_point - hyst;
-            float rain_stop = trigger_point + hyst;
+            // Beide Schwellen sind unabhängige Anteile der Trockenfrequenz.
+            // Damit folgt auch die Ausschaltschwelle dem Temperaturgang des
+            // Oszillators, statt am Einschaltpunkt zu hängen.
+            float on_frac  = id(wet_on).state;
+            float off_frac = id(wet_off).state;
+            // Vertauschte oder zu enge Eingabe abfangen: ohne Band gäbe es keine
+            // Hysterese mehr und der Zustand flatterte im Rauschen (rund 2 % von
+            // freq_dry, gemessen 184 Hz Standardabweichung über 10 Tage).
+            if (off_frac < on_frac + ${wet_band_min}) {
+              off_frac = on_frac + ${wet_band_min};
+              ESP_LOGW("rain", "Schwelle Dry lag unter Wet + ${wet_band_min} - auf %.3f angehoben", off_frac);
+            }
+            float rain_start = id(freq_dry) * on_frac;
+            float rain_stop  = id(freq_dry) * off_frac;
 
             if (f < rain_stop) {
               // Der Sensor ist im nassen Bereich (oder im Hysterese-Band).
@@ -486,6 +533,23 @@ interval:
                 id(rain_binary).publish_state(false);
                 id(time_since_dry) = millis(); // Wichtig: Für die Kalibrierung merken!
               }
+            }
+
+            // «Regen kürzlich»: geht mit derselben Flanke an wie rain_binary,
+            // fällt aber erst, wenn der Sensor die volle Haltezeit ununterbrochen
+            // trocken war. last_wet_time zählt ab der letzten Nässe, nicht ab dem
+            // Abschalten von rain_binary - die Haltezeit beschreibt also wirklich
+            // «zuletzt nass vor X Minuten».
+            bool recent = id(rain_recent_state);
+            if (id(is_raining)) {
+              recent = true;
+            } else {
+              uint32_t hold_ms = (uint32_t)(id(rain_hold_min).state * 60.0f * 1000.0f);
+              if (recent && (millis() - last_wet_time > hold_ms)) recent = false;
+            }
+            if (recent != id(rain_recent_state)) {
+              id(rain_recent_state) = recent;
+              id(rain_recent).publish_state(recent);
             }
 
             // Nur auswertbar, wenn Soll- UND Istwert gültig sind - sonst ist
@@ -718,6 +782,16 @@ binary_sensor:
   - platform: template
     name: "Regen Shed"
     id: rain_binary
+    device_class: moisture
+
+  # Zweite Semantik neben dem schnellen Nass-Signal: «Regen Shed» sagt, ob der
+  # Sensor JETZT nass ist, «Regen kürzlich» ob es in den letzten
+  # «Rain Hold Time» Minuten geregnet hat. Für Automatisierungen, die ein
+  # Regenereignis als Ganzes brauchen (Storen, Fenster, Bewässerung) und nicht
+  # bei jeder Trocknungspause zwischen zwei Schauern umschalten sollen.
+  - platform: template
+    name: "Regen kürzlich"
+    id: rain_recent
     device_class: moisture
 
   # --------------------------------------------------------
