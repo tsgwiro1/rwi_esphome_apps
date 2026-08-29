@@ -50,7 +50,7 @@ preferences:
   flash_write_interval: 10min
 
 substitutions:
-  fw_version: "2.0.0"
+  fw_version: "2.1.0"
   # ESP32
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
@@ -312,6 +312,24 @@ number:
     mode: box
     entity_category: config
 
+  # Schwelle der Flankenerkennung. Nicht der Pegel der Frequenz zählt hier,
+  # sondern ihr Abfall: eine Benetzung drückt die Frequenz binnen einer Minute
+  # deutlich stärker nach unten, als das Rauschen es je tut. Aus einer
+  # Messreihe stammt der Vorgabewert -1000 Hz/min; er liegt oberhalb des
+  # stärksten im Trockenen beobachteten Abfalls und unterhalb der bei
+  # Benetzung üblichen Werte. 0 schaltet die Flankenerkennung ab.
+  - platform: template
+    name: "Rain Slope Threshold [Hz/min]"
+    id: rain_slope_limit
+    optimistic: true
+    min_value: -5000
+    max_value: 0
+    step: 50
+    initial_value: -1000
+    restore_value: true
+    mode: box
+    entity_category: config
+
 # --------------------------------------------------------
 # GLOBALE VARIABLEN (Unsichtbares "Gedächtnis")
 # --------------------------------------------------------
@@ -326,6 +344,10 @@ globals:
   - id: rain_recent_state
     type: bool
     initial_value: 'false'
+  # Aktuelle Steigung der Frequenz in Hz/min, gebildet in der 10-s-Schleife.
+  - id: rain_slope
+    type: float
+    initial_value: 'NAN'
   - id: time_since_dry
     type: uint32_t
     initial_value: '0'
@@ -493,11 +515,56 @@ interval:
 
           // Ein statischer Timer, der sich merkt, wann der Sensor zuletzt nass war
           static uint32_t last_wet_time = millis();
+          // Zeitpunkt der letzten erkannten Benetzungsflanke. Getrennt vom
+          // Timer oben, damit eine Flanke den Rain Off Delay des schnellen
+          // Signals nicht verlängert.
+          static uint32_t last_edge_time = millis();
+
+          // Ringpuffer der Flankenerkennung: 12 Werte im 10-s-Takt = 120 s.
+          static float slope_buf[12];
+          static uint8_t slope_n = 0;
+          static uint8_t slope_i = 0;
 
           // Prüfen, ob der Frequenzzähler schon gültige Werte liefert
           if (std::isnan(f) || f <= 0) {
             status_msg = "Warte auf Sensorwerte";
+            // Der Puffer darf keine Lücke überspannen, sonst zeigt die
+            // Steigung nach dem nächsten gültigen Wert einen Sprung.
+            slope_n = 0;
+            slope_i = 0;
+            id(rain_slope) = NAN;
           } else {
+            // --- Flankenerkennung: Benetzung am Frequenzabfall erkennen ---
+            // Verglichen werden zwei 60-s-Mittel im Abstand von 60 s, die
+            // Differenz ist damit unmittelbar Hz/min. Die Mittelung drückt das
+            // Rauschen des Einzelwerts, ohne die Reaktion zu verzögern: der
+            // Wert entsteht weiterhin alle 10 s neu.
+            slope_buf[slope_i] = f;
+            slope_i = (slope_i + 1) % 12;
+            if (slope_n < 12) slope_n++;
+
+            bool edge_now = false;
+            if (slope_n == 12) {
+              float sum_old = 0.0f, sum_new = 0.0f;
+              for (uint8_t k = 0; k < 6; k++) {
+                sum_old += slope_buf[(slope_i + k) % 12];       // die ältesten sechs
+                sum_new += slope_buf[(slope_i + 6 + k) % 12];   // die jüngsten sechs
+              }
+              float slope = (sum_new - sum_old) / 6.0f;
+              id(rain_slope) = slope;
+
+              float slope_limit = id(rain_slope_limit).state;
+              // 0 schaltet die Erkennung ab; NaN vor dem Wiederherstellen der
+              // Einstellung fällt durch dieselbe Bedingung.
+              if (slope_limit < 0.0f && slope <= slope_limit) {
+                edge_now = true;
+                last_edge_time = millis();
+                if (!id(rain_recent_state)) {
+                  ESP_LOGI("rain", "Benetzung erkannt: %.0f Hz/min", slope);
+                }
+              }
+            }
+
             // Beide Schwellen sind unabhängige Anteile der Trockenfrequenz.
             // Damit folgt auch die Ausschaltschwelle dem Temperaturgang des
             // Oszillators, statt am Einschaltpunkt zu hängen.
@@ -535,17 +602,20 @@ interval:
               }
             }
 
-            // «Regen kürzlich»: geht mit derselben Flanke an wie rain_binary,
-            // fällt aber erst, wenn der Sensor die volle Haltezeit ununterbrochen
-            // trocken war. last_wet_time zählt ab der letzten Nässe, nicht ab dem
-            // Abschalten von rain_binary - die Haltezeit beschreibt also wirklich
-            // «zuletzt nass vor X Minuten».
+            // «Regen kürzlich»: geht an, sobald der Sensor nass ist ODER eine
+            // Benetzungsflanke erkannt wurde, und fällt erst, wenn seit dem
+            // letzten dieser beiden Ereignisse die volle Haltezeit vergangen ist.
+            // Gezählt wird ab der Nässe, nicht ab dem Abschalten von
+            // rain_binary - die Haltezeit beschreibt also wirklich «zuletzt nass
+            // vor X Minuten». Die Flanke wirkt bewusst nur hier: «Regen Shed»
+            // bleibt die reine Absolutmessung.
             bool recent = id(rain_recent_state);
-            if (id(is_raining)) {
+            if (id(is_raining) || edge_now) {
               recent = true;
             } else {
               uint32_t hold_ms = (uint32_t)(id(rain_hold_min).state * 60.0f * 1000.0f);
-              if (recent && (millis() - last_wet_time > hold_ms)) recent = false;
+              uint32_t last_wetting = (last_edge_time > last_wet_time) ? last_edge_time : last_wet_time;
+              if (recent && (millis() - last_wetting > hold_ms)) recent = false;
             }
             if (recent != id(rain_recent_state)) {
               id(rain_recent_state) = recent;
@@ -720,6 +790,17 @@ sensor:
     update_interval: 300s
     entity_category: diagnostic
     lambda: 'return id(freq_dry);'
+
+  - platform: template
+    name: "1.6 Weather Station Frequency Slope"
+    unit_of_measurement: "Hz/min"
+    state_class: measurement
+    accuracy_decimals: 0
+    # Die Steigung ist selbst schon ein 60-s-Mittel, ein dichteres Abtasten
+    # brächte keine zusätzliche Information.
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: 'return id(rain_slope);'
 
   # --------------------------------------------------------
   # HEIZUNG TEMPERATUR (NTC Pin 36) - 3-Stufen-Umrechnung

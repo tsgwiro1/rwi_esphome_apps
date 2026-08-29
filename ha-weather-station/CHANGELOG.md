@@ -2,6 +2,19 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [2.1.0] - 2026-08-29
+
+### Hinzugefügt
+
+* **Flankenerkennung.** Erkannt wird eine Benetzung neu auch am Tempo des Frequenzabfalls, nicht nur am erreichten Pegel. Damit erfasst die Station die Benetzungen, die die Absolutschwelle gar nicht erreicht - in einer Messreihe eines Regenmorgens ein gutes Dutzend, die erste rund eine halbe Stunde vor der Absolutmeldung. Schwelle: **Rain Slope Threshold [Hz/min]** (Default −1000, 0 schaltet ab).
+* **`1.6 Weather Station Frequency Slope`** (Hz/min, Diagnose, 60-s-Takt) - die Grösse, gegen die diese Schwelle prüft; zum Beobachten vor dem Nachjustieren.
+
+### Geändert
+
+* **`Regen kürzlich`** geht nun auch bei einer erkannten Benetzung an, die Haltezeit läuft ab dem jeweils späteren Ereignis. **`Regen Shed` bleibt unverändert** die reine Absolutmessung - die Flanke meldet ein Ereignis, keinen Zustand, und soll das schnelle Signal nicht zerhacken.
+
+Getestet mit ESPHome 2026.7.4 (RAM 28.5 %, Flash 54.6 %), per OTA geflasht. Die Flanke selbst ist noch nicht an echtem Regen belegt - der Trockenfall verhält sich wie erwartet.
+
 ## [2.0.0] - 2026-08-29
 
 ### Achtung beim Update

@@ -1,6 +1,6 @@
 # ha-weather-station - Wetterstation mit beheiztem Regensensor
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![Version](https://img.shields.io/badge/version-2.1.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -27,7 +27,7 @@ Mit der Verwendung dieses Codes oder Nachbau der Hardware erklärst du dich dami
 ## 1. Funktionsprinzip
 
 * **Messwerte:** Temperatur (AM2315), Luftfeuchte (SHT31) und Luftdruck (BMP280) werden über einen gemeinsamen I²C-Bus erfasst. Der Taupunkt wird nach der Magnus-Formel aus AM2315-Temperatur und SHT31-Feuchte berechnet.
-* **Regenerkennung:** Der Regensensor liefert eine Frequenz, die mit zunehmender Nässe **sinkt**. Erkannt wird nicht gegen einen festen Absolutwert, sondern gegen die gelernte Trockenfrequenz des Sensors. Das Ergebnis wird in zwei Entitäten gemeldet: «ist der Sensor jetzt nass» und «hat es in den letzten Minuten geregnet» (siehe Abschnitt 2).
+* **Regenerkennung:** Der Regensensor liefert eine Frequenz, die mit zunehmender Nässe **sinkt**. Erkannt wird nicht gegen einen festen Absolutwert, sondern gegen die gelernte Trockenfrequenz des Sensors. Zusätzlich erkennt eine Flankenauswertung Benetzungen am Tempo des Frequenzabfalls, auch wenn die Absolutschwelle gar nicht erreicht wird. Das Ergebnis wird in zwei Entitäten gemeldet: «ist der Sensor jetzt nass» und «hat es in den letzten Minuten geregnet» (siehe Abschnitt 2).
 * **Beheizter Sensor:** Ein nativer ESPHome-PID-Regler hält den Regensensor über einem einstellbaren Sollwert (wahlweise Taupunkt oder Umgebungstemperatur, plus Überhöhung). So trocknet er nach Regen ab und beschlägt in feuchten Nächten nicht.
 * **Selbstkalibrierung:** Die Trockenfrequenz wird nur unter kontrollierten Bedingungen nachgeführt (siehe Abschnitt 2). Dadurch bleibt die Auslöseschwelle über die Lebensdauer des Sensors stabil.
 * **Anti-Kondensation am SHT31:** Übersteigt die Luftfeuchte 98 %, startet ein Heizzyklus über den internen Heizer des SHT31. Während des Zyklus werden die Messwerte verworfen, damit die aufgeheizten (und damit falschen) Feuchtewerte nicht in Home Assistant landen.
@@ -64,9 +64,17 @@ Der Abstand der beiden Schwellen ist die Hysterese und liegt bei etwa dem Fünff
 Der beheizte Sensor trocknet zwischen zwei Schauern in Minuten ab, ein Regenereignis zerfällt dadurch in mehrere Meldungen. Das ist physikalisch echt - an zwei Regentagen nachgemessen - und mit Schwellen oder einem längeren *Rain Off Delay* nicht zu beheben.
 
 * **Regen Shed** - ist der Sensor **jetzt** nass? Schaltet innert 10 s ein, nach *Rain Off Delay* wieder aus. Für alles, was sofort reagieren muss.
-* **Regen kürzlich** - hat es **in den letzten Minuten** geregnet? Geht mit derselben Flanke ein, fällt aber erst nach *Rain Hold Time* ununterbrochener Trockenheit. Für Storen, Fenster, Bewässerung - alles, was ein Regenereignis als Ganzes braucht.
+* **Regen kürzlich** - hat es **in den letzten Minuten** geregnet? Geht ein, sobald der Sensor nass wird **oder** die Flankenerkennung eine Benetzung meldet, und fällt erst nach *Rain Hold Time* ununterbrochener Trockenheit. Für Storen, Fenster, Bewässerung - alles, was ein Regenereignis als Ganzes braucht.
 
-Die Haltezeit zählt ab der letzten gemessenen Nässe, nicht ab dem Abschalten von *Regen Shed*. Ihr Vorgabewert ist eine Annahme, kein Messergebnis: er überbrückt die kurzen Trockenpausen eines Regentags, ohne getrennte Schauer zusammenzukleben. Höher stellen heisst eher «der Boden ist noch feucht», tiefer schneller freigeben; auf 0 verhält sich die Entität wie *Regen Shed*.
+Die Haltezeit zählt ab der letzten Nässe bzw. der letzten erkannten Benetzung, nicht ab dem Abschalten von *Regen Shed*. Ihr Vorgabewert ist eine Annahme, kein Messergebnis: er überbrückt die kurzen Trockenpausen eines Regentags, ohne getrennte Schauer zusammenzukleben. Höher stellen heisst eher «der Boden ist noch feucht», tiefer schneller freigeben; auf 0 fällt sie unmittelbar mit dem Trockenwerden zurück.
+
+### Flankenerkennung
+
+Nicht jede Benetzung drückt die Frequenz tief genug, um die Absolutschwelle zu erreichen; Nieselregen und die ersten Tropfen eines Schauers bleiben darüber. Am **Tempo** des Abfalls sind sie trotzdem erkennbar - eine Benetzung lässt die Frequenz binnen einer Minute deutlich stärker sinken, als das Rauschen es tut.
+
+Die Firmware bildet die Steigung alle 10 s als Differenz zweier 60-s-Mittel im Abstand von 60 s und meldet sie als `1.6 Weather Station Frequency Slope` in Hz/min. Unterschreitet sie **Rain Slope Threshold**, gilt das als Benetzung. Der Vorgabewert stammt aus einer Messreihe: er liegt oberhalb des stärksten im Trockenen beobachteten Abfalls und unterhalb der bei Benetzung üblichen Werte. **0 schaltet die Erkennung ab.**
+
+Die Flanke wirkt allein auf *Regen kürzlich* - sie erkennt ein Ereignis, keinen Zustand. *Regen Shed* bleibt die reine Absolutmessung und wird durch die zusätzlichen Ereignisse nicht zerhackt.
 
 ### Wann kalibriert wird
 
@@ -157,6 +165,7 @@ Alle Werte sind als Eingabefeld (`mode: box`) ausgeführt, in der Kategorie *Kon
 | **Rain Threshold Dry** | 0.5…1.0 | 0.954 | Ausschaltschwelle als Anteil der Trockenfrequenz |
 | **Rain Off Delay [min]** | 0…60 | 3 | Trockenzeit, bis «Regen Shed» zurückgesetzt wird |
 | **Rain Hold Time [min]** | 0…180 | 45 | Nachlaufzeit von «Regen kürzlich» |
+| **Rain Slope Threshold [Hz/min]** | −5000…0 | −1000 | Frequenzabfall, ab dem eine Benetzung erkannt wird (0 = aus) |
 | **Calibration delay [min]** | 1…120 | 30 | Wartezeit nach dem Trockenwerden bis zur Kalibrierung |
 | **Range for Calibration** | 0.01…0.2 | 0.04 | Maximal zulässige Drift für eine Kalibrierung |
 | **SHT Heater Time [min]** | 1…30 | 5 | Heizdauer des SHT31-Defog-Zyklus |
@@ -170,7 +179,7 @@ Alle Werte sind als Eingabefeld (`mode: box`) ausgeführt, in der Kategorie *Kon
 * **Barometic Pressure Shed (`sensor.barometic_pressure_shed`):** Luftdruck vom BMP280 inkl. Höhenkorrektur.
 * **Dew Point Shed (`sensor.dew_point_shed`):** Berechneter Taupunkt (Magnus-Formel).
 * **Regen Shed (`binary_sensor.raining`):** Ist der Sensor jetzt nass? `device_class: moisture`.
-* **Regen kürzlich:** Hat es innerhalb der *Rain Hold Time* geregnet? `device_class: moisture`.
+* **Regen kürzlich:** Hat es innerhalb der *Rain Hold Time* geregnet - gemessen oder über die Flanke erkannt? `device_class: moisture`.
 * **Weather Station Frequency (`sensor.weather_station_frequency`):** Aktuelle Sensorfrequenz, sekündlich gemessen und über 60 s gemittelt.
 * **Weather Station Sensor Heater (`sensor.weather_station_sensor_heater`):** Isttemperatur der Sensorheizung, über 60 s gemittelt.
 * **Rain Sensor Heater PID (`climate.ha_weather_station_rain_sensor_heater_pid`):** Der PID-Regler als Climate-Entität, inkl. Soll-/Isttemperatur und Betriebszustand.
@@ -187,6 +196,7 @@ Die Kategorie 1.x ist projektlokal, 2.x bis 6.x kommen aus `common/diagnostics.y
 * **1.3 SHT Defog Status:** `Normalbetrieb`, `Heizt (Kondensationsschutz)` oder `Abkühlphase`.
 * **1.4 SHT Defog Cycle Active:** EIN während des gesamten Defog-Zyklus (Heiz- **und** Abkühlphase).
 * **1.5 Heizung Störung** (`device_class: problem`): EIN, wenn der NTC-Wert das Plausibilitätsfenster verlässt und die Heizung deshalb zwangsweise aus ist. Im Normalbetrieb kippt der Zustand nie - eignet sich daher direkt als Auslöser für eine Benachrichtigung in Home Assistant.
+* **1.6 Weather Station Frequency Slope:** Steigung der Sensorfrequenz in Hz/min - die Grösse, gegen die *Rain Slope Threshold* prüft. Vor dem Nachjustieren der Schwelle gehört dieser Wert einige trockene Tage lang beobachtet.
 
 ---
 
@@ -212,6 +222,7 @@ Die Entitäten sind bewusst darauf ausgelegt, wenig zu senden. Die Regelung läu
 | Temperatur, Feuchte, Luftdruck, Taupunkt | 60 s | je 1'440 |
 | Sensor Frequency, Temperature Rainsensor | 60 s (Mittelwert) | je 1'440 |
 | 1.0 Dry Frequency | 300 s | 288 |
+| 1.6 Frequency Slope | 60 s | 1'440 |
 | 1.1 Calibration Status, 1.2 Calibration Active | nur bei Änderung | wenige |
 | Regen Shed, Regen kürzlich, 1.4 SHT Defog Cycle Active | nur bei Flankenwechsel | wenige |
 
