@@ -1,6 +1,6 @@
 # ha-weather-station - Wetterstation mit beheiztem Regensensor
 
-![Version](https://img.shields.io/badge/version-1.0.1-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -42,7 +42,7 @@ Mit der Verwendung dieses Codes oder Nachbau der Hardware erklärst du dich dami
 Die Auslöseschwelle wird bei jedem Durchlauf relativ zur gelernten Trockenfrequenz `freq_dry` gebildet:
 
 ```
-trigger_point = freq_dry × Trigger point Rain      (Default 0.80, also 80 % der Trockenfrequenz)
+trigger_point = freq_dry × Trigger point Rain      (Default 0.94, also 94 % der Trockenfrequenz)
 hyst          = trigger_point × Rain trigger hysteresis ÷ 2
 rain_start    = trigger_point − hyst               (Einschaltschwelle)
 rain_stop     = trigger_point + hyst               (Ausschaltschwelle)
@@ -50,6 +50,8 @@ rain_stop     = trigger_point + hyst               (Ausschaltschwelle)
 
 * **Regen EIN:** Sobald die Frequenz unter `rain_start` fällt, wird sofort auf «Regen» geschaltet - ohne Verzögerung, damit z. B. eine Bewässerung rechtzeitig abbricht.
 * **Regen AUS:** Erst wenn die Frequenz für die volle Dauer von **Rain Off Delay** (Default 3 min) über `rain_stop` bleibt. Jeder Messwert im Nassbereich setzt diesen Timer zurück. Das verhindert Flattern bei Nieselregen und während des Abtrocknens.
+
+> ⚠️ **Die beiden Regler hängen zusammen und müssen gegenläufig bewegt werden.** Die Hysterese bezieht sich auf den *Trigger point*, nicht auf die Trockenfrequenz. Wer nur den Trigger point erhöht, schiebt `rain_stop` mit nach oben - ab etwa 0.94 bei Hysterese 0.12 liegt es **über** der Trockenfrequenz, und das Gerät käme nie mehr auf «trocken» zurück. Empfindlicher wird die Erkennung deshalb nur, wenn man den Trigger point anhebt **und** die Hysterese gleichzeitig verengt. Nach oben begrenzt wird das Ganze vom Rauschen: die Basislinie streut über zehn Tage um rund 2 % der Trockenfrequenz, weiter als etwa 0.94 lässt sich `rain_start` daher nicht schieben.
 
 ### Wann kalibriert wird
 
@@ -61,7 +63,7 @@ Die Trockenfrequenz wird als gleitender Mittelwert nachgeführt (`freq_dry = (15
 4. Seit dem Trockenwerden ist **Calibration delay** (Default 30 min) vergangen.
 5. Die Abweichung zur bisherigen Trockenfrequenz liegt innerhalb von **Range for Calibration** (Default 4 %).
 
-Welche Bedingung gerade blockiert, ist im Klartext an der Diagnose-Entität `1.1 Dry Frequency Calibration Status` ablesbar: `Regen aktiv`, `Sensor noch zu nass`, `Heizt auf`, `Wartet auf Delay`, `Frequenz-Drift zu hoch` oder `Kalibriert`. Beim Start steht dort `Warte auf Sensorwerte`, bis der Frequenzzähler gültige Werte liefert.
+Welche Bedingung gerade blockiert, ist im Klartext an der Diagnose-Entität `1.1 Dry Frequency Calibration Status` ablesbar: `Regen aktiv`, `Sensor noch zu nass`, `NTC unplausibel - Heizung aus`, `Übertemperatur - Heizung aus`, `Sensordaten fehlen - Heizung aus`, `Heizt auf`, `Wartet auf Delay`, `Frequenz-Drift zu hoch` oder `Kalibriert`. Beim Start steht dort `Warte auf Sensorwerte`, bis der Frequenzzähler gültige Werte liefert.
 
 Die Begrenzung über *Range for Calibration* ist bewusst eng gewählt: Sie verhindert, dass ein schleichend nasser oder defekter Sensor seine eigene Referenz mitzieht und die Regenerkennung dadurch blind wird.
 
@@ -74,7 +76,13 @@ Ziel = clamp(Ziel, Heater Min Temperature, Heater Max Temperature)
 
 Die Quelle ist über **Heater Source** umschaltbar. `Dew Point` (Default) hält den Sensor gezielt über dem Taupunkt und ist die energiesparendere Variante; `Ambient` bezieht sich auf die Umgebungstemperatur.
 
-**Failsafe:** Liefern die Sensoren keine gültigen Werte (`NaN`, z. B. direkt nach dem Booten), wird der PID-Regler zwingend auf `OFF` gesetzt, statt auf einen undefinierten Sollwert zu regeln.
+**Failsafe:** Der PID-Regler wird zwingend auf `OFF` gesetzt, sobald **eine** der drei Bedingungen nicht erfüllt ist:
+
+* **Sollwert gültig** - liefert die Quelle (Taupunkt bzw. Umgebungstemperatur) `NaN`, etwa direkt nach dem Booten, wird nicht auf einen undefinierten Sollwert geregelt.
+* **Istwert plausibel** (`ntc_min_plausible`, −30 °C) - ein defekter Fühler meldet kein `NaN`, sondern eine plausibel aussehende Zahl: sowohl bei Kurzschluss (über `log(0)`) als auch bei offener Leitung (über den sehr grossen Widerstand) landet die Rechnung bei rund −273 °C. **Beide Fehlerfälle laufen nach unten**, die untere Grenze fängt daher beide ab. Ohne diese Prüfung bildet der Regler aus dem scheinbar eiskalten Sensor einen riesigen Fehler und fährt die Heizung dauerhaft auf volle Leistung.
+* **Keine Übertemperatur** (`heater_cutout_temp`, 60 °C) - das Kunststoffteil, in dem der Sensor sitzt, verträgt nicht mehr. Die Heizleistung auf dem Keramiksubstrat reicht im Normalfall ohnehin nicht so weit; wird der Wert dennoch erreicht, stimmt etwas nicht. Die Schwelle liegt bewusst 10 K über der einstellbaren Obergrenze von **Heater Max Temperature** (50 °C), damit ein regulärer Sollwert sie nie auslöst.
+
+Die beiden Fühler-Fälle werden über `1.5 Heizung Störung` gemeldet; im Kalibrierstatus sind alle drei im Klartext unterschieden.
 
 ---
 
@@ -96,7 +104,7 @@ Das Projekt läuft auf einem ESP32 (`esp32dev`) unter dem ESP-IDF-Framework.
 
 **I²C-Adressen:** SHT31 `0x44`, BMP280 `0x76`, AM2315 `0x5C` (über die `am2320`-Plattform, protokollkompatibel).
 
-**NTC-Kette:** Die Temperatur der Sensorheizung wird in vier Stufen berechnet - ADC-Rohspannung → `resistance` (680 Ω, DOWNSTREAM) → `ntc` (B = 3750, 1 kΩ @ 25 °C) → Glättung über 10 Messwerte. Der schnelle interne Wert (100 ms) speist den PID-Regler, an Home Assistant geht ein auf 10 s gemittelter Wert. *Sinkt die angezeigte Temperatur, wenn der NTC erwärmt wird, muss `configuration` auf `UPSTREAM` gestellt werden.*
+**NTC-Kette:** Die Temperatur der Sensorheizung wird in vier Stufen berechnet - ADC-Rohspannung (Abtastung 100 ms) → `resistance` (680 Ω, DOWNSTREAM) → `ntc` (B = 3750, 1 kΩ @ 25 °C) → gleitender Mittelwert über 20 Messwerte, der alle 2 s publiziert. Dieser 2-s-Wert speist den PID-Regler, seit V1.1.0 auch die Plausibilitätsprüfung und die Warm-Bedingung der Selbstkalibrierung; an Home Assistant geht ein zusätzlich auf 60 s gemittelter Wert. *Sinkt die angezeigte Temperatur, wenn der NTC erwärmt wird, muss `configuration` auf `UPSTREAM` gestellt werden.*
 
 **Hinweis zum invertierten PWM:** Der Heizungsausgang ist mit `inverted: true` konfiguriert. ESPHome rechnet dabei intern `Duty = 1 − Stellwert`, d. h. der PID-Modus `OFF` erzeugt **100 % Tastverhältnis** am Pin. Das ist korrekt für eine low-aktive Treiberstufe - bei einem high-aktiven Treiber würde die Heizung stattdessen bei jedem Abschalten volle Leistung ziehen. Vor dem Dauerbetrieb gegen den Schaltplan prüfen.
 
@@ -128,10 +136,10 @@ Alle Werte sind als Eingabefeld (`mode: box`) ausgeführt, in der Kategorie *Kon
 | :--- | :---: | :---: | :--- |
 | **Heater Source** | Dew Point / Ambient | Dew Point | Bezugsgrösse für den Heizungssollwert |
 | **Heater Temperature Elevation** | 0…50 K | 10 | Überhöhung über die Bezugsgrösse |
-| **Heater Min Temperature** | 0…100 °C | 10 | Untere Klemmung des Sollwerts |
-| **Heater Max Temperature** | 0…100 °C | 50 | Obere Klemmung des Sollwerts |
-| **Trigger point Rain** | 0.1…1.0 | 0.80 | Auslöseschwelle als Anteil der Trockenfrequenz |
-| **Rain trigger hysteresis** | 0.01…0.5 | 0.12 | Breite des Hysteresebands |
+| **Heater Min Temperature** | 0…50 °C | 10 | Untere Klemmung des Sollwerts |
+| **Heater Max Temperature** | 0…50 °C | 50 | Obere Klemmung des Sollwerts (bewusst unter der Übertemperatur-Abschaltung) |
+| **Trigger point Rain** | 0.1…1.0 | 0.94 | Auslöseschwelle als Anteil der Trockenfrequenz |
+| **Rain trigger hysteresis** | 0.01…0.5 | 0.03 | Breite des Hysteresebands |
 | **Rain Off Delay [min]** | 0…60 | 3 | Trockenzeit, bis «Regen» zurückgesetzt wird |
 | **Calibration delay [min]** | 1…120 | 30 | Wartezeit nach dem Trockenwerden bis zur Kalibrierung |
 | **Range for Calibration** | 0.01…0.2 | 0.04 | Maximal zulässige Drift für eine Kalibrierung |
@@ -161,6 +169,7 @@ Die Kategorie 1.x ist projektlokal, 2.x bis 6.x kommen aus `common/diagnostics.y
 * **1.2 Dry Frequency Calibration Active:** EIN, solange die Trockenfrequenz nachgeführt wird.
 * **1.3 SHT Defog Status:** `Normalbetrieb`, `Heizt (Kondensationsschutz)` oder `Abkühlphase`.
 * **1.4 SHT Defog Cycle Active:** EIN während des gesamten Defog-Zyklus (Heiz- **und** Abkühlphase).
+* **1.5 Heizung Störung** (`device_class: problem`): EIN, wenn der NTC-Wert das Plausibilitätsfenster verlässt und die Heizung deshalb zwangsweise aus ist. Im Normalbetrieb kippt der Zustand nie - eignet sich daher direkt als Auslöser für eine Benachrichtigung in Home Assistant.
 
 ---
 

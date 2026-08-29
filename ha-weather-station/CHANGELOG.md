@@ -2,6 +2,29 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.1.0] - 2026-08-29
+
+### Hinzugefügt
+
+* **`1.5 Heizung Störung`** (`device_class: problem`) - meldet einen unplausiblen NTC-Wert oder eine Übertemperatur. Ohne diese Entität wäre der neue Failsafe unsichtbar: die Heizung ginge still aus und niemand erführe warum.
+* **Übertemperatur-Abschaltung bei 60 °C** (`heater_cutout_temp`). Das Kunststoffteil, in dem der Sensor sitzt, verträgt nicht mehr; die Heizleistung auf dem Keramiksubstrat reicht im Normalfall ohnehin nicht so weit. Wird der Wert dennoch erreicht, stimmt etwas nicht und der Regler bleibt auf `OFF`.
+
+### Behoben
+
+* **Ein defekter NTC liess die Heizung dauerhaft mit voller Leistung laufen.** Der bisherige Failsafe prüfte nur die Sollwertquelle (Taupunkt bzw. Umgebungstemperatur) auf `NaN`, nicht den Istwert. Die Fehlerfälle des Fühlers liefern aber keinen `NaN`, sondern eine plausibel aussehende Zahl: sowohl bei Kurzschluss (über `log(0)`) als auch bei offener Leitung (über den sehr grossen Widerstand) landet die Rechnung bei rund −273 °C - **beide laufen also nach unten**. `PIDClimate::update_pid_()` schaltet nur bei `NaN` ab und bildet sonst aus dem riesigen Regelfehler dauerhaft 100 % Stellwert. Der Istwert wird jetzt gegen `ntc_min_plausible` (−30 °C) geprüft; darunter bleibt der Regler zwingend auf `OFF`.
+* **Nach einem Neustart entfiel die Wartezeit vor der Selbstkalibrierung.** `time_since_dry` startete mit `0`, wodurch `millis() - time_since_dry` sofort grösser war als jeder eingestellte *Calibration delay*. Ein Reboot kurz nach dem Regen konnte den Sensor damit auf eine noch feuchte Frequenz kalibrieren lassen. Der Wert wird jetzt in `on_boot` auf `millis()` gesetzt.
+* **Der Kalibrierstatus flatterte beim Aufheizen.** Die Bedingung «Sensor ist warm» verglich den auf 60 s gemittelten HA-Wert (`Weather Station Sensor Heater`) gegen einen frischen Sollwert. Ein einzelner Minutenmittelwert kippte die Aussage, worauf der Status für genau einen Schleifendurchlauf auf `Heizt auf` sprang - am 14. und 16.08.2026 mehrfach für je 10 s beobachtet. Verglichen wird jetzt der schnelle interne Istwert (2 s). Verschärft wurde das durch eine niedrig eingestellte *Heater Temperature Elevation*: bei 3 K Überhöhung liegt das 2-K-Band knapp unter dem Sollwert.
+* **Ehrlicher Status statt `Heizt auf`,** wenn Soll- oder Istwert fehlen. Bisher fiel die Anzeige in beiden Fällen auf `Heizt auf` zurück, obwohl die Heizung zwangsweise **aus** war - `target_temp` ist dann `NaN` und jeder Vergleich dagegen falsch. Neu: `NTC unplausibel - Heizung aus`, `Übertemperatur - Heizung aus` und `Sensordaten fehlen - Heizung aus`.
+* **Grenzwert `rain_stop` einheitlich.** Die Nässe-Erkennung verwendete `<`, die Statusermittlung `<=`; bei exakt `f == rain_stop` meldeten Logik und Status Verschiedenes.
+
+### Geändert
+
+* **Startwerte der Regenschwellen auf `Trigger point Rain: 0.94` und `Rain trigger hysteresis: 0.03`** (vorher 0.80 / 0.12). Die alte Kombination verlangte einen Frequenzeinbruch von 15.4 %, bevor Regen gemeldet wurde, und liess sich nicht entschärfen: `rain_stop` hängt am Trigger point, nicht an der Trockenfrequenz, und wandert ab Trigger point ≈ 0.94 bei Hysterese 0.12 **über** die Trockenfrequenz - das Gerät käme nie mehr auf «trocken» zurück. Die neuen Startwerte laufen seit dem 23.08.2026 im Betrieb: Einschaltschwelle bei 92.6 % statt 84.6 % der Trockenfrequenz, an zwei Regentagen (25. und 28.08.) ohne Fehlalarm, mit rund einer halben Stunde früherer Meldung beim Regenbeginn am 25.08. Die Werte lagen bisher nur im NVS; ein Neuaufbau hätte wieder in der Sackgasse begonnen.
+
+* **Obergrenze von `Heater Max Temperature` von 100 auf 50 °C gesenkt.** Der einstellbare Sollwert muss unter der Übertemperatur-Abschaltung liegen, sonst löste ein regulär eingestellter Wert von z. B. 80 °C die Schutzabschaltung aus und würde als Störung gemeldet. 50 °C lässt 10 K Reserve und war ohnehin der Vorgabewert; für einen Sensor, der nur wenige Kelvin über dem Taupunkt gehalten wird, ist das reichlich.
+
+Keine Änderung an Regelverhalten im Normalbetrieb, an der Hysteresemechanik oder an den Melderaten. Getestet mit ESPHome 2026.7.4 (`config` und `compile` fehlerfrei, RAM 28.3 %, Flash 54.5 %).
+
 ## [1.0.1] - 2026-07-28
 
 ### Geändert

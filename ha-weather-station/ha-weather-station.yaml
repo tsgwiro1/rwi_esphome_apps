@@ -21,7 +21,17 @@ esphome:
           // 3. Regen-Status einmalig setzen (danach nur noch bei Flankenwechsel)
           id(rain_binary).publish_state(id(is_raining));
 
-          // 4. PID-Regler beim Start hart auf AUS zwingen
+          // 4. Heizungs-Störung initialisieren
+          id(heater_fault).publish_state(false);
+
+          // 5. Kalibrier-Wartezeit ab jetzt rechnen.
+          //    Mit dem Startwert 0 wäre (millis() - time_since_dry) sofort grösser
+          //    als jede eingestellte Wartezeit. Nach einem Reboot kurz nach dem
+          //    Regen entfiele der Calibration delay damit vollständig und der
+          //    Sensor könnte auf eine noch feuchte Frequenz kalibrieren.
+          id(time_since_dry) = millis();
+
+          // 6. PID-Regler beim Start hart auf AUS zwingen
           auto call = id(rain_heater_pid).make_call();
           call.set_mode(climate::CLIMATE_MODE_OFF);
           call.perform();
@@ -39,11 +49,27 @@ preferences:
   flash_write_interval: 10min
 
 substitutions:
-  fw_version: "1.0.1"
+  fw_version: "1.1.0"
   # ESP32
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
   diag_min_heap_critical: "40000" # 40kb ist kritisch
+
+  # SCHUTZGRENZEN DER SENSORHEIZUNG - beide schalten den PID zwingend ab.
+  #
+  # Unten: Plausibilitätsgrenze für den NTC. Ein defekter Fühler meldet kein NaN,
+  #        sondern eine plausibel aussehende Zahl: sowohl bei Kurzschluss (über
+  #        log(0)) als auch bei offener Leitung (über den sehr grossen
+  #        Widerstand) landet die Rechnung bei rund -273 °C. Beide Fehlerfälle
+  #        laufen also nach unten - die untere Grenze fängt sie ab.
+  # Oben:  Übertemperatur-Abschaltung. Das Kunststoffteil, in dem der Sensor
+  #        sitzt, verträgt keine höheren Temperaturen. Die Heizleistung auf dem
+  #        Keramiksubstrat reicht im Normalfall ohnehin nicht so weit; wird der
+  #        Wert dennoch erreicht, stimmt etwas nicht.
+  #        Muss über 'Heater Max Temperature' liegen (dort auf 50 °C begrenzt),
+  #        damit ein regulärer Sollwert die Abschaltung nie auslöst - 10 K Reserve.
+  ntc_min_plausible: "-30.0"
+  heater_cutout_temp: "60.0"
 
 packages:
   my_diagnostics: !include common/diagnostics.yaml
@@ -120,24 +146,30 @@ number:
     mode: box
     entity_category: config
 
+  # Beide Klemmungen enden bei 50 °C - höher lässt die Max-Klemmung den Sollwert
+  # ohnehin nicht, ein einstellbarer Minimalwert darüber wäre nur ein sinnloser
+  # Zustand (Min > Max, wobei Max gewinnt).
   - platform: template
     name: "Heater Min Temperature"
     id: heater_min_temp
     optimistic: true
     min_value: 0
-    max_value: 100
+    max_value: 50
     step: 1
     initial_value: 10
     restore_value: true
     mode: box
     entity_category: config
 
+  # Obergrenze bewusst bei 50 °C: die Übertemperatur-Abschaltung liegt bei
+  # ${heater_cutout_temp} °C, ein einstellbarer Sollwert darüber würde sie im
+  # Normalbetrieb auslösen und als Störung gemeldet.
   - platform: template
     name: "Heater Max Temperature"
     id: heater_max_temp
     optimistic: true
     min_value: 0
-    max_value: 100
+    max_value: 50
     step: 1
     initial_value: 50
     restore_value: true
@@ -168,6 +200,12 @@ number:
     mode: box
     entity_category: config
 
+  # ACHTUNG: Die beiden folgenden Werte hängen zusammen und müssen gegenläufig
+  # bewegt werden. rain_stop = Trigger point × (1 + Hysterese/2) bezieht sich auf
+  # den Trigger point, nicht auf die Trockenfrequenz. Ab Trigger point ≈ 0.94 mit
+  # Hysterese 0.12 wandert rain_stop ÜBER die Trockenfrequenz - das Gerät käme
+  # nie mehr auf «trocken» zurück. Die alte Vorgabe 0.80/0.12 verlangte einen
+  # Frequenzeinbruch von 15.4 %, bevor Regen gemeldet wurde.
   - platform: template
     name: "Trigger point Rain"
     id: rain_trigger
@@ -175,7 +213,7 @@ number:
     min_value: 0.1
     max_value: 1.0
     step: 0.01
-    initial_value: 0.80
+    initial_value: 0.94
     restore_value: true
     mode: box
     entity_category: config
@@ -187,7 +225,7 @@ number:
     min_value: 0.01
     max_value: 0.5
     step: 0.01
-    initial_value: 0.12
+    initial_value: 0.03
     restore_value: true
     mode: box
     entity_category: config
@@ -353,9 +391,25 @@ interval:
           static float pid_last_target = NAN;
           static bool pid_initialized = false;
 
-          // FAILSAFE: Prüfen, ob die Sensoren gültige Werte liefern
-          if (std::isnan(source_temp) || std::isnan(elev)) {
-            // SENSOR-DATEN FEHLEN (z.B. direkt nach dem Booten) -> Heizung ZWINGEND AUS!
+          // SCHUTZ DER SENSORHEIZUNG - zwei getrennte Gründe, damit die Diagnose
+          // sagen kann, welcher zugetroffen hat.
+          //
+          // Unten: Ein defekter Fühler meldet kein NaN, sondern eine plausibel
+          // aussehende Zahl - Kurzschluss wie offene Leitung landen bei rund
+          // -273 °C. Der PID bildet daraus einen riesigen Regelfehler und fährt
+          // die Heizung dauerhaft auf 100 %; PIDClimate::update_pid_() fängt nur
+          // NaN ab, diesen Fall nicht.
+          // Oben: Übertemperatur. Sollte die Regelung nie erreichen, weil der
+          // Sollwert auf 50 °C begrenzt ist.
+          float heater_now = id(heater_temp_fast).state;
+          bool ntc_plausible   = !std::isnan(heater_now) && heater_now > ${ntc_min_plausible};
+          bool heater_temp_ok  = !std::isnan(heater_now) && heater_now < ${heater_cutout_temp};
+          bool heater_sensor_ok = ntc_plausible && heater_temp_ok;
+          bool heater_target_ok = !std::isnan(source_temp) && !std::isnan(elev);
+
+          // FAILSAFE: Ohne gültigen Sollwert ODER ohne plausiblen Istwert bleibt
+          // die Heizung zwingend aus.
+          if (!heater_target_ok || !heater_sensor_ok) {
             if (!pid_initialized || pid_mode_heat) {
               auto call = id(rain_heater_pid).make_call();
               call.set_mode(climate::CLIMATE_MODE_OFF);
@@ -379,10 +433,24 @@ interval:
             }
           }
 
+          // Störungsmeldung nur bei Änderung - der Zustand kippt im Normalfall nie.
+          static bool last_fault = false;
+          static bool fault_valid = false;
+          if (!fault_valid || (!heater_sensor_ok) != last_fault) {
+            id(heater_fault).publish_state(!heater_sensor_ok);
+            last_fault = !heater_sensor_ok;
+            fault_valid = true;
+          }
+
           // --- 2. REGEN- & KALIBRIERUNGS-LOGIK ---
           float f = id(rain_freq).state;
-          float current_temp = id(heater_temp).state;
-          
+          // Der schnelle Istwert (2 s), nicht die auf 60 s gemittelte
+          // HA-Schaufenster-Entität. Sonst wird ein bis zu eine Minute alter
+          // Mittelwert gegen einen frischen Sollwert verglichen und der
+          // Kalibrierstatus flattert beim Aufheizen zwischen «Heizt auf» und
+          // «Kalibriert» - am 14. und 16.08.2026 mehrfach für je 10 s beobachtet.
+          float current_temp = heater_now;
+
           std::string status_msg = "Initialisiere...";
           bool is_calibrating = false;
 
@@ -420,16 +488,27 @@ interval:
               }
             }
 
-            bool sensor_warm = current_temp >= (target_temp - 2.0);
+            // Nur auswertbar, wenn Soll- UND Istwert gültig sind - sonst ist
+            // target_temp NaN und jeder Vergleich dagegen falsch.
+            bool sensor_warm = heater_target_ok && heater_sensor_ok &&
+                               current_temp >= (target_temp - 2.0);
             bool delay_passed = (millis() - id(time_since_dry)) > (id(cal_delay_min).state * 60 * 1000);
             float drift = fabsf(f - id(freq_dry)) / id(freq_dry);
             bool in_cal_range = (drift <= id(cal_range).state);
 
-            // Den exakten Grund ermitteln
+            // Den exakten Grund ermitteln. Die Grenze ist dieselbe wie oben in
+            // der Nass-Erkennung (<, nicht <=), sonst melden Logik und Status
+            // bei f == rain_stop Verschiedenes.
             if (id(is_raining)) {
               status_msg = "Regen aktiv";
-            } else if (f <= rain_stop) {
+            } else if (f < rain_stop) {
               status_msg = "Sensor noch zu nass";
+            } else if (!ntc_plausible) {
+              status_msg = "NTC unplausibel - Heizung aus";
+            } else if (!heater_temp_ok) {
+              status_msg = "Übertemperatur - Heizung aus";
+            } else if (!heater_target_ok) {
+              status_msg = "Sensordaten fehlen - Heizung aus";
             } else if (!sensor_warm) {
               status_msg = "Heizt auf";
             } else if (!delay_passed) {
@@ -660,6 +739,18 @@ binary_sensor:
     device_class: running
     # Kein lambda: Der Zustand kippt genau zweimal pro Defog-Zyklus und wird
     # direkt im Skript publiziert - ein 60-s-Polling waere reine Wiederholung.
+
+  # --------------------------------------------------------
+  # DIAGNOSTIC SENSOR FÜR DIE HEIZUNGS-STÖRUNG
+  # --------------------------------------------------------
+  - platform: template
+    name: "1.5 Heizung Störung"
+    id: heater_fault
+    entity_category: diagnostic
+    device_class: problem
+    # Kein lambda: Der Zustand wird direkt aus der 10-s-Logik publiziert, sobald
+    # der NTC-Wert das Plausibilitätsfenster verlässt. EIN heisst: Fühler defekt,
+    # Heizung zwangsweise aus.
 
 text_sensor:
   # --------------------------------------------------------
