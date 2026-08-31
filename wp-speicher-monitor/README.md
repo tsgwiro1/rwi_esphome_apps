@@ -1,6 +1,6 @@
 # wp-speicher-monitor - Schichtungsanzeige für den Wärmespeicher
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -55,6 +55,38 @@ Die Fühler werden alle 10 s gelesen und über ein gleitendes Mittel von 10 Wert
 geglättet. Nach Home Assistant geht damit rund alle 100 s ein Wert. Für einen
 Speicher, dessen Temperatur sich über Stunden ändert, ist das reichlich; die
 schnellen Rohwerte braucht nur das lokale Display.
+
+Der Filter hat `send_first_at: 1` als Vorgabe: Der **erste** Messwert nach einem
+Neustart wird sofort durchgereicht, erst danach greift der 100-s-Takt. Anzeige
+und abgeleitete Werte stehen also bereits nach der ersten Messung.
+
+### Fühler-Watchdog
+
+Ein Fühler kann nicht nur falsche Werte liefern, sondern schlicht aufhören zu
+melden. Ohne Gegenmassnahme bliebe sein letzter Wert in den internen Globals
+stehen, und Schichterkennung wie Display würden mit einer Zahl weiterrechnen,
+die längst nicht mehr gilt.
+
+Deshalb merkt sich das Gerät je Fühler den Zeitpunkt des letzten **gültigen**
+Werts. Alle 10 s prüft ein Intervall, ob dieser Zeitpunkt länger als die Frist
+von 300 s zurückliegt - das entspricht drei ausgelassenen Meldungen. Reisst ein
+Fühler ab, geschieht dreierlei:
+
+1. Sein Wert in den Globals wird auf `NAN` gesetzt, sein Farbbalken auf Schwarz.
+2. «Layer Position» und «Highest Temp Difference» melden `NAN` und stehen in
+   Home Assistant damit auf `unknown`, statt eine Schichtung zu behaupten.
+3. Der Binärsensor «1.0 Fuehler Watchdog» (`device_class: problem`) geht auf
+   `on`.
+
+Der Test ist zeitgesteuert und hängt bewusst **nicht** an `on_value` - dort
+löst ein Fühler, der aufgehört hat zu melden, nichts mehr aus. Die Differenz
+zweier `uint32_t` trägt den `millis()`-Überlauf nach 49 Tagen.
+
+Bis zum ersten Ablauf der Frist nach einem Neustart meldet der Watchdog kein
+Problem: Solange ist das Fehlen von Werten normal und kein Defekt.
+
+Kommt ein Fühler zurück, hebt seine nächste gültige Meldung den Zustand
+selbsttätig wieder auf.
 
 ### Erkennung der Schichtgrenze
 
@@ -155,6 +187,7 @@ Display-Projekten in `~/esphome/pic/` und sind nicht Teil dieses Repositories.
 | `sensor.boiler_room_humidity` | % | Luftfeuchte im Heizraum |
 | `sensor.layer_position` | % | Höhe der erkannten Schichtgrenze (0 / 25 / 50 / 75) |
 | `sensor.highest_temp_difference` | °C | grösste Differenz zweier benachbarter Fühler |
+| `binary_sensor.…_1_0_fuehler_watchdog` | - | `on`, wenn mindestens ein Fühler seit über 300 s keinen gültigen Wert geliefert hat |
 
 Dazu die Diagnose-Entitäten aus `common/diagnostics.yaml` (Kategorien 2.x bis
 6.x: WLAN, Netzwerk, System, Versionen, Neustart-Buttons).
@@ -220,13 +253,16 @@ Recorder-Historie, statt sie aus dem Melde-Intervall zu schätzen.
   Assistant heraus einstellbar.
 * **Der I²C-Bus ist aktiv, aber unbenutzt.** `scan: true` auf GPIO21/22 läuft
   bei jedem Start mit, ohne dass ein Teilnehmer angeschlossen ist.
-* **Kein Watchdog auf die Fühler.** Fällt ein DS18B20 aus, bleibt sein Wert in
-  Home Assistant auf `unavailable`, das Display zeigt `nan`, und die
-  Schichterkennung rechnet mit dem letzten in den Globals abgelegten Wert
-  weiter.
+* **Der Watchdog schützt die abgeleiteten Werte, nicht `sensor.s1` selbst.**
+  Fällt ein Fühler aus, gehen «Layer Position» und «Highest Temp Difference»
+  auf `unknown` und der Binärsensor auf `on` - `sensor.s1` behält aber seinen
+  letzten Wert. Das ist erheblich, weil `sensor.s1` dem
+  [`wp-zwe2-controller`](../wp-zwe2-controller) als Speicherverriegelung für
+  einen 4.5-kW-Heizstab dient und dort **kein Alterungscheck** stattfindet. Wer
+  die Lücke schliessen will, lässt den ZWE2 zusätzlich den Binärsensor prüfen -
+  das ist eine Änderung am ZWE2, nicht an diesem Gerät.
 * **Die Zeitanzeige hängt an Home Assistant.** Es gibt keine RTC und keinen
   SNTP-Fallback.
-* **Erste 100 s nach dem Neustart ohne Anzeige.** Die Speicherfühler
-  publizieren durch das gleitende Mittel über 10 Werte erst nach dem zehnten
-  Messzyklus. Solange sind die Farb-Globals leer: schwarze Balken, `nan` als
-  Temperatur, «Layer Position» rechnet auf Nullwerten.
+* **Die Frist des Watchdogs ist fest verdrahtet.** 300 s stehen als
+  Substitution `sensor_timeout_ms` in der YAML und sind aus Home Assistant
+  heraus nicht änderbar.

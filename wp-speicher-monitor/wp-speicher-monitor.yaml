@@ -14,7 +14,12 @@ esp32:
 
 # HIER überschreiben wir die Grenzen für den starken ESP32
 substitutions:
-  fw_version: "1.0.0"
+  fw_version: "1.1.0"
+  # Frist des Fuehler-Watchdogs. Die Fuehler melden durch das gleitende Mittel
+  # ueber 10 Werte nur alle ~100 s; 300000 ms lassen also drei Meldungen aus,
+  # bevor ein Wert als veraltet gilt. Gilt zugleich als Anlaufzeit nach dem
+  # Neustart, weil s_last_ok bei 0 startet.
+  sensor_timeout_ms: "300000"
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
   diag_min_heap_critical: "40000" # 40kb ist kritisch
 
@@ -98,7 +103,13 @@ sensor:
     update_interval: 10s
     on_value:
       then:
-        - lambda: id(calc_color)->execute(x,"S1"); id(s1_color)[0] = id(s_color)[0]; id(s1_color)[1] = id(s_color)[1]; id(s1_color)[2] = id(s_color)[2]; id(s_temps)[0] = x;
+        - lambda: |-
+            if (std::isnan(x)) return;
+            id(s_last_ok)[0] = millis();
+            id(s_stale)[0] = false;
+            id(calc_color)->execute(x,"S1");
+            id(s1_color)[0] = id(s_color)[0]; id(s1_color)[1] = id(s_color)[1]; id(s1_color)[2] = id(s_color)[2];
+            id(s_temps)[0] = x;
     filters:
       - sliding_window_moving_average:
           window_size: 10
@@ -112,7 +123,13 @@ sensor:
     update_interval: 10s
     on_value:
       then:
-        - lambda: id(calc_color)->execute(x,"S2"); id(s2_color)[0] = id(s_color)[0]; id(s2_color)[1] = id(s_color)[1]; id(s2_color)[2] = id(s_color)[2]; id(s_temps)[1] = x;
+        - lambda: |-
+            if (std::isnan(x)) return;
+            id(s_last_ok)[1] = millis();
+            id(s_stale)[1] = false;
+            id(calc_color)->execute(x,"S2");
+            id(s2_color)[0] = id(s_color)[0]; id(s2_color)[1] = id(s_color)[1]; id(s2_color)[2] = id(s_color)[2];
+            id(s_temps)[1] = x;
     filters:
       - sliding_window_moving_average:
           window_size: 10
@@ -126,7 +143,13 @@ sensor:
     update_interval: 10s
     on_value:
       then:
-        - lambda: id(calc_color)->execute(x,"S3"); id(s3_color)[0] = id(s_color)[0]; id(s3_color)[1] = id(s_color)[1]; id(s3_color)[2] = id(s_color)[2]; id(s_temps)[2] = x;
+        - lambda: |-
+            if (std::isnan(x)) return;
+            id(s_last_ok)[2] = millis();
+            id(s_stale)[2] = false;
+            id(calc_color)->execute(x,"S3");
+            id(s3_color)[0] = id(s_color)[0]; id(s3_color)[1] = id(s_color)[1]; id(s3_color)[2] = id(s_color)[2];
+            id(s_temps)[2] = x;
     filters:
       - sliding_window_moving_average:
           window_size: 10
@@ -140,7 +163,13 @@ sensor:
     update_interval: 10s
     on_value:
       then:
-        - lambda: id(calc_color)->execute(x,"S4"); id(s4_color)[0] = id(s_color)[0]; id(s4_color)[1] = id(s_color)[1]; id(s4_color)[2] = id(s_color)[2]; id(s_temps)[3] = x;
+        - lambda: |-
+            if (std::isnan(x)) return;
+            id(s_last_ok)[3] = millis();
+            id(s_stale)[3] = false;
+            id(calc_color)->execute(x,"S4");
+            id(s4_color)[0] = id(s_color)[0]; id(s4_color)[1] = id(s_color)[1]; id(s4_color)[2] = id(s_color)[2];
+            id(s_temps)[3] = x;
     filters:
       - sliding_window_moving_average:
           window_size: 10
@@ -152,6 +181,17 @@ sensor:
     icon: "mdi:layers"
     update_interval: 10s
     lambda: !lambda |-
+      // Fehlt auch nur ein Fuehler, ist keine Aussage ueber die Schichtung
+      // moeglich. NAN setzt die Entitaet in HA auf unknown, statt eine Hoehe
+      // aus veralteten Werten zu erfinden. Am 2026-08-31 mit verkuerzter
+      // Frist gemessen: nan nach der Frist, wieder 25 % beim naechsten Wert.
+      for (int i = 0; i < 4; i++) {
+        if (std::isnan(id(s_temps)[i])) {
+          id(s_diff) = NAN;
+          id(s_schicht) = 0;
+          return NAN;
+        }
+      }
       float diff = 0.0;
       float last_diff = 0.0;
       int schichtLevel = 0;
@@ -174,6 +214,48 @@ sensor:
     device_class: "temperature"
     lambda: !lambda |-
       return id(s_diff);
+
+interval:
+  # Fuehler-Watchdog. Bewusst zeitgesteuert und nicht an on_value gehaengt:
+  # ein Fuehler, der schlicht aufhoert zu melden, loest dort nichts mehr aus.
+  # Die Differenz zweier uint32_t traegt den millis()-Ueberlauf nach 49 Tagen.
+  - interval: 10s
+    then:
+      - lambda: |-
+          const uint32_t now = millis();
+          for (int i = 0; i < 4; i++) {
+            if (id(s_stale)[i]) continue;
+            if ((now - id(s_last_ok)[i]) > ${sensor_timeout_ms}) {
+              id(s_stale)[i] = true;
+              id(s_temps)[i] = NAN;
+              ESP_LOGW("watchdog", "S%d seit %u ms ohne gueltigen Wert - verworfen",
+                       i + 1, (unsigned) (now - id(s_last_ok)[i]));
+            }
+          }
+          if (id(s_stale)[0]) { id(s1_color)[0] = 0; id(s1_color)[1] = 0; id(s1_color)[2] = 0; }
+          if (id(s_stale)[1]) { id(s2_color)[0] = 0; id(s2_color)[1] = 0; id(s2_color)[2] = 0; }
+          if (id(s_stale)[2]) { id(s3_color)[0] = 0; id(s3_color)[1] = 0; id(s3_color)[2] = 0; }
+          if (id(s_stale)[3]) { id(s4_color)[0] = 0; id(s4_color)[1] = 0; id(s4_color)[2] = 0; }
+
+binary_sensor:
+  - platform: template
+    name: "1.0 Fuehler Watchdog"
+    id: sensor_watchdog
+    device_class: problem
+    entity_category: diagnostic
+    icon: "mdi:thermometer-alert"
+    lambda: !lambda |-
+      // Anlaufzeit nach dem Neustart: bis zur ersten Frist ist das Fehlen
+      // von Werten normal und kein Defekt.
+      if (millis() < ${sensor_timeout_ms}) {
+        return false;
+      }
+      for (int i = 0; i < 4; i++) {
+        if (id(s_stale)[i]) {
+          return true;
+        }
+      }
+      return false;
 
 i2c:
   sda: GPIO21
@@ -232,6 +314,15 @@ globals:
      type: int[3]
    - id: s_temps
      type: float[4]
+     initial_value: '{NAN, NAN, NAN, NAN}'
+   # Zeitpunkt des letzten gueltigen Werts je Fuehler. Start bei 0, damit die
+   # Differenz zu millis() nach dem Neustart erst nach der Frist anschlaegt.
+   - id: s_last_ok
+     type: uint32_t[4]
+     initial_value: '{0, 0, 0, 0}'
+   - id: s_stale
+     type: bool[4]
+     initial_value: '{true, true, true, true}'
    - id: s_diff
      type: float
    - id: s_schicht
@@ -317,10 +408,26 @@ display:
       it.filled_rectangle(23, 157, 84, 43, Color(id(s2_color)[0], id(s2_color)[1], id(s2_color)[2]));
       it.filled_rectangle(23, 200, 84, 44, Color(id(s3_color)[0], id(s3_color)[1], id(s3_color)[2]));
       it.filled_rectangle(23, 244, 84, 44, Color(id(s4_color)[0], id(s4_color)[1], id(s4_color)[2]));
-      it.printf(125, 105, id(robo32), id(black), TextAlign::TOP_LEFT, "%4.1f°C", id(s1).state);
-      it.printf(125, 149, id(robo32), id(black), TextAlign::TOP_LEFT, "%4.1f°C", id(s2).state);
-      it.printf(125, 193, id(robo32), id(black), TextAlign::TOP_LEFT, "%4.1f°C", id(s3).state);
-      it.printf(125, 237, id(robo32), id(black), TextAlign::TOP_LEFT, "%4.1f°C", id(s4).state);
+      if (id(s_stale)[0]) {
+        it.print(125, 105, id(robo32), id(black), TextAlign::TOP_LEFT, "--.-°C");
+      } else {
+        it.printf(125, 105, id(robo32), id(black), TextAlign::TOP_LEFT, "%4.1f°C", id(s1).state);
+      }
+      if (id(s_stale)[1]) {
+        it.print(125, 149, id(robo32), id(black), TextAlign::TOP_LEFT, "--.-°C");
+      } else {
+        it.printf(125, 149, id(robo32), id(black), TextAlign::TOP_LEFT, "%4.1f°C", id(s2).state);
+      }
+      if (id(s_stale)[2]) {
+        it.print(125, 193, id(robo32), id(black), TextAlign::TOP_LEFT, "--.-°C");
+      } else {
+        it.printf(125, 193, id(robo32), id(black), TextAlign::TOP_LEFT, "%4.1f°C", id(s3).state);
+      }
+      if (id(s_stale)[3]) {
+        it.print(125, 237, id(robo32), id(black), TextAlign::TOP_LEFT, "--.-°C");
+      } else {
+        it.printf(125, 237, id(robo32), id(black), TextAlign::TOP_LEFT, "%4.1f°C", id(s4).state);
+      }
       it.line(0, 301, 240, 301, id(black));
       it.strftime(120, 305, id(robo12), id(black), TextAlign::TOP_CENTER, "%d.%m.%Y %H:%M", id(homeassistant_time).now());
       

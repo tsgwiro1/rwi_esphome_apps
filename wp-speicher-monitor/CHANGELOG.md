@@ -2,6 +2,73 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.1.0] - 2026-08-31
+
+### Neu: Fühler-Watchdog
+
+Bisher konnte ein Fühler aufhören zu melden, ohne dass es auffiel: Sein letzter
+Wert blieb in den internen Globals stehen, und Schichterkennung wie Display
+rechneten unbegrenzt damit weiter.
+
+* **Alterungsprüfung je Fühler.** Jede gültige Meldung schreibt einen
+  Zeitstempel in das neue Global `s_last_ok`. Ein Intervall prüft alle 10 s, ob
+  dieser länger als `sensor_timeout_ms` (neu, 300000 ms) zurückliegt - das
+  entspricht drei ausgelassenen Meldungen bei einem 100-s-Takt.
+* **Verworfene Werte werden nicht mehr weiterverwendet.** Ein als veraltet
+  erkannter Fühler bekommt `NAN` in `s_temps` und einen schwarzen Farbbalken.
+* **«Layer Position» und «Highest Temp Difference» melden `NAN`**, sobald auch
+  nur ein Fühler fehlt. In Home Assistant stehen sie damit auf `unknown`, statt
+  eine Schichtung aus veralteten Zahlen zu behaupten.
+* **Neuer Binärsensor «1.0 Fuehler Watchdog»** (`device_class: problem`,
+  `entity_category: diagnostic`). Bis zum ersten Ablauf der Frist nach einem
+  Neustart meldet er bewusst kein Problem.
+* **Das Display behauptet keine Zahl mehr, die nicht mehr gilt** - ein
+  veralteter Fühler wird als `--.-°C` angezeigt.
+* **NAN-Werte kommen nicht mehr in die Globals.** Die `on_value`-Lambdas der
+  vier Fühler steigen bei `NAN` sofort aus.
+
+Die Prüfung ist bewusst zeitgesteuert und hängt **nicht** an `on_value` - dort
+löst ein Fühler, der aufgehört hat zu melden, definitionsgemäss nichts mehr aus.
+Die Differenz zweier `uint32_t` trägt den `millis()`-Überlauf nach 49 Tagen.
+
+### Korrektur an der Dokumentation zu V1.0.0
+
+Der Punkt «Erste 100 s nach dem Neustart ohne Anzeige» **war falsch** und ist
+entfernt. `sliding_window_moving_average` hat `send_first_at: 1` als Vorgabe und
+reicht den ersten Messwert sofort durch; erst danach greift `send_every: 10`.
+Anzeige und abgeleitete Werte stehen also schon nach der ersten Messung. Die
+ursprüngliche Aussage stammte aus einem Logmitschnitt, der erst nach dem Boot
+begann und die erste Meldung deshalb nicht enthielt.
+
+### Geprüfter Ausfallpfad
+
+Der Watchdog ist nicht nur eingebaut, sondern ausgelöst worden. Dafür lief am
+2026-08-31 vorübergehend ein Build mit `sensor_timeout_ms: 15000` auf dem Gerät:
+
+| Zeit | Ereignis |
+| :--- | :--- |
+| 16:42:28 | S1-S4 nach 19.6-21.1 s ohne Wert verworfen, vier `[W][watchdog]`-Zeilen |
+| 16:42:29 | «Layer Position» meldet `nan` |
+| 16:42:36 | «Highest Temp Difference» meldet `nan` |
+| - | In HA: Binärsensor `on`, beide Sensoren `unknown`, `sensor.s1` unverändert 77.5 °C |
+| 16:43:48 | frischer S1-Wert |
+| 16:43:49 | «Layer Position» wieder 25 % - Erholung ohne Zutun |
+
+Danach wurde die Frist auf 300000 ms zurückgesetzt und neu gebaut und geflasht.
+
+### Geflashter Stand
+
+Per OTA eingespielt und geprüft am 2026-08-31, ESPHome 2026.8.2,
+Config-Hash `0x2066078d`, `project` 1.1.0. Nach dem Neustart alle vier Fühler am
+Bus, S1 77.5 / S2 66.0 / S3 66.6 / S4 64.4 °C, Layer Position 25 %, Watchdog
+`off`. Keine Fehler im Log; die beiden bekannten Meldungen «Bootloader supports
+SRAM1 as IRAM» und «safe_mode took a long time» sind folgenlos.
+
+**Was der Watchdog nicht leistet:** `sensor.s1` behält bei einem Ausfall seinen
+letzten Wert. Der `wp-zwe2-controller` nutzt genau diesen Sensor als
+Speicherverriegelung für einen 4.5-kW-Heizstab und prüft ihn nicht auf Alter.
+Diese Lücke bleibt offen und ist dort zu schliessen, nicht hier.
+
 ## [1.0.0] - 2026-07-30
 
 ### Erstrelease
@@ -80,6 +147,9 @@ Keine Fehler im Log; die beiden Meldungen «Bootloader supports SRAM1 as IRAM»
 und «safe_mode took a long time (78 ms)» sind Hinweise ohne Auswirkung.
 
 ### Beobachtung für später
+
+> **Nachtrag zu V1.1.0: Dieser Abschnitt war falsch.** `send_first_at: 1` reicht
+> den ersten Messwert sofort durch. Siehe die Korrektur unter [1.1.0].
 
 Die vier Speicherfühler publizieren erst nach dem zehnten Messzyklus, also rund
 100 s nach dem Start. Bis dahin sind die Farb-Globals und `s_temps` noch leer:
