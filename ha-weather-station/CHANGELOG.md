@@ -2,6 +2,31 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [3.0.0] - 2026-08-31
+
+Die Flankenerkennung aus V2.1.0 ist wieder entfernt.
+
+### Achtung beim Update
+
+**Zwei Entitäten verschwinden:** `Rain Slope Threshold [Hz⁄min]` und `1.6 Weather Station Frequency Slope`. Die ESPHome-Integration räumt sie samt Verlauf selbst aus der Registry. Auf beide greift in Home Assistant nichts zu - weder Automation, Skript, Szene, Helper noch Dashboard.
+
+**Die Nummer 1.6 bleibt frei.** Ein Nachrücken von `1.7` würde deren Entity-ID und damit den laufenden Verlauf der Temperatur-Delta-Beobachtung kosten.
+
+### Entfernt
+
+* **Die Flankenerkennung über die Frequenzsteigung**, samt Ringpuffer, Regler und Diagnosesensor. `Regen kürzlich` schaltet wieder allein über die Absolutmessung ein, und die Haltezeit zählt ab der letzten Nässe. `Regen Shed` ist unverändert.
+
+### Warum
+
+Am 30.08.2026 löste die Flanke zweimal ohne Regen aus, 06:21-07:07 und 23:59-00:59, belegt gegen Wetterradar und Frequenzverlauf. Die Auswertung ergab:
+
+* Das Rauschen der Steigung liegt im Trockenen bei **σ = 338 Hz/min** (111 Minutenwerte). Die Schwelle −1000 lag damit bei **3.0 σ** - nicht bei den 4.3 σ der Auslegung vom 23.08.2026, die an einem anderen, ruhigeren Schätzer aus 60-s-Werten der HA-Historie ermittelt worden waren (σ = 234). Die Auslegungsreserve ist in der Implementierung verlorengegangen.
+* Gemessene Fehlalarmrate: **zwei in 41 trockenen Stunden**, je 45-60 Minuten «Regen kürzlich».
+* Höher legen geht nicht: ab **−2408 Hz/min** (0.926 × Trockenfrequenz) verlangt die Flanke binnen einer Minute mehr Abfall, als die Absolutschwelle insgesamt braucht - sie käme damit nie zuerst. Zwischen 5 σ (≈ −1690) und dieser Grenze liegt ein Faktor 1.4.
+* Zum Vergleich das echte Ereignis vom 31.08.2026, 02:57 Uhr: die Steigung erreichte **−9007 Hz/min**, das 27-fache von σ. Dieselbe Nacht zeigte erstmals auch den vollständigen Nass-Pfad: «Regen Shed» ein 02:57:25, aus 03:31:05, «Regen kürzlich» aus 04:13:05 - exakt 45 min nach der letzten Nässe.
+
+Die Fähigkeit selbst ist damit nicht widerlegt, nur der Weg dorthin: eine Benetzung senkt den Pegel und **hält** ihn dort, die Steigung sieht dasselbe Signal nur eine Minute lang und ist als Differenz zweier Mittel um √2 lauter. Ein Test auf den geglätteten Pegel läge bei rund 6 σ; gebaut ist er nicht, die offene Zahl dazu steht in README Abschnitt 2.
+
 ## [2.2.1] - 2026-08-29
 
 ### Geändert
