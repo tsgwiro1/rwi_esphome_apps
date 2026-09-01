@@ -360,23 +360,37 @@ mit 5 s und wäre davon nicht betroffen.
   Software auf einem Bastel-Mikrocontroller und hängen zum Teil an Werten aus
   dem Netzwerk. Der Schutz des Heizstabs und des Speichers gegen Überhitzung
   muss mechanisch und unabhängig von diesem Gerät vorhanden sein.
-* **Ohne Home Assistant regelt das Gerät mit veralteten Werten weiter.** Der
-  5-s-Takt kommt von `time.homeassistant`, läuft aber nach der ersten
-  Zeitsynchronisation lokal weiter - die Schleife bleibt also aktiv, während
-  Überschuss, Batterie und Speichertemperatur auf ihrem letzten Wert stehen. Die
-  lokal verdrahteten Verriegelungen (Übertemperatur, Modulspannung) und der
-  Hauptschalter greifen weiter, die Speicherverriegelung friert ein. War sie im
-  Moment des Ausfalls nicht aktiv, kann der Heizstab bei stehender Datenlage
-  unbegrenzt weiter einspeisen. Nach einem Neustart **ohne** Home Assistant wird
-  die Uhr nie gestellt, der Takt feuert nicht und der Heizstab bleibt aus - das
-  ist der harmlosere der beiden Fälle.
-* **Ein unbrauchbarer Zählerwert führt sauber auf 0 %, ein fehlender
-  Batteriewert nicht.** Meldet Home Assistant für die Netzleistung einen
-  nichtnumerischen Zustand, rechnet die Kette mit `nan` weiter, die Prüfung
-  gegen die Mindestansteuerung schlägt fehl und die Ansteuerung geht auf 0 - der
-  gutmütige Fall. Beim Batteriesensor prüft das Lambda nur `x < 0`, was für
-  `nan` falsch ist: die Entladung wird dann still als 0 angenommen und der
-  Entladeschutz fällt weg, ohne dass es auffällt.
+
+### Sensor- und Temperaturmanagement
+
+Das ist die grösste Schwäche dieser Konfiguration und der Bereich, der als
+erstes überarbeitet gehört. Die Steuerung trifft ihre Entscheidungen über drei
+Temperatur- und Leistungswerte, von denen keiner auf Alter, Plausibilität oder
+Verfügbarkeit geprüft wird - und der wichtigste davon kommt über das Netzwerk
+aus einem anderen Gerät.
+
+**Zur Entwarnung:** Heizelemente bringen ihren eigenen mechanischen Thermostat
+und eine Übertemperatursicherung mit, unabhängig von jeder Elektronik. Das ist
+kein theoretisches Argument, sondern am 2026-07-30 direkt beobachtet: die
+Regelung forderte 100 % an, `sensor.heizstab` zeigte 12.8 W statt 4500 W - der
+Thermostat des Heizstabs hatte am oberen Ende des Temperaturbereichs bereits
+angesprochen. Der Speicher kann über diesen Weg also nicht überhitzt werden,
+auch wenn die Software-Verriegelung versagt.
+
+Schön ist es trotzdem nicht. Eine Steuerung, die dauerhaft 100 % anfordert, ohne
+zu wissen, dass nichts fliesst, und die nicht merkt, wenn ihre Datenquelle
+weggefallen ist, arbeitet blind - der mechanische Thermostat wird dann vom
+Ausnahmefall zum Regelfall. Die Punkte unten gehören behoben.
+
+* **Neustart-Default und fehlende Alterung greifen ineinander.** Einzeln sind
+  die beiden nächsten Punkte begrenzt, zusammen sind sie es nicht: bootet das
+  Gerät in einem Moment, in dem `wp-speicher-monitor` nicht erreichbar ist,
+  trifft nie ein S1-Wert ein. Die Speicherverriegelung bleibt dann auf ihrem
+  Default «nicht geladen» stehen, und es gibt keinen Mechanismus, der das je
+  bemerkt - das Gerät regelt unbefristet ohne jede Speichertemperatur. In dieser
+  Kombination greift auch das Argument nicht mehr, der Effekt begrenze sich an
+  der oberen Schwelle selbst: die greift nur, wenn überhaupt ein Wert ankommt.
+  Was dann noch bleibt, ist der mechanische Thermostat des Heizstabs.
 * **Ein Neustart im Totband der Speicherhysterese gibt den Heizstab wieder
   frei.** Der Binärsensor «Boiler Temperature» hat keinen Restore und steht nach
   dem Boot in Home Assistant auf `unknown`. Das Verriegelungs-Lambda liest
@@ -395,6 +409,58 @@ mit 5 s und wäre davon nicht betroffen.
   einem, der `unavailable` meldet - hält seinen Wert unbegrenzt gültig.
   Besonders relevant bei `sensor.s1`, weil das die Speicherverriegelung trägt
   und aus einem anderen Gerät kommt.
+
+  Als Ausbau denkbar: **ein Ersatzfühler, der übernimmt, wenn der erste
+  ausfällt.** Der Speicher hat mit `wp-speicher-monitor` vier Fühler über die
+  Höhe verteilt, es liesse sich also eine Rangfolge definieren - S1 als
+  Hauptquelle, ein tiefer liegender Fühler als Rückfall, und erst wenn auch der
+  altert, die Verriegelung auf «gesperrt» setzen. Bis dahin bleibt die Regelung
+  arbeitsfähig, statt bei jedem Fühlerausfall stehenzubleiben.
+
+  Ein Teil davon liegt schon bereit: `wp-speicher-monitor` meldet seit V1.1.0
+  `binary_sensor.infrastructure_wp_speicher_monitor_1_0_fuehler_watchdog`,
+  sobald ein Fühler länger als 300 s keinen gültigen Wert mehr geliefert hat.
+  Zwei Einschränkungen sind dabei zu beachten: der Watchdog ist **kollektiv** -
+  er wird wahr, wenn *irgendeiner* der vier Fühler stale ist, und sagt nicht,
+  welcher - und `sensor.s1` selbst behält seinen letzten Wert, wird also nicht
+  `unavailable`. Für eine konservative Verriegelung reicht das trotzdem: dieses
+  Gerät müsste den Binärsensor nur mitlesen und bei `on` auf «gesperrt» fallen.
+  Für die feinere Lösung mit Rangfolge bräuchte es eine Aussage je Fühler.
+
+  **Als Ersatzfühler vorgemerkt: `sensor.wp_temperatur_warmwasser`.** Er kommt
+  aus der `luxtronik`-Integration, also von der Wärmepumpensteuerung selbst -
+  ein anderer Fühler, eine andere Integration und ein anderer Ausfallpfad als
+  der ESPHome-Speichermonitor. Genau das macht ihn als Rückfall brauchbar. Zwei
+  Punkte sind beim Einbau zu beachten, beide am 2026-09-01 über 24 h Historie
+  gemessen:
+
+  * **Die Schwelle ist nicht übertragbar.** Der Fühler liest höher als S1: im
+    Median +2.15 K über den ganzen Bereich, +2.25 K im Bereich ab 70 °C, in dem
+    die Verriegelung arbeitet. Die Streuung ist mit σ = 0.36 K klein, die Spanne
+    lag dort zwischen +1.40 und +2.88 K. «Tmax Boiler» unverändert gegen diesen
+    Fühler zu prüfen, würde rund 2 K zu früh sperren - sicher, aber es
+    verschenkt nutzbare Ladekapazität. Er braucht also einen eigenen Schwellwert
+    oder einen Offset.
+  * **Eine Alterungsfrist lässt sich nicht aus der Historie ableiten.** Die
+    Lücken in der Recorder-Historie - beim Warmwasserfühler bis 1140 s - sind
+    keine Meldelücken, sondern Zeiträume ohne Temperaturänderung: Home
+    Assistant verwirft unveränderte Wiederholungen, es entsteht keine Zeile.
+    Wer aus solchen Lücken auf einen Ausfall schliesst, misst die Trägheit des
+    Speichers und nicht die Lebendigkeit des Fühlers. Eine Frist gehört
+    entsprechend dort bestimmt, wo die Werte entstehen - so wie es der
+    Fühler-Watchdog des Speichermonitors macht, der am Gerät selbst prüft und
+    nicht in der Historie. Für den Luxtronik-Fühler fehlt ein solches Gegenstück
+    noch.
+
+  Beide Fühler sitzen im **selben Speicher**, auf leicht unterschiedlicher
+  Einbauhöhe - daher der konstante Temperaturunterschied. Der Offset ist damit
+  eine Einbaueigenschaft und kein Zufall, was den Fühler für den Backup-Fall gut
+  brauchbar macht.
+* **Ein ausgefallener Fühler wird nicht gemeldet.** Fällt der DS18B20 aus, ist
+  seine Temperatur `nan`, damit sind beide Vergleiche falsch, und Lüfter wie
+  Übertemperaturzustand bleiben auf ihrem letzten Stand stehen. Ein Watchdog,
+  der das nach Home Assistant meldet, fehlt - der Ausfall sieht von aussen aus
+  wie ein kühler Kühlkörper.
 * **Die Übertemperaturerkennung sitzt hinter einem 100-Sekunden-Mittel.** Der
   Kühlkörperfühler wird alle 10 s gelesen, aber erst nach 10 Werten publiziert,
   und die Logik hängt an `on_value`. Zwischen dem tatsächlichen Überschreiten
@@ -403,6 +469,46 @@ mit 5 s und wäre davon nicht betroffen.
   eine halbe Fensterlänge nach. Für die thermische Zeitkonstante eines
   Kühlkörpers mit Lüfter ist das viel. Ein zweiter, ungefilterter Pfad für die
   reine Abschaltschwelle wäre die naheliegende Verbesserung.
+* **Die Regelung hat keine Rückmeldung, ob ihre Ansteuerung überhaupt ankommt.**
+  Der Heizstab hat einen eigenen mechanischen Thermostat, der am oberen Ende des
+  Temperaturbereichs abschaltet. Ist er offen, fordert das Gerät weiter
+  Leistung an, ohne dass Leistung fliesst - belegt am 2026-07-30: Ansteuerung
+  100 %, tatsächliche Aufnahme 12.8 W statt 4500 W, gemessen an
+  `sensor.heizstab`. Der Unterschied zwischen 0 % und 100 % Ansteuerung waren in
+  diesem Zustand 6 W Eigenaufnahme der Modulelektronik.
+
+  Betroffen ist damit auch die Rückaddition der Eigenaufnahme: sie rechnet mit
+  `Ansteuerung × «Power Heater»`, also mit dem Sollwert und nicht mit einer
+  Messung. Bei offenem Thermostat überschätzt das Gerät seinen Überschuss um bis
+  zu die volle Heizstableistung. Bei 100 % bleibt das folgenlos, weil die
+  Ansteuerung ohnehin am Anschlag ist; bei Teillast fordert die Regelung zu hoch
+  und kann nicht erkennen, dass ihre Ausgabe nicht landet.
+
+  `sensor.heizstab` liegt in Home Assistant bereit, wird vom Gerät aber nicht
+  gelesen. Ihn für die Rückaddition zu verwenden und zusätzlich eine Meldung zu
+  erzeugen, wenn über längere Zeit Leistung angefordert aber keine gemessen
+  wird, wäre die naheliegende Verbesserung - das deckt zugleich einen defekten
+  Heizstab ab.
+* **Ein unbrauchbarer Zählerwert führt sauber auf 0 %, ein fehlender
+  Batteriewert nicht.** Meldet Home Assistant für die Netzleistung einen
+  nichtnumerischen Zustand, rechnet die Kette mit `nan` weiter, die Prüfung
+  gegen die Mindestansteuerung schlägt fehl und die Ansteuerung geht auf 0 - der
+  gutmütige Fall. Beim Batteriesensor prüft das Lambda nur `x < 0`, was für
+  `nan` falsch ist: die Entladung wird dann still als 0 angenommen und der
+  Entladeschutz fällt weg, ohne dass es auffällt.
+* **Ohne Home Assistant regelt das Gerät mit veralteten Werten weiter.** Der
+  5-s-Takt kommt von `time.homeassistant`, läuft aber nach der ersten
+  Zeitsynchronisation lokal weiter - die Schleife bleibt also aktiv, während
+  Überschuss, Batterie und Speichertemperatur auf ihrem letzten Wert stehen. Die
+  lokal verdrahteten Verriegelungen (Übertemperatur, Modulspannung) und der
+  Hauptschalter greifen weiter, die Speicherverriegelung friert ein. War sie im
+  Moment des Ausfalls nicht aktiv, kann der Heizstab bei stehender Datenlage
+  unbegrenzt weiter einspeisen. Nach einem Neustart **ohne** Home Assistant wird
+  die Uhr nie gestellt, der Takt feuert nicht und der Heizstab bleibt aus - das
+  ist der harmlosere der beiden Fälle.
+
+### Weitere Punkte
+
 * **«Hyst Fan» ist doppelt belegt.** Der Parameter bestimmt die
   Lüfterhysterese und - verdoppelt - die Freigabeschwelle der Übertemperatur.
   Wer die Lüfterhysterese anpasst, verschiebt ungewollt auch die
@@ -430,36 +536,11 @@ mit 5 s und wäre davon nicht betroffen.
   nicht hervor; es liefert nur die momentane Ansteuerung in Prozent. Ein
   `total_increasing`-Zähler analog zu `wp-solar-monitor` fehlt und wäre die
   grösste funktionale Lücke.
-* **Die Regelung hat keine Rückmeldung, ob ihre Ansteuerung überhaupt ankommt.**
-  Der Heizstab hat einen eigenen mechanischen Thermostat, der am oberen Ende des
-  Temperaturbereichs abschaltet. Ist er offen, fordert das Gerät weiter
-  Leistung an, ohne dass Leistung fliesst - belegt am 2026-07-30: Ansteuerung
-  100 %, tatsächliche Aufnahme 12.8 W statt 4500 W, gemessen an
-  `sensor.heizstab`. Der Unterschied zwischen 0 % und 100 % Ansteuerung waren in
-  diesem Zustand 6 W Eigenaufnahme der Modulelektronik.
-
-  Betroffen ist damit auch die Rückaddition der Eigenaufnahme: sie rechnet mit
-  `Ansteuerung × «Power Heater»`, also mit dem Sollwert und nicht mit einer
-  Messung. Bei offenem Thermostat überschätzt das Gerät seinen Überschuss um bis
-  zu die volle Heizstableistung. Bei 100 % bleibt das folgenlos, weil die
-  Ansteuerung ohnehin am Anschlag ist; bei Teillast fordert die Regelung zu hoch
-  und kann nicht erkennen, dass ihre Ausgabe nicht landet.
-
-  `sensor.heizstab` liegt in Home Assistant bereit, wird vom Gerät aber nicht
-  gelesen. Ihn für die Rückaddition zu verwenden und zusätzlich eine Meldung zu
-  erzeugen, wenn über längere Zeit Leistung angefordert aber keine gemessen
-  wird, wäre die naheliegende Verbesserung - das deckt zugleich einen defekten
-  Heizstab ab.
 * **Kein Hysteresefenster an der Einschaltschwelle.** Pendelt der Überschuss um
   die Grenze von «Min Heater Output», springt die Ansteuerung im 5-s-Takt
   zwischen 0 und 20 %. Die Rückaddition der Eigenaufnahme dämpft das, solange
   «Power Heater» stimmt **und** der Heizstab tatsächlich Leistung aufnimmt (siehe
   vorigen Punkt) - sie ist der einzige Schutz dagegen.
-* **Ein ausgefallener Fühler wird nicht gemeldet.** Fällt der DS18B20 aus, ist
-  seine Temperatur `nan`, damit sind beide Vergleiche falsch, und Lüfter wie
-  Übertemperaturzustand bleiben auf ihrem letzten Stand stehen. Ein Watchdog,
-  der das nach Home Assistant meldet, fehlt - der Ausfall sieht von aussen aus
-  wie ein kühler Kühlkörper.
 * **Die drei Home-Assistant-Sensoren tragen `name: none`.** Zusammen mit
   `internal: True` entsteht ohnehin keine Entität, der Name ist also
   wirkungslos - er sieht in der YAML aber aus wie einer.
