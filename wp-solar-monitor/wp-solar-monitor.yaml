@@ -12,7 +12,12 @@ esp32:
 
 # HIER überschreiben wir die Grenzen für den starken ESP32
 substitutions:
-  fw_version: "1.0.0"
+  fw_version: "1.1.0"
+  # Frist des Fuehler-Watchdogs. Vorlauf und Ruecklauf melden durch das
+  # gleitende Mittel ueber 2 Werte alle ~10 s; 60000 ms lassen also sechs
+  # Meldungen aus, bevor ein Wert als veraltet gilt. Gilt zugleich als
+  # Anlaufzeit nach dem Neustart, weil t_last_ok bei 0 startet.
+  sensor_timeout_ms: "60000"
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
   diag_min_heap_critical: "40000" # 40kb ist kritisch
 
@@ -55,6 +60,7 @@ captive_portal:
 spi:
   clk_pin: GPIO18
   mosi_pin: GPIO23
+  id: bus_spi
 
 #dallasng:
 #  - pin: GPIO25
@@ -76,6 +82,12 @@ sensor:
     id: vl
     resolution: 10
     update_interval: 5s
+    on_value:
+      then:
+        - lambda: |-
+            if (std::isnan(x)) return;
+            id(t_last_ok)[0] = millis();
+            id(t_stale)[0] = false;
     filters:
       - sliding_window_moving_average:
           window_size: 2
@@ -87,6 +99,12 @@ sensor:
     id: rl
     resolution: 10
     update_interval: 5s
+    on_value:
+      then:
+        - lambda: |-
+            if (std::isnan(x)) return;
+            id(t_last_ok)[1] = millis();
+            id(t_stale)[1] = false;
     filters:
       - sliding_window_moving_average:
           window_size: 2
@@ -150,6 +168,25 @@ binary_sensor:
     device_class: RUNNING
     name: "Pumpe"
     id: pump
+
+  - platform: template
+    name: "1.3 Fuehler Watchdog"
+    id: sensor_watchdog
+    device_class: problem
+    entity_category: diagnostic
+    icon: "mdi:thermometer-alert"
+    lambda: !lambda |-
+      // Anlaufzeit nach dem Neustart: bis zur ersten Frist ist das Fehlen
+      // von Werten normal und kein Defekt.
+      if (millis() < ${sensor_timeout_ms}) {
+        return false;
+      }
+      for (int i = 0; i < 2; i++) {
+        if (id(t_stale)[i]) {
+          return true;
+        }
+      }
+      return false;
 
 button:
   - platform: template
@@ -219,6 +256,24 @@ number:
     max_value: 10
     step: 0.1
 
+interval:
+  # Fuehler-Watchdog. Bewusst zeitgesteuert und nicht an on_value gehaengt:
+  # ein Fuehler, der schlicht aufhoert zu melden, loest dort nichts mehr aus.
+  # Die Differenz zweier uint32_t traegt den millis()-Ueberlauf nach 49 Tagen.
+  - interval: 10s
+    then:
+      - lambda: |-
+          const uint32_t now = millis();
+          for (int i = 0; i < 2; i++) {
+            if (id(t_stale)[i]) continue;
+            if ((now - id(t_last_ok)[i]) > ${sensor_timeout_ms}) {
+              id(t_stale)[i] = true;
+              ESP_LOGW("watchdog", "%s seit %u ms ohne gueltigen Wert - verworfen",
+                       i == 0 ? "Vorlauf" : "Ruecklauf",
+                       (unsigned) (now - id(t_last_ok)[i]));
+            }
+          }
+
 globals:
   - id: energyWh
     type: float
@@ -228,6 +283,15 @@ globals:
     type: float
     restore_value: no
     initial_value: '0.0'
+  # Zeitpunkt des letzten gueltigen Werts je Fuehler ([0] Vorlauf,
+  # [1] Ruecklauf). Start bei 0, damit die Differenz zu millis() nach dem
+  # Neustart erst nach der Frist anschlaegt.
+  - id: t_last_ok
+    type: uint32_t[2]
+    initial_value: '{0, 0}'
+  - id: t_stale
+    type: bool[2]
+    initial_value: '{true, true}'
 
 script:
   - id: calculate_energy
@@ -236,8 +300,9 @@ script:
           float deltaT = 0.0;
           float weight = 0.0;
           float energySlice = 0.0;
+          const bool sensors_ok = !id(t_stale)[0] && !id(t_stale)[1];
           deltaT = max(id(vl).state - id(rl).state, (float)0.0);
-          if (id(pump).state && deltaT > 0.5) {
+          if (sensors_ok && id(pump).state && deltaT > 0.5) {
             weight = id(flow).state / 60 * 5 / 1000 * id(sdi).state;
             energySlice = weight * deltaT * id(swk).state;
             energySlice *= 0.277778;   // kJ to Wh
@@ -248,25 +313,34 @@ script:
             id(energyWh) = id(energyWh) + energySlice;
             id(power) = energySlice * 3600 / 5;
             ESP_LOGD("Calculate", "Temp Diff: %.1f%°C Energy last 5s: %.2fWh  Energy today: %.2fWh Power: %.2fW", id(vl).state - id(rl).state, energySlice, id(energyWh), id(power));
+          } else if (!sensors_ok) {
+            id(power) = 0;
+            ESP_LOGW("Calculate", "Fuehler veraltet - Zaehlung angehalten. Energy today: %.2fWh", id(energyWh));
           } else {
             id(power) = 0;
             ESP_LOGD("Calculate", "Pump off  Energy today: %.2fWh  Power: %.2fW", id(energyWh), id(power));
           }
 
+# Bilder sind seit 2026.8 Plattformen der image-Komponente; das alte
+# Blockformat ohne "platform:" faellt mit ESPHome 2027.1.0 weg.
 image:
-  - file: "pic/wlan.png"
+  - platform: file
+    file: "pic/wlan.png"
     id: wlan_icon
     type: GRAYSCALE
     resize: 32x32
-  - file: "pic/solar_schema_no_pump3.png"
+  - platform: file
+    file: "pic/solar_schema_no_pump3.png"
     id: schema
     type: RGB565
     resize: 280x154
-  - file: "pic/pump_green.png"
+  - platform: file
+    file: "pic/pump_green.png"
     id: pump_on
     type: RGB565
     resize: 32x32
-  - file: "pic/pump_gray.png"
+  - platform: file
+    file: "pic/pump_gray.png"
     id: pump_off
     type: RGB565
     resize: 32x32
@@ -304,13 +378,32 @@ color:
     blue: 0%
 
 display:
-  - platform: st7789v
-    model: Adafruit RR 280x240
-    eightbitcolor: true
-    rotation: 90
+  # Vormals platform: st7789v, model: Adafruit RR 280x240 - der Legacy-Treiber
+  # ist deprecated und faellt mit ESPHome 2027.1.0 weg. mipi_spi kennt dieses
+  # Panel nicht als Modell, deshalb kommen Groesse und Zeilenversatz von Hand;
+  # die Werte stammen aus dem Legacy-Modell ADAFRUIT_RR_280X240. Der alte
+  # Treiber schickte INVON fest verdrahtet - daher invert_colors: true. Die
+  # 20 MHz und eightbitcolor -> color_depth "8" sind vom Geraet abgelesen.
+  - platform: mipi_spi
+    model: ST7789V
+    spi_id: bus_spi
     cs_pin: 14
     dc_pin: 27
     reset_pin: 33
+    data_rate: 20MHz
+    dimensions:
+      width: 240
+      height: 280
+      offset_width: 0
+      offset_height: 20
+    rotation: 90
+    invert_colors: true
+    color_depth: "8"
+    buffer_size: 100%
+    # Der Legacy-Treiber zeichnete alle 5 s neu, mipi_spi tut das per Vorgabe
+    # jede Sekunde. Hier festgehalten, damit die Umstellung das Verhalten
+    # nicht nebenbei aendert.
+    update_interval: 5s
     lambda: |-
       it.fill(Color::WHITE);
       it.print(107, 37, id(robo32), id(black), TextAlign::BOTTOM_CENTER, "SOLAR");
@@ -323,8 +416,16 @@ display:
       } else {
         it.image(52, 180, id(pump_off));
       }
-      it.printf(108, 99, id(robo20), id(red), TextAlign::TOP_LEFT, "%4.1f°C", id(vl).state);
-      it.printf(108, 169, id(robo20), id(blue), TextAlign::TOP_LEFT, "%4.1f°C", id(rl).state);
+      if (id(t_stale)[0]) {
+        it.print(108, 99, id(robo20), id(red), TextAlign::TOP_LEFT, "--.-°C");
+      } else {
+        it.printf(108, 99, id(robo20), id(red), TextAlign::TOP_LEFT, "%4.1f°C", id(vl).state);
+      }
+      if (id(t_stale)[1]) {
+        it.print(108, 169, id(robo20), id(blue), TextAlign::TOP_LEFT, "--.-°C");
+      } else {
+        it.printf(108, 169, id(robo20), id(blue), TextAlign::TOP_LEFT, "%4.1f°C", id(rl).state);
+      }
       it.printf(68, 152, id(robo20), id(black), TextAlign::TOP_CENTER, "%s", id(pump).state ? "ON" : "OFF");
       if (id(energyWh) < 1000) {
         it.printf(218, 58, id(robo26), id(dark_green), TextAlign::TOP_CENTER, "%4.0f Wh", id(energyWh));

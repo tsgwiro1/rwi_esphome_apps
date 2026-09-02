@@ -2,6 +2,88 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.1.0] - 2026-09-02
+
+### Hinzugefügt
+
+* **Fühler-Watchdog für Vorlauf und Rücklauf.** Jeder gültige Messwert stempelt
+  über `on_value` seinen Zeitpunkt in ein Global; ein 10-Sekunden-Takt erklärt
+  einen Fühler nach **60 s** ohne gültigen Wert für veraltet. Die Frist steht als
+  Substitution `sensor_timeout_ms` und entspricht sechs ausgelassenen Meldungen.
+  Zeitgesteuert und bewusst nicht an `on_value` gehängt - ein Fühler, der
+  aufhört zu melden, löst dort nichts mehr aus.
+* **Binärsensor «1.3 Fuehler Watchdog»** (`device_class: problem`,
+  Kategorie `diagnostic`). Nummer 1.3, weil 1.0 bis 1.2 bereits vergeben sind.
+  In den ersten 60 s nach einem Neustart meldet er grundsätzlich nicht: bis zur
+  ersten Frist ist das Fehlen von Werten normal.
+
+### Geändert
+
+* **Die Wärmemengenrechnung hält bei veraltetem Fühler an.** Die Torbedingung
+  prüft neu zusätzlich, dass beide Fühler aktuell sind. Bisher hing der Schutz
+  allein daran, dass ein ausgefallener DS18B20 `nan` liefert und der Vergleich
+  gegen `nan` fehlschlägt. Das trägt nur beim Totalausfall: der gleitende
+  Mittelwert verwirft einzelne NaN-Werte und liefert selbst erst dann NaN, wenn
+  **alle** Werte im Fenster NaN sind. Ein Fühler, der einfriert statt zu
+  scheitern, hätte den Tageszähler auf einer eingefrorenen Spreizung
+  weiterzählen lassen.
+* **Das Display zeigt `--.-°C` statt `nan`,** wenn der zugehörige Fühler
+  veraltet ist.
+* **Display von `st7789v` auf `mipi_spi` umgestellt.** Der Legacy-Treiber ist
+  seit ESPHome 2026.7 deprecated und fällt mit **2027.1.0** weg. `mipi_spi`
+  kennt dieses Adafruit-Panel nicht als Modell, deshalb stehen Grösse (240x280)
+  und Zeilenversatz (20) von Hand in der YAML - übernommen aus dem
+  Legacy-Modell `ADAFRUIT_RR_280X240`. `invert_colors: true` bildet nach, dass
+  der alte Treiber `INVON` fest verdrahtet schickte; `eightbitcolor: true` wurde
+  zu `color_depth: "8"`. Die 20 MHz sind vom laufenden Gerät abgelesen, nicht
+  geschätzt.
+* **`update_interval: 5s` am Display ausdrücklich gesetzt.** Der Legacy-Treiber
+  zeichnete alle 5 s neu, `mipi_spi` täte es per Vorgabe jede Sekunde. Ohne
+  diesen Eintrag hätte die Umstellung nebenbei die Zeichenlast verfünffacht.
+* **`image:`-Block auf das Plattformformat umgestellt** (`- platform: file` je
+  Bild). Das alte Blockformat fällt ebenfalls mit **2027.1.0** weg. Beide
+  Display-Fristen sind damit in einem Zug erledigt.
+* Der SPI-Bus hat eine `id: bus_spi` bekommen, damit das Display sie
+  referenzieren kann.
+
+### Geflashter Stand
+
+Per OTA eingespielt und geprüft am 2026-09-02 um 21:03 (192.168.0.127), ESPHome
+2026.8.2, Konfig-Hash `0xd608fbb4`. Das Display meldet nach der Umstellung
+dieselbe Geometrie wie zuvor: 280x240 nach Drehung, Versatz 20, 20 MHz,
+8-bit-Puffer mit 67 200 Bytes, `Invert colors: YES`, Farbreihenfolge BGR. Der
+Zeilenversatz erscheint im Dump als «Offset width: 20», weil die Hardwaredrehung
+die Achsen tauscht - der sichtbare Ausschnitt bleibt derselbe.
+
+Beide DS18B20 melden im 5-s-Takt, der Watchdog steht auf `off`, die
+Wärmemengenrechnung läuft (abends, Pumpe aus, Leistung 0). Tageszähler mit
+12 788 Wh und Pumpenlaufzeit mit 20 665 s unverändert aus dem NVS zurück. Freier
+Heap 169 kB, System Gesundheit 🟢 Stabil. Keine Fehler im Log; die Meldung zum
+alten Bootloader ist bekannt und ohne Auswirkung.
+
+Die Entität heisst in Home Assistant
+`binary_sensor.infrastructure_wp_solar_monitor_1_3_fuehler_watchdog` - mit
+Bereichspräfix, das HA neu angelegten Entitäten voranstellt.
+
+**Das Bild auf dem Display wurde nach dem Flash von Auge kontrolliert und ist
+unverändert richtig** - Farben, Zeilenversatz und Anordnung stimmen. Das war der
+einzige Punkt der Umstellung, den kein Log belegen kann.
+
+### Nebenbei geklärt: die Anlagenparameter
+
+Der Wärmeträger ist **TYFOCOR® LS**. Dichte und Wärmekapazität standen bis dahin
+auf dem unteren Anschlag ihrer Eingabefelder und sind auf die Datenblattwerte
+der 60-°C-Zeile gesetzt worden (1008 kg/m³, 3.76 kJ/kg°K). Das gehört nicht zu
+dieser Firmware-Version - die Werte liegen im NVS, nicht in der YAML - ist hier
+aber vermerkt, weil sich damit der ausgewiesene Ertrag ab dem 2026-09-02 um
+rund 14 % erhöht. Einzelheiten in README §4 und §6.
+
+### Nicht geändert
+
+Anzeigeaufbau, Koordinaten, Farben, Bildmaterial, die Energieformel selbst und
+sämtliche Entitätsnamen bleiben unverändert. Die Umstellung des Treibers ist
+eine Formsache, keine Neugestaltung.
+
 ## [1.0.0] - 2026-07-30
 
 ### Erstrelease

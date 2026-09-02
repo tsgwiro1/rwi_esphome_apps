@@ -1,6 +1,6 @@
 # wp-solar-monitor - Wärmemengenzähler für den Solarkreis
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -66,9 +66,10 @@ Das Script `calculate_energy` läuft alle 5 s, getaktet von einer
 `on_time`-Automation auf `seconds: /5`. Es rechnet in vier Schritten:
 
 1. **Spreizung:** ΔT = Vorlauf − Rücklauf, negative Werte auf 0 begrenzt.
-2. **Torbedingung:** Es wird nur weitergerechnet, wenn die Pumpe läuft **und**
-   ΔT über 0.5 K liegt. Damit zählt das Rauschen zweier Fühler bei stehender
-   Anlage keine Energie.
+2. **Torbedingung:** Es wird nur weitergerechnet, wenn beide Fühler aktuell
+   sind, die Pumpe läuft **und** ΔT über 0.5 K liegt. Damit zählt weder das
+   Rauschen zweier Fühler bei stehender Anlage noch ein eingefrorener Messwert
+   Energie.
 3. **Masse der Zeitscheibe:** Aus dem eingestellten Durchfluss (l/min) wird die
    in 5 s umgewälzte Menge und über die eingestellte Dichte deren Masse in kg.
 4. **Energie:** Masse × ΔT × spezifische Wärmekapazität ergibt kJ, umgerechnet
@@ -91,9 +92,12 @@ Drei der vier Faktoren sind Annahmen, keine Messwerte:
   Bus. Ändert die Pumpe ihre Stufe oder verschlammt der Kreis, rechnet das Gerät
   unverändert mit dem alten Wert weiter. Die ausgewiesene Energie skaliert
   **linear** mit dieser Zahl.
-* **Dichte und Wärmekapazität** hängen von der Glykolkonzentration und der
-  Temperatur ab und sind hier je ein Festwert über den ganzen Temperaturbereich.
-  Auch sie gehen linear ein.
+* **Dichte und Wärmekapazität** hängen von der Temperatur ab und sind hier je
+  ein Festwert über den ganzen Bereich. Das ist unkritischer als es klingt: für
+  die Rechnung zählt nur ihr Produkt, und weil die Dichte mit der Temperatur
+  fällt während die Wärmekapazität steigt, ändert sich dieses Produkt zwischen
+  30 und 80 °C um **weniger als 1 %** (siehe Abschnitt 4). Ein Festwert genügt
+  also - er muss nur stimmen.
 * **Die Temperaturen** werden an der Rohrwand gemessen, nicht im Medium.
 
 Ein Fehler von 10 % beim Durchfluss ist damit direkt ein Fehler von 10 % beim
@@ -127,6 +131,31 @@ Ein LDR am ADC (GPIO34) schaltet die Beleuchtung: unter Rohwert 3900 ein, über
 Dämmerung nicht im Sekundentakt blinkt. Der Sensor ist `internal: true` und
 erscheint nicht in Home Assistant.
 
+### Fühler-Watchdog
+
+Jeder gültige Messwert stempelt seinen Zeitpunkt in ein Global. Ein
+10-Sekunden-Takt vergleicht diesen Stempel mit der Frist von **60 s** - das sind
+sechs ausgelassene Meldungen bei einem Melderhythmus von 10 s - und erklärt den
+Fühler danach für veraltet. Bewusst zeitgesteuert und nicht an `on_value`
+gehängt: ein Fühler, der schlicht aufhört zu melden, löst dort nichts mehr aus.
+
+Ist auch nur einer der beiden Fühler veraltet, geschieht dreierlei:
+
+1. Die Wärmemengenrechnung hält an. Die Leistung geht auf 0, der Tageszähler
+   bleibt stehen, statt auf einem eingefrorenen Temperaturwert weiterzuzählen.
+2. Das Display zeigt an der Stelle der Temperatur `--.-°C` statt `nan`.
+3. Der Binärsensor «1.3 Fuehler Watchdog» (`device_class: problem`) meldet nach
+   Home Assistant.
+
+In den ersten 60 s nach einem Neustart meldet der Watchdog grundsätzlich nichts
+- bis zur ersten Frist ist das Fehlen von Werten normal und kein Defekt.
+
+Das schliesst nicht jede Lücke: Der gleitende Mittelwert verwirft einzelne
+NaN-Werte und liefert selbst nur dann NaN, wenn **alle** Werte im Fenster NaN
+sind. Ein Fühler, der bloss sporadisch fehlschlägt, meldet also weiter - er
+liefert dann einen Mittelwert aus weniger Stützstellen, was ein echter, aktueller
+Messwert bleibt. Der Watchdog greift beim Totalausfall, nicht beim Wackelkontakt.
+
 ### Tagesreset
 
 Um 00:00:00 werden Energiezähler und Pumpenlaufzeit auf 0 gesetzt. Beide
@@ -149,9 +178,15 @@ Counters» für den Eingriff von Hand.
 | GPIO27 | Display DC |
 | GPIO33 | Display Reset |
 
-**Display:** ST7789V, Modell «Adafruit RR 280x240», `rotation: 90`,
-`eightbitcolor: true`. Der SPI-Bus hat kein MISO - das Display wird nur
-beschrieben, nicht gelesen.
+**Display:** ST7789V über `mipi_spi`, 240x280 mit Zeilenversatz 20,
+`rotation: 90`, `color_depth: "8"`, `invert_colors: true`, 20 MHz, Neuzeichnung
+alle 5 s. Der SPI-Bus hat kein MISO - das Display wird nur beschrieben, nicht
+gelesen.
+
+`mipi_spi` kennt dieses Adafruit-Panel nicht als fertiges Modell. Grösse und
+Zeilenversatz stehen deshalb von Hand in der YAML; die Werte stammen aus dem
+Legacy-Modell `ADAFRUIT_RR_280X240`. `invert_colors: true` bildet nach, dass der
+alte Treiber `INVON` fest verdrahtet schickte.
 
 **Fühleradressen** (fest in der YAML hinterlegt):
 
@@ -183,6 +218,7 @@ Display-Projekten in `~/esphome/pic/` und sind nicht Teil dieses Repositories.
 | `sensor.wp_solar_monitor_1_1_pump_runtime_today` | s | Pumpenlaufzeit des Tages |
 | `sensor.wp_solar_monitor_1_2_pump_last_turn_on` | s | letzte Einschaltung der Pumpe |
 | `binary_sensor.wp_solar_monitor_pumpe` | - | Pumpenkontakt, `device_class: running` |
+| `binary_sensor.infrastructure_wp_solar_monitor_1_3_fuehler_watchdog` | - | meldet einen veralteten Fühler, `device_class: problem` |
 | `button.wp_solar_monitor_1_0_reset_counters` | - | Energie und Laufzeit von Hand nullen |
 
 Einstellbare Anlagenparameter, alle neustartfest und in der Kategorie `config`:
@@ -192,6 +228,10 @@ Einstellbare Anlagenparameter, alle neustartfest und in der Kategorie `config`:
 | `number.wp_solar_monitor_durchfluss` | 0 - 10 l/min | 0.1 |
 | `number.wp_solar_monitor_spez_dichte` | 960 - 1060 kg/m³ | 1 |
 | `number.wp_solar_monitor_spez_w_rmekap` | 3.40 - 4.00 kJ/kg°K | 0.01 |
+
+Der Watchdog trägt als einzige Entität das Bereichspräfix `infrastructure_` -
+Home Assistant stellt es neu angelegten Entitäten voran. Die übrigen stammen aus
+der Zeit davor und behalten ihre kürzere ID.
 
 Dazu die Diagnose-Entitäten aus `common/diagnostics.yaml` (Kategorien 2.x bis
 6.x: WLAN, Netzwerk, System, Versionen, Neustart-Buttons).
@@ -227,10 +267,34 @@ sind:
 PLATFORMIO_CORE_DIR="$HOME/.platformio_esphome" ~/.local/bin/esphome compile wp-solar-monitor.yaml
 ```
 
-Nach der Montage sind die drei `number`-Entitäten einzustellen, bevor die
-Energiewerte etwas bedeuten: Durchfluss laut Durchflussanzeiger der
-Solarstation, Dichte und Wärmekapazität passend zur Glykolkonzentration des
-Kreises.
+### Anlagenparameter
+
+Der Kreis ist mit **TYFOCOR® LS** gefüllt, einem gebrauchsfertigen
+Propylenglykol-Wasser-Gemisch für Vakuumröhren-Kollektoren, Frostschutz bis
+−28 °C. Aus der Herstellertabelle (technisches Datenblatt, Thermophysikalische
+Eigenschaften):
+
+| T [°C] | Dichte [kg/m³] | c_p [kJ/kg·K] | Produkt [kJ/m³·K] |
+| ---: | ---: | ---: | ---: |
+| 30 | 1029 | 3.640 | 3746 |
+| 40 | 1021 | 3.680 | 3757 |
+| 50 | 1015 | 3.720 | 3776 |
+| 60 | 1008 | 3.760 | 3790 |
+| 70 | 1001 | 3.800 | 3804 |
+| 80 | 993 | 3.840 | 3813 |
+
+Eingestellt sind seit dem 2026-09-02 die Werte der 60-°C-Zeile als
+repräsentative Kreismitteltemperatur: **Dichte 1008 kg/m³**, **Wärmekapazität
+3.76 kJ/kg°K**. Welche Zeile zwischen 30 und 80 °C man nimmt, ändert das
+Ergebnis um unter 1 %.
+
+Der **Durchfluss** bleibt bei 8.0 l/min und stammt vom Durchflussanzeiger der
+Solarstation - er ist der einzige der drei Werte, der weiterhin auf einer
+Ablesung statt auf einem Datenblatt beruht.
+
+Wird der Wärmeträger einmal gewechselt, gehören Dichte und Wärmekapazität aus
+dem Datenblatt des neuen Mediums nachgezogen; beide gehen linear in jede
+ausgewiesene Wattstunde ein.
 
 Fällt das WLAN aus, spannt das Gerät den Fallback-AP mit Captive Portal auf. Der
 lokale Webserver (Port 80, ohne OTA) zeigt die Temperaturen und den Pumpenstatus
@@ -262,12 +326,14 @@ Entität in der Recorder-Historie, statt sie aus dem Melde-Intervall zu schätze
   geht linear in jede ausgewiesene Wattstunde ein. Ein Volumenstromsensor im
   Solarkreis wäre der eine Umbau, der aus dem Indikator ein Messgerät machen
   würde.
-* **Zwei der drei Parameter stehen am unteren Anschlag ihres Bereichs**
-  (Stand 2026-07-30: Dichte 960 kg/m³ bei einem Bereich ab 960, Wärmekapazität
-  3.40 kJ/kg°K bei einem Bereich ab 3.40, Durchfluss 8.0 l/min). Ob das gewollt
-  ist oder ein nie angepasster Startwert, ist aus der Konfiguration nicht
-  ersichtlich - beide Werte gehören gegen die tatsächliche Glykolmischung
-  geprüft.
+* **Werte vor dem 2026-09-02 sind um rund 14 % zu niedrig.** Bis dahin standen
+  Dichte und Wärmekapazität auf 960 kg/m³ und 3.40 kJ/kg°K - beides der untere
+  Anschlag des jeweiligen Eingabefelds und kein Betriebspunkt von TYFOCOR LS
+  (960 kg/m³ erreicht das Medium erst bei etwa 120 °C, 3.40 kJ/kg°K erst bei
+  −20 °C). Das Produkt lag damit bei 3264 statt 3790 kJ/m³·K. Wer ältere
+  Tagesbilanzen mit neueren vergleicht, muss die alten mit **1.16**
+  multiplizieren. Die Korrektur brauchte keinen Flash, die Werte liegen im
+  NVS.
 * **Ohne Home Assistant zählt das Gerät keine Energie.** Alle drei
   Zeit-Instanzen sind `platform: homeassistant`. Ist HA nicht erreichbar, feuert
   der 5-s-Takt nicht: Leistung und Tagesenergie bleiben stehen, und der
@@ -280,11 +346,11 @@ Entität in der Recorder-Historie, statt sie aus dem Melde-Intervall zu schätze
 * **Der Schwellwert von 0.5 K ist fest verdrahtet.** Ertrag bei kleinerer
   Spreizung - typisch am frühen Morgen und späten Abend - wird nicht gezählt.
   Das ist der Preis dafür, dass Fühlerrauschen keine Phantomenergie erzeugt.
-* **Ein ausgefallener Fühler stoppt die Zählung, statt zu lügen.** Fällt ein
-  DS18B20 aus, ist die Spreizung `nan`, die Torbedingung damit nie erfüllt: die
-  Leistung geht auf 0 und der Tageszähler bleibt stehen. Das Display zeigt
-  `nan`. Ein Watchdog, der diesen Zustand nach HA meldet, fehlt - der Ausfall
-  sieht von aussen aus wie eine stehende Anlage.
+* **Der Watchdog greift beim Totalausfall, nicht beim Wackelkontakt.** Ein
+  Fühler, der nur sporadisch fehlschlägt, liefert über den gleitenden Mittelwert
+  weiter Werte und gilt damit als gesund. Das ist vertretbar - der gemeldete
+  Wert bleibt ein echter, aktueller Messwert -, aber ein Sensor mit
+  schlechter Klemme fällt so nicht auf.
 * **Der Tageszähler schreibt regelmässig ins NVS.** Als neustartfestes Global
   wird er sekündlich auf Änderung geprüft und bei Änderung gespeichert, während
   Pumpenlauf also etwa alle 5 s - rund 720 Schreibvorgänge je Betriebsstunde,
@@ -297,12 +363,10 @@ Entität in der Recorder-Historie, statt sie aus dem Melde-Intervall zu schätze
   Assistant ändern und alle Verweise darauf brechen, deshalb bleibt es so.
 * **Die Schriftart `robo12` ist definiert, aber im Display-Lambda unbenutzt.**
   Sie belegt nur Flash.
-* **Die Display-Plattform `st7789v` ist ab ESPHome 2026.7 als deprecated
-  markiert** und verweist auf `mipi_spi`. Sie ist dort noch der eigenständige
-  Legacy-Treiber und funktioniert unverändert - die `mipi_spi`-Regression, die
-  `wp-fp1-smartblock` auf 2026.5.3 festhält, betrifft dieses Gerät also nicht.
-  Der Wechsel auf `mipi_spi` wird aber irgendwann fällig, und dann sind
-  Farbformat und Offsets neu zu prüfen.
+* **Die Panelgeometrie steht von Hand in der YAML.** Weil `mipi_spi` das
+  Adafruit-Panel nicht als Modell kennt, sind 240x280 und der Zeilenversatz 20
+  eingetippte Werte. Ein Tippfehler dort verschiebt das ganze Bild, ohne dass
+  die Validierung etwas merkt.
 * **Kein OTA-Rollback.** Das Gerät meldet beim Start «Bootloader too old for OTA
   rollback and SRAM1 as IRAM (+40KB)». Der Bootloader stammt aus der
   Erstinbetriebnahme und kann nur per USB erneuert werden. Praktische Folge: ein
