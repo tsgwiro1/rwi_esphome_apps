@@ -13,8 +13,11 @@ Dieselbe Gerätedatei existiert dreifach und muss identisch bleiben:
 | Lokal | `~/esphome/<projekt>.yaml` | Arbeitskopie, hier wird gebaut |
 | HA | `ha:/config/esphome/<projekt>.yaml` | ESPHome-Add-on |
 
-Lokal ↔ HA synchronisiert Roger mit `~/esphome/sync2HA.command` (rsync in beide
-Richtungen). Der Abgleich zum Repo passiert von Hand.
+Lokal ↔ HA wird mit `~/esphome/sync2HA.command` abgeglichen (rsync in beide
+Richtungen, ohne `--delete`). **Das Skript führst du selbst aus**, sobald eine
+Geräte-YAML in `~/esphome` geändert wurde — nicht Roger, und nicht erst auf
+Nachfrage. Sonst baut der Update-Knopf in Home Assistant aus einer veralteten
+Kopie. Der Abgleich zum Repo passiert weiterhin von Hand.
 
 **Bei Abweichung ist `~/esphome` massgeblich, nicht das Repo.** Belegt am
 2026-07-28: Im Repo fehlte bei `ha-smartrelais` der `on_boot`-Block für
