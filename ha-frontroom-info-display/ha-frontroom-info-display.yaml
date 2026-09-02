@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.9.0"
+  fw_version: "1.10.0"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -62,6 +62,8 @@ substitutions:
   wallbox_max_power: "11000"      # W, Skalenende des Leistungsbalkens
   ldr_bright_below: "3900"        # LDR-Rohwert, darunter volle Helligkeit
   ldr_dim_above: "3950"           # LDR-Rohwert, darueber halbe Helligkeit
+  ldr_dim_delay: "120"            # s, so lange muss es dunkel bleiben, bevor
+                                  # abgedunkelt wird. Aufgehellt wird sofort.
   touch_x_min: "280"              # Touch-Kalibrierung, siehe HARDWARE.md Abschnitt 8
   touch_x_max: "3860"
   touch_y_min: "340"
@@ -323,6 +325,24 @@ globals:
     type: int
     restore_value: no
     initial_value: '0' 
+  # Regelzustand der Hintergrundbeleuchtung. Beide bewusst ohne restore_value:
+  # nach einem Neustart soll die Lage neu aus dem Messwert hergeleitet werden,
+  # nicht aus dem NVS. backlight_applied startet auf -1 ("noch nichts
+  # gesetzt"), damit die Helligkeit beim ersten Messwert in jedem Fall gestellt
+  # wird -- egal, welchen Wert ALWAYS_ON aus dem Speicher geholt hat.
+  - id: backlight_dim
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: backlight_applied
+    type: float
+    restore_value: no
+    initial_value: '-1'
+  # Wie lange es am Stueck zu dunkel ist. Nur diese Richtung wird verzoegert.
+  - id: dim_seconds
+    type: int
+    restore_value: no
+    initial_value: '0'
   # Hinweisbalken: Text, Stufe (1 = orange, 2 = rot) und Restlaufzeit in
   # Sekunden. Gesetzt wird ausschliesslich ueber das Skript show_hint.
   - id: hint_text
@@ -718,27 +738,40 @@ binary_sensor:
 
 # Define all the numeric sensors used
 sensor:
+  # Zwei Sensoren auf derselben Messung, weil zwei verschiedene Anforderungen
+  # daran haengen. Der ADC-Sensor ist die *Regelgroesse*: nur so viel
+  # geglaettet, wie die Entscheidung hell/dunkel braucht, und intern, weil
+  # niemand ihn in Home Assistant sehen will. Der copy-Sensor darunter ist die
+  # *Anzeige* und traegt allein die Filter fuer die Meldungen nach aussen.
+  # Beide Pfade sind damit unabhaengig einstellbar -- eine Aenderung an der
+  # Recorder-Last verlangsamt die Regelung nicht und umgekehrt.
   - platform: adc
     pin: GPIO34
-    name: "Room Brightness"
+    id: room_brightness
+    internal: true
     icon: "mdi:brightness-6"
     update_interval: 2s
     raw: True
-    internal: true
     accuracy_decimals: 0
     unit_of_measurement: ""
     entity_category: "diagnostic"
-    on_value_range:
-      - below: ${ldr_bright_below}
-        then:
-          - light.turn_on: 
-              id: backlight
-              brightness: 100%
-      - above: ${ldr_dim_above}
-        then:
-          - light.turn_on: 
-              id: backlight
-              brightness: 50%
+    filters:
+      # Der Teiler ist hochohmig; die 100 nF aus dem LDR-Mod daempfen, das
+      # Mittel ueber fuenf Abtastungen nimmt den Rest. 10 s Fenster, gemeldet
+      # bei jeder Abtastung: rund 5 s Nachlauf, mehr braucht die Regelung nicht.
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
+
+  - platform: copy
+    source_id: room_brightness
+    name: "1.0 Room Brightness"
+    filters:
+      # Gilt nur fuer Home Assistant. Hoechstens alle 30 s eine Meldung und nur
+      # bei mindestens 20 Zaehlschritten Aenderung: bei delta 5 waren es 3000
+      # Recorder-Zeilen am Tag, bei 20 rund 1350 -- gemessen an 35 h Verlauf.
+      - throttle: 30s
+      - delta: 20
   - platform: homeassistant
     entity_id: ${ent_pv_power}
     id: pv_power
@@ -808,7 +841,7 @@ text_sensor:
   # des Balkens: Wer den Ladeplan-Schalter in Home Assistant umlegt und ihn
   # zurueckspringen sieht, findet hier den Grund.
   - platform: template
-    name: "Letzter Hinweis"
+    name: "1.1 Letzter Hinweis"
     id: last_hint
     icon: "mdi:message-alert-outline"
     entity_category: diagnostic
@@ -1342,6 +1375,41 @@ touchscreen:
 
 # Update the UI state
 interval:
+  # Helligkeitsregelung. Bewusst ein Intervall und kein on_value: Die
+  # Verzoegerung soll an der Zeit haengen, nicht an der Meldungsrate des
+  # Sensors -- sonst verstellt jede Aenderung an den Filtern zugleich das
+  # Regelverhalten.
+  #
+  # Asymmetrisch: aufgehellt wird sofort, abgedunkelt erst, wenn es
+  # ldr_dim_delay Sekunden am Stueck dunkel bleibt. Eine kurze Aufhellung
+  # mitten in der Nacht -- am 2026-09-02 um 06:28 fuer 50 s gemessen -- soll
+  # durchschlagen, ihr Ende aber nicht sofort wieder abdunkeln.
+  #
+  # Zustandsbasiert statt flankenbasiert: on_value_range feuert nur beim
+  # *Eintritt* in einen Bereich und merkt sich den letzten im NVS; stand der
+  # LDR nach einem Neustart im selben Bereich, blieb die Helligkeit auf dem
+  # gespeicherten Wert stehen. ALWAYS_ON faengt das nicht auf, es erzwingt nur
+  # den Zustand "ein", nicht die Helligkeit.
+  - interval: 5s
+    then:
+      - lambda: |-
+          float x = id(room_brightness).state;
+          if (std::isnan(x)) { return; }
+          if (x < ${ldr_bright_below}) {
+            id(dim_seconds) = 0;
+            id(backlight_dim) = false;
+          } else if (x > ${ldr_dim_above}) {
+            id(dim_seconds) += 5;
+            if (id(dim_seconds) >= ${ldr_dim_delay}) { id(backlight_dim) = true; }
+          }
+          // Im Totband dazwischen bleibt alles stehen, auch der Zaehler.
+          float want = id(backlight_dim) ? 0.5f : 1.0f;
+          if (want != id(backlight_applied)) {
+            id(backlight_applied) = want;
+            auto call = id(backlight).turn_on();
+            call.set_brightness(want);
+            call.perform();
+          }
   - interval: 1s
     then:
       - lambda: |-

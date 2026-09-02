@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.9.0-blue)
+![Version](https://img.shields.io/badge/version-1.10.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -74,7 +74,11 @@ verzichten.
   `${ent_evcc_mode}` abgeglichen. Ein lokaler Eingriff kann damit nicht stehen
   bleiben, und eine verpasste Meldung heilt von selbst.
 * **Lokale Helligkeitsregelung.** Ein LDR am ADC steuert die
-  Hintergrundbeleuchtung in zwei Stufen, unabhängig von Home Assistant.
+  Hintergrundbeleuchtung in zwei Stufen, unabhängig von Home Assistant. Die
+  Regelung läuft in einem 5-Sekunden-Intervall und vergleicht dort gegen die
+  Schwellen. Sie heilt damit auch einen Neustart, nach dem die gespeicherte
+  Helligkeit nicht zur Raumhelligkeit passt, und sie ist **asymmetrisch**:
+  sofort hell, abgedunkelt erst nach zwei Minuten anhaltender Dunkelheit.
 
 ---
 
@@ -105,7 +109,7 @@ teilen sich auf diesem Board keinen Bus:
 | **Hintergrundbeleuchtung** | `GPIO21` | LEDC-PWM, als `monochromatic`-Light |
 | **Touch CS** | `GPIO33` | `xpt2046`, `threshold: 400`, 50 ms Abtastung |
 | **Touch IRQ** | `GPIO36` | Interrupt-Pin des Touchcontrollers |
-| **LDR Raumhelligkeit** | `GPIO34` | ADC, Rohwert, 2 s, `internal: true` |
+| **LDR Raumhelligkeit** | `GPIO34` | ADC, Rohwert, 2 s. Intern als Regelgrösse, nach aussen über einen `copy`-Sensor |
 | **Taster «Schnellladen»** | `GPIO35` | `delayed_on: 10ms`, Input-only-Pin |
 | **Taster «Ladeplan»** | `GPIO22` | `delayed_on: 10ms`, interner Pull-Up |
 | **LED «Charge Now»** | `GPIO17` | LEDC, **invertiert** |
@@ -408,19 +412,25 @@ Bedeutung, da ohnehin nur `http://` aufgerufen wird.
 
 | Entität | Typ | Bedeutung |
 | :--- | :--- | :--- |
-| **Display Backlight** | `light` (monochromatic) | Helligkeit der Hintergrundbeleuchtung, `restore_mode: ALWAYS_ON` |
+| **Display Backlight** | `light` (monochromatic) | Helligkeit der Hintergrundbeleuchtung. `restore_mode: ALWAYS_ON` erzwingt nur den Zustand «ein» — **die Helligkeit kommt aus dem gespeicherten Wert**, die LDR-Regelung zieht sie nach dem Start nach |
+| **1.0 Room Brightness** | `sensor` (`copy`, Kategorie *Diagnose*) | LDR-Rohwert. Die einzige Möglichkeit, die Schwellen der Helligkeitsregelung zu prüfen. Höchstens alle 30 s und nur bei 20 Zählschritten Änderung |
 | **EVCC Schnellladen** | `switch` (template) | EIN spiegelt evcc-Modus `NOW`; Einschalten setzt `NOW`, Ausschalten `PV` |
 | **EVCC Planladung** | `switch` (template) | EIN spiegelt einen aktiven Ladeplan; Einschalten öffnet die Eingabeseite am Display — nur bei angestecktem Fahrzeug —, Ausschalten löscht den Plan |
 | **Ladeplan Ziel-SoC** | `number` (template, 0…100 %, Schritt 5) | Der Ziel-SoC für das **nächste** Senden. Reine Vorbelegung — das Setzen schickt nichts an evcc |
 | **Ladeplan Uhrzeit** | `datetime` (template, `type: time`) | Die Uhrzeit für das **nächste** Senden, ebenfalls ohne Wirkung auf einen laufenden Plan |
-| **Letzter Hinweis** | `text_sensor` (template, Kategorie *Diagnose*) | Der zuletzt am Display gezeigte Hinweis. Bleibt stehen, damit ein in HA abgelehnter Schalter dort eine Begründung hat |
+| **1.1 Letzter Hinweis** | `text_sensor` (template, Kategorie *Diagnose*) | Der zuletzt am Display gezeigte Hinweis. Bleibt stehen, damit ein in HA abgelehnter Schalter dort eine Begründung hat |
 | **Touch Kalibrierlog** | `switch` (template, Kategorie *Konfiguration*) | Gibt bei jeder Berührung Bildschirm- und Rohkoordinaten ins Log aus. Für die Kalibrierung eines neuen Panels, siehe [HARDWARE.md](HARDWARE.md), Abschnitt 8. Nach einem Neustart immer aus |
+
+Die beiden Nummern 1.x sind kein Zufall: `common/diagnostics.yaml` belegt die
+Kapitel **2.x bis 6.x**, der Block **1.x ist den geräteeigenen Diagnosewerten
+vorbehalten**. Home Assistant sortiert die Liste nach dem Namen — eine Entität
+ohne Nummer fiele aus der Ordnung.
 
 Dazu die Diagnose-Entitäten der Kategorien 2.x bis 6.x aus
 `common/diagnostics.yaml`. Die Heap-Grenzen sind für den ESP32 auf 80 kB (gut)
 und 40 kB (kritisch) angehoben.
 
-Nicht in Home Assistant sichtbar sind der LDR-Sensor «Room Brightness» und die
+Nicht in Home Assistant sichtbar sind die
 beiden Status-LEDs - sie sind als `internal: true` deklariert.
 
 Die beiden evcc-Schalter tragen seit V1.6.2 `restore_mode: DISABLED`. Bei der
@@ -547,7 +557,7 @@ verdrahtet.
 | :--- | :--- | :--- |
 | `device_name` | `ha-frontroom-info-display` | `name` und `friendly_name`, zugleich der mDNS-Name |
 | `project_name` | `tsgwiro1.ha-frontroom-info-display` | `project:`-Block |
-| `fw_version` | `1.9.0` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
+| `fw_version` | `1.10.0` | Firmwarestand, siehe Abschnitt «Versionierung» im Repo-`CLAUDE.md` |
 | `device_timezone` | `Europe/Zurich` | IANA-Name oder POSIX-TZ-Zeichenkette. **Ohne Angabe nimmt ESPHome die Zeitzone des bauenden Rechners** — der Ladeplan ginge dann mit einer fremden Ortszeit an evcc |
 
 **evcc**
@@ -596,7 +606,8 @@ Autors und werden in jeder anderen Installation abweichen:
 | Substitution | Vorgabe | Bedeutung |
 | :--- | :--- | :--- |
 | `wallbox_max_power` | `11000` | W, Skalenende des Leistungsbalkens auf `ev_page`; steuert Beschriftung *und* Balkenlänge |
-| `ldr_bright_below` / `ldr_dim_above` | `3900` / `3950` | LDR-Rohwerte der beiden Helligkeitsschwellen |
+| `ldr_bright_below` / `ldr_dim_above` | `3900` / `3950` | LDR-Rohwerte der beiden Helligkeitsschwellen. **Hoher Rohwert heisst dunkel.** An 4417 Messwerten geprüft: Tageslicht 176–1900, Abend mit Raumlicht 1880–2060, echte Dunkelheit 4003–4095 — das Paar sitzt im Niemandsland dazwischen |
+| `ldr_dim_delay` | `120` | Sekunden anhaltender Dunkelheit, bevor abgedunkelt wird. Aufgehellt wird ohne Verzögerung |
 | `touch_x_min` … `touch_mirror_y` | siehe HARDWARE.md | Touch-Kalibrierung, sieben Werte |
 
 **Verhalten**
@@ -787,8 +798,12 @@ Abonnent im Haus.
 
 * **Senden:** Ausser den beiden Template-Schaltern (zyklische Auswertung ihres
   Lambdas) und dem Backlight-Light publiziert das Gerät nichts Eigenes. Der
-  LDR-Sensor tastet alle 2 s ab, ist aber `internal` und erzeugt keinen
-  Netzwerkverkehr. Den Hauptanteil stellt `common/diagnostics.yaml`.
+  LDR-Sensor tastet alle 2 s ab und meldet seit V1.10.0 nach aussen, durch
+  `throttle` und `delta` aber höchstens alle 30 s und nur bei 20
+  Zählschritten Änderung — gemessen rund 1350 Recorder-Zeilen am Tag statt
+  3000 ohne den `delta`-Filter. **Die Filter des `copy`-Sensors betreffen nur
+  die Meldungen nach aussen**; die Regelung liest den internen ADC-Sensor und
+  bleibt davon unberührt. Den Hauptanteil stellt `common/diagnostics.yaml`.
 * **Empfangen:** 24 Abonnements bedeuten, dass jede Zustandsänderung dieser
   Entitäten an das Display geschickt wird. Das ist Last auf dem Event-Bus und
   im Netzwerk, nicht in der Datenbank - und sie entsteht auf der HA-Seite

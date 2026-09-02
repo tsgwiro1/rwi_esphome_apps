@@ -2,6 +2,68 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.10.0] - 2026-09-02
+
+### Behoben
+
+* **Die Hintergrundbeleuchtung blieb nach einem Neustart auf dem zuletzt
+  gespeicherten Wert stehen.** Zwei Eigenschaften griffen ineinander:
+  `restore_mode: ALWAYS_ON` erzwingt nur den Zustand «ein», die Helligkeit
+  kommt aus dem gespeicherten Wert; und `on_value_range` feuert nur beim
+  **Eintritt** in einen Bereich und merkt sich den letzten im NVS. Stand der
+  LDR nach dem Neustart im selben Bereich wie vorher, wurde nichts nachgezogen
+  — das Display blieb auf 50 %, obwohl es hell war.
+
+  Die Regelung läuft deshalb neu in einem **5-Sekunden-Intervall**: Sie
+  vergleicht den aktuellen Messwert gegen die Schwellen und stellt die
+  Helligkeit, sobald sie vom Ziel abweicht. Ein Intervall und kein `on_value`,
+  damit die Verzögerung an der Zeit hängt und nicht an der Melderate des
+  Sensors — nachts steht der Wert am Anschlag und der Sensor meldet nichts
+  mehr. `backlight_applied` startet auf −1, damit nach jedem Start in jedem
+  Fall neu gestellt wird.
+
+### Neu
+
+* **Die Regelung ist asymmetrisch: sofort hell, langsam dunkel.** Unter
+  `ldr_bright_below` geht die Beleuchtung ohne Verzögerung auf 100 %. Über
+  `ldr_dim_above` wird erst abgedunkelt, wenn es **`ldr_dim_delay` Sekunden am
+  Stück** dunkel bleibt (Vorgabe 120 s). Eine kurze Aufhellung mitten in der
+  Nacht soll durchschlagen, ihr Ende aber nicht sofort wieder abdunkeln — am
+  2026-09-02 um 06:28 für 50 Sekunden gemessen.
+
+* **«1.0 Room Brightness» ist in Home Assistant sichtbar** (Kategorie
+  *Diagnose*). Der Sensor war `internal` und schrieb nicht einmal eine
+  Logzeile — es gab keinen einzigen Messwert, an dem sich die Schwellen hätten
+  prüfen lassen.
+
+* **Die Diagnose-Entitäten des Geräts sind durchnummeriert.** Das
+  `common`-Paket belegt 2.x bis 6.x, der Block **1.x gehört den geräteeigenen
+  Werten**: neu `1.0 Room Brightness` und `1.1 Letzter Hinweis` — letzterer
+  stand seit V1.5.0 ohne Nummer und fiel damit aus der Sortierung der Liste,
+  die Home Assistant nach dem Namen bildet.
+
+  **Beide Umbenennungen kosten die Historie.** Der Name steckt seit ESPHome
+  2026.8 in der `unique_id`; HA legt je eine neue Entität an, die alte bleibt
+  verwaist zurück und ist von Hand zu löschen.
+
+* **Regelgrösse und Anzeige sind getrennt.** Der ADC-Sensor ist `internal` und
+  trägt nur die Glättung, die die Entscheidung hell/dunkel braucht (Mittel
+  über 10 s, gemeldet alle 2 s). Ein `copy`-Sensor darüber ist die
+  HA-Entität und trägt allein die Filter für die Meldungen nach aussen
+  (`throttle: 30s`, dann `delta: 20`). Beide Pfade sind damit unabhängig
+  einstellbar — die Recorder-Last lässt sich senken, ohne die Regelung zu
+  verlangsamen.
+
+  Gemessen an 35 Stunden Verlauf: `delta: 5` ergab rund **3000** Recorder-
+  Zeilen am Tag, `delta: 20` rund **1350**, dazu greift der `throttle`.
+
+**Die Schwellen 3900 / 3950 bleiben unverändert.** Ein voller Tag-Nacht-Zyklus
+mit 4417 Messwerten hat sie bestätigt: Tageslicht liegt bei 176–1900, ein
+Abend mit eingeschaltetem Raumlicht bei 1880–2060, echte Dunkelheit bei
+4003–4095. Das Schwellenpaar sitzt im Niemandsland dazwischen, das der Wert
+nur beim Durchlaufen der Dämmerung berührt — in 36 Stunden lagen **vier**
+Messwerte zwischen den beiden Schwellen, jeder ein einzelner Abtastwert.
+
 ## [1.9.0] - 2026-08-24
 
 ### Neu
