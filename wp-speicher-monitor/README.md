@@ -1,6 +1,6 @@
 # wp-speicher-monitor - Schichtungsanzeige für den Wärmespeicher
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![Version](https://img.shields.io/badge/version-1.2.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -155,8 +155,13 @@ erscheint nicht in Home Assistant.
 | GPIO33 | Display Reset |
 | GPIO21 / GPIO22 | I²C SDA / SCL (Bus aktiv mit `scan: true`, aktuell ohne Teilnehmer) |
 
-**Display:** ILI9xxx, Modell «TFT 2.4», 240x320, `rotation: 180`,
-`color_palette: 8BIT`, 20 MHz Datenrate.
+**Display:** ILI9341 über `mipi_spi`, 240x320, `rotation: 180`,
+`color_depth: "8"`, `buffer_size: 100%`, 20 MHz Datenrate. Die Drehung liegt im
+MADCTL-Register des Panels, nicht im Zeichencode - das Build-Log meldet dazu
+`Using hardware transform to implement rotation`.
+
+`buffer_size` gehört zwingend dazu: ohne PSRAM nimmt `mipi_spi` sonst einen
+Teilpuffer und ruft das Anzeige-Lambda einmal je Teilstück auf.
 
 **Fühleradressen** (fest in der YAML hinterlegt):
 
@@ -266,3 +271,11 @@ Recorder-Historie, statt sie aus dem Melde-Intervall zu schätzen.
 * **Die Frist des Watchdogs ist fest verdrahtet.** 300 s stehen als
   Substitution `sensor_timeout_ms` in der YAML und sind aus Home Assistant
   heraus nicht änderbar.
+* **Ein fehlgeschlagenes OTA fällt nicht selbsttätig zurück.** Der Safe Mode
+  meldet `Bootloader rollback: not supported` - der Bootloader auf dem Chip
+  wurde ohne App-Rollback gebaut. Das OTA selbst ist davon nicht betroffen, die
+  zweite App-Partition ist vorhanden und nutzbar; von Hand führt der Safe Mode
+  dorthin zurück. Die Meldung `Bootloader supports SRAM1 as IRAM` ist **kein**
+  Mangel, sondern der Beleg, dass der Bootloader neu genug ist.
+* **Das Display läuft mit 20 MHz.** Ob es 40 MHz verträgt, ist nie versucht
+  worden. Bei 165 ms Schleifenzeit wäre das der nächste Hebel.

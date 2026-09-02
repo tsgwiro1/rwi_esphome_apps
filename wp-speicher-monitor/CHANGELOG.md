@@ -2,6 +2,57 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.2.0] - 2026-09-02
+
+### Zwei Abkündigungen von ESPHome 2027.1.0 abgearbeitet
+
+Beides betrifft denselben Anzeigecode und ist deshalb in einem Zug erledigt.
+
+* **`image:` auf das Plattformformat umgestellt.** Bilder sind seit ESPHome
+  2026.8 Plattformen der `image`-Komponente; jeder der vier Einträge trägt jetzt
+  `platform: file`. Am erzeugten Bildmaterial ändert sich nichts.
+* **Display von `ili9xxx` auf `mipi_spi` umgestellt.** `model: ILI9341` ist die
+  Entsprechung zu `model: TFT 2.4`, `color_depth: "8"` die zu
+  `color_palette: 8BIT`. Pins, Datenrate, Drehung und Farbumkehr bleiben, wie
+  sie waren; das Gerät meldet dieselbe Geometrie wie zuvor (240x320,
+  Swap X/Y NO, Mirror X YES, Mirror Y NO, BGR, Invert NO).
+* **`buffer_size: 100%` gesetzt.** Ohne PSRAM wählt `mipi_spi` von sich aus
+  einen Teilpuffer von rund 20 kB und ruft das Anzeige-Lambda **einmal je
+  Teilstück** auf. Die Angabe erzwingt den vollen Puffer von 76 800 Byte, also
+  denselben, den `ili9xxx` hatte - im Log als `Buffer fraction: 1/1`.
+
+### Die Umstellung ist schneller, nicht langsamer
+
+Am `ha-frontroom-info-display` war `mipi_spi` 2026 gemessen 55 % langsamer, und
+der Wechsel wurde dort zurückgenommen. Hier ist es umgekehrt. Gemessen mit
+einem vorübergehenden `debug`/`loop_time`-Sensor, beide Bauten sonst identisch:
+
+| | `ili9xxx` | `mipi_spi` |
+| :--- | ---: | ---: |
+| Schleifenzeit im Mittel | 190.2 ms | **165.0 ms** |
+| Spitze | 191 ms | 171 ms |
+| Freier Speicher | 149.2 kB | 150.5 kB |
+
+Der Grund steht im Build-Log: `Using hardware transform to implement rotation`.
+`mipi_spi` legt die 180°-Drehung ins MADCTL-Register, `ili9xxx` rechnet sie bei
+jedem gezeichneten Bildpunkt in Software um. Bei einem Lambda mit viel Text
+wiegt das schwerer als der bekannte Nachteil von `mipi_spi`, nämlich 48 statt
+63 Bildpunkte je SPI-Übertragung.
+
+Der `ili9xxx`-Wert stammt aus fünf Minuten, der `mipi_spi`-Wert aus **36
+Stunden Dauerbetrieb**: 36 Stundenmittel zwischen 163.1 und 166.6 ms, höchster
+Einzelwert 171 ms, kein Drift. Der Messsensor ist mit dieser Version wieder
+entfernt.
+
+### Geflashter Stand
+
+Per OTA eingespielt am 2026-09-01, danach 37.5 Stunden ohne Neustart gelaufen
+und am 2026-09-02 abgenommen. Das Bild auf dem Schirm wurde am Gerät
+sichtgeprüft: Lage, Farben der Schichtbalken und Sitz des Pfeils unverändert
+richtig. Fühler-Watchdog durchgehend `off`, WLAN 🟢 Exzellent, System Gesundheit
+🟢 Stabil, freier Speicher 150 488 B. «Layer Position» folgte der Schichtung im
+Tagesverlauf von 25 % auf 75 %.
+
 ## [1.1.0] - 2026-08-31
 
 ### Neu: Fühler-Watchdog

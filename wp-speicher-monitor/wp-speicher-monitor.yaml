@@ -14,7 +14,7 @@ esp32:
 
 # HIER überschreiben wir die Grenzen für den starken ESP32
 substitutions:
-  fw_version: "1.1.0"
+  fw_version: "1.2.0"
   # Frist des Fuehler-Watchdogs. Die Fuehler melden durch das gleitende Mittel
   # ueber 10 Werte nur alle ~100 s; 300000 ms lassen also drei Meldungen aus,
   # bevor ein Wert als veraltet gilt. Gilt zugleich als Anlaufzeit nach dem
@@ -329,20 +329,26 @@ globals:
      type: int
      initial_value: '0'
 
+# Bilder sind seit 2026.8 Plattformen der image-Komponente; das alte
+# Blockformat ohne "platform:" faellt mit ESPHome 2027.1.0 weg.
 image:
-  - file: "pic/wlan.png"
+  - platform: file
+    file: "pic/wlan.png"
     id: wlan_icon
     type: GRAYSCALE
     resize: 32x32
-  - file: "pic/hygrometer.png"
+  - platform: file
+    file: "pic/hygrometer.png"
     id: hygro_icon
     type: GRAYSCALE
     resize: 32x32
-  - file: "pic/thermometer.png"
+  - platform: file
+    file: "pic/thermometer.png"
     id: temp_icon
     type: GRAYSCALE
     resize: 32x32
-  - file: "pic/arrow.png"
+  - platform: file
+    file: "pic/arrow.png"
     id: arrow_icon
     type: GRAYSCALE
     resize: 22x22
@@ -378,16 +384,17 @@ output:
     pin: GPIO32
 
 display:
-  - platform: ili9xxx
-    model: TFT 2.4
-    spi_id: bus_spi 
+  - platform: mipi_spi
+    model: ILI9341
+    spi_id: bus_spi
     cs_pin: 14
     dc_pin: 27
     reset_pin: 33
     data_rate: 20MHz
     rotation: 180
     invert_colors: false
-    color_palette: 8BIT
+    color_depth: "8"
+    buffer_size: 100%
 
     lambda: |-
       it.fill(Color::WHITE);
