@@ -50,7 +50,7 @@ preferences:
   flash_write_interval: 10min
 
 substitutions:
-  fw_version: "3.1.0"
+  fw_version: "3.2.0"
   # ESP32
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
@@ -664,24 +664,33 @@ climate:
 
 sensor:
   # --------------------------------------------------------
-  # TEMPERATUR (AM2315 via am2320 Plattform)
+  # KONTROLLTEMPERATUR (AM2315 via am2320 Plattform)
   # --------------------------------------------------------
+  # Bis V3.1.0 war das die angezeigte Temperatur. Seit V3.2.0 kommt die aus
+  # dem SHT31 - Datenblatt gegen Datenblatt: ±0.2 K gegen max. ±1 K, Drift
+  # 0.03 gegen 0.1 K/Jahr. Der AM2315 misst weiter, geht aber in keine
+  # Rechnung mehr ein: er ist über «1.7» die einzige Kreuzprüfung der Station.
+  # Ohne zweiten Fühler fiele eine driftende oder abgehängte Messung gar nicht
+  # auf. Die Feuchte des AM2315 wird bewusst nicht ausgelesen - ihre ±2 %RH
+  # gelten nur bei 25 °C und 5 V, ohne Hysterese und Nichtlinearität.
   - platform: am2320
     temperature:
-      name: "Temperature Shed"
+      name: "1.8 Temperature AM2315"
       state_class: measurement
-      id: temp_shed
+      entity_category: diagnostic
+      id: temp_am
 
   # --------------------------------------------------------
   # LUFTFEUCHTIGKEIT (SHT31)
   # --------------------------------------------------------
   - platform: sht3xd
-    # Seit V3.1.0 speist dieser Kanal den Taupunkt: Temperatur und Feuchte
-    # kommen aus demselben Chip. Eine relative Feuchte gilt nur bei der
-    # Temperatur, bei der sie gemessen wurde - laut Sensirion kostet 1 K
-    # Versatz bei hoher Feuchte bis zu 5 %RH. Die angezeigte
-    # «Temperature Shed» bleibt bewusst beim AM2315; ein Wechsel dort kostet
-    # den Verlauf in Home Assistant und ist eine eigene Aufgabe.
+    # Dieser Kanal ist seit V3.1.0 die Temperatur der Taupunktrechnung und
+    # seit V3.2.0 über die Kopie weiter unten auch die angezeigte
+    # «Temperature Shed». Eine relative Feuchte gilt nur bei der Temperatur,
+    # bei der sie gemessen wurde - laut Sensirion kostet 1 K Versatz bei hoher
+    # Feuchte bis zu 5 %RH. Der Kanal bleibt zusätzlich unter eigenem Namen
+    # sichtbar, weil in Home Assistant drei Verbraucher direkt auf ihn zeigen
+    # (Template-Sensor absolute Feuchte, Makro «aussenluft», Dashboard).
     temperature:
       name: "Temperature SHT31"
       id: temp_sht
@@ -714,6 +723,27 @@ sensor:
               return {};
             }
             return x;
+
+  # --------------------------------------------------------
+  # ANGEZEIGTE TEMPERATUR (Kopie des SHT31-Kanals)
+  # --------------------------------------------------------
+  # Bewusst eine Kopie und kein umbenannter Sensor. Die unique_id der
+  # ESPHome-Integration lautet MAC/Subdevice/Domain/Name - die Quelle kommt
+  # darin nicht vor. Der Name bleibt gleich, damit bleiben Entity-ID, Verlauf
+  # und Langzeitstatistik von «Temperature Shed» erhalten, obwohl der Wert
+  # jetzt aus einem anderen Chip stammt. Im Verlauf entsteht dadurch am
+  # Umstellungstag ein Sprung von rund +0.19 K - dem gemessenen konstanten
+  # Versatz der beiden Fühler.
+  #
+  # Während des SHT-Wartungszyklus liefert die Quelle nichts, die Kopie also
+  # auch nicht: Home Assistant hält dann rund 17 Minuten den letzten Wert,
+  # wie bei Feuchte und Taupunkt schon bisher.
+  - platform: copy
+    source_id: temp_sht
+    name: "Temperature Shed"
+    id: temp_shed
+    state_class: measurement
+    accuracy_decimals: 1
 
   # --------------------------------------------------------
   # LUFTDRUCK (BMP280 mit Elevation Correction)
@@ -825,10 +855,10 @@ sensor:
     update_interval: 60s
     entity_category: diagnostic
     lambda: |-
-      if (std::isnan(id(temp_sht).state) || std::isnan(id(temp_shed).state)) {
+      if (std::isnan(id(temp_sht).state) || std::isnan(id(temp_am).state)) {
         return NAN;
       }
-      return id(temp_sht).state - id(temp_shed).state;
+      return id(temp_sht).state - id(temp_am).state;
 
   # --------------------------------------------------------
   # HEIZUNG TEMPERATUR (NTC Pin 36) - 3-Stufen-Umrechnung

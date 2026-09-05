@@ -2,6 +2,33 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [3.2.0] - 2026-09-05
+
+Die angezeigte Temperatur kommt jetzt ebenfalls aus dem SHT31; der AM2315 wird zum reinen Kontrollfühler.
+
+### Achtung beim Update
+
+**Der Verlauf von `sensor.temperature_shed` bleibt erhalten, bekommt aber einen Sprung.** Die Entität behält Name, Entity-ID und Langzeitstatistik - ab dem 05.09.2026 stammen ihre Werte jedoch vom SHT31 statt vom AM2315, was einen Versatz von rund **+0.19 K** bedeutet. Vergleiche über dieses Datum hinweg sind um diesen Betrag verschoben.
+
+**Eine Entität kommt hinzu:** `1.8 Temperature AM2315` (Diagnose). Es verschwindet keine.
+
+### Geändert
+
+* **`Temperature Shed` ist eine Kopie des SHT31-Kanals** (`platform: copy`) statt der AM2315-Messwert. Bewusst eine Kopie und keine Umbenennung: Die `unique_id` der ESPHome-Integration lautet `MAC/Subdevice/Domain/Name` - die Quelle kommt darin nicht vor. Bleibt der Name, bleiben Entity-ID, Verlauf und Statistik.
+* **Der AM2315 heisst neu `1.8 Temperature AM2315`** und ist als Diagnose eingestuft. Er misst weiter, geht aber in keine Rechnung mehr ein und trägt über `1.7` die einzige Kreuzprüfung der Station. Seine Feuchte wird weiterhin nicht ausgelesen.
+* **`Temperature SHT31` bleibt unverändert bestehen** - obwohl es nun denselben Wert zeigt wie `Temperature Shed`. In Home Assistant zeigen drei Verbraucher direkt darauf, die die Temperatur als Einzelpunkt brauchen und nicht als den Ortsmittelwert, in den `Temperature Shed` dort eingeht.
+
+### Warum
+
+Die Wahl fällt nach Datenblatt, nicht nach Messung: SHT31 ±0.2 °C typisch bei 0.04 °C Wiederholbarkeit und < 0.03 °C/Jahr Drift, AM2315 typisch ±0.1 °C aber **max. ±1 °C**, Wiederholbarkeit ±0.2 °C und 0.1 °C/Jahr Drift. Der AM2315 widerspricht sich dabei selbst - genauer als das eigene Rauschen geht nicht -, weshalb mit den ±1 °C zu planen ist. Gemessen liegen die beiden nur 0.19 K auseinander; welcher recht hat, sagt ohne Referenzfühler niemand.
+
+Zusätzlich wird die Anzeige in sich stimmig: Temperatur, Feuchte und Taupunkt stammen seit dieser Version aus demselben Chip, die Spanne Temperatur minus Taupunkt trägt den Versatz der beiden Fühler nicht mehr.
+
+### Folgen
+
+* **`Heater Source: Ambient` ist kein Rückfall auf den zweiten Fühler mehr.** Beide Quellen hängen am SHT31. Fällt er aus, liefert keine einen gültigen Sollwert und der Failsafe hält die Heizung aus - die sichere Richtung, aber bewusst so entschieden.
+* **Einmal pro Woche steht die angezeigte Temperatur rund 17 Minuten still**, solange der SHT-Wartungszyklus läuft und nachwirkt. Für Feuchte und Taupunkt war das schon vorher so.
+
 ## [3.1.0] - 2026-09-05
 
 Der Taupunkt nimmt Temperatur und Feuchte aus demselben Chip.
