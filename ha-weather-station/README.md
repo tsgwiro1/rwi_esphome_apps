@@ -1,6 +1,6 @@
 # ha-weather-station - Wetterstation mit beheiztem Regensensor
 
-![Version](https://img.shields.io/badge/version-3.2.0-blue)
+![Version](https://img.shields.io/badge/version-3.2.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -180,6 +180,7 @@ Alle Werte sind als Eingabefeld (`mode: box`) ausgeführt, in der Kategorie *Kon
 * **Dew Point Shed (`sensor.dew_point_shed`):** Berechneter Taupunkt (Magnus-Formel).
 * **Regen Shed (`binary_sensor.raining`):** Ist der Sensor jetzt nass? `device_class: moisture`.
 * **Regen kürzlich:** Hat es innerhalb der *Rain Hold Time* geregnet? `device_class: moisture`.
+* **Temperature AM2315:** der zweite Temperaturfühler. Seit V3.2.0 nicht mehr die angezeigte Temperatur, sondern die zweite Meinung - er geht in keine Rechnung ein. Trägt bewusst **keine** Kapitelnummer und keine Diagnose-Einstufung: 1.x ist den Diagnose-Entitäten vorbehalten, dies hier ist ein normaler Messwert.
 * **Temperature SHT31:** derselbe Messwert wie `Temperature Shed`, unter eigenem Namen. Er bleibt bestehen, weil in Home Assistant Verbraucher direkt darauf zeigen, die die Temperatur bewusst als Einzelpunkt und nicht als Ortsmittelwert brauchen. Während eines Wartungszyklus werden keine Werte publiziert.
 * **Weather Station Frequency (`sensor.weather_station_frequency`):** Aktuelle Sensorfrequenz, sekündlich gemessen und über 60 s gemittelt.
 * **Weather Station Sensor Heater (`sensor.weather_station_sensor_heater`):** Isttemperatur der Sensorheizung, über 60 s gemittelt.
@@ -198,7 +199,6 @@ Die Kategorie 1.x ist projektlokal, 2.x bis 6.x kommen aus `common/diagnostics.y
 * **1.4 SHT Wartungszyklus aktiv:** EIN während des gesamten Zyklus (Heiz- **und** Abkühlphase).
 * **1.5 Heizung Störung** (`device_class: problem`): EIN, wenn der NTC-Wert das Plausibilitätsfenster verlässt und die Heizung deshalb zwangsweise aus ist. Im Normalbetrieb kippt der Zustand nie - eignet sich daher direkt als Auslöser für eine Benachrichtigung in Home Assistant.
 * **1.7 Temperature Delta SHT31 - AM2315:** Temperaturunterschied zwischen den beiden Fühlern. Hat die Umstellung in V3.1.0 ausgelöst und geht seither in keine Rechnung mehr ein. Bleibt als Kreuzprüfung - die einzige Redundanz der Station (siehe Abschnitt 8). Erwartetes Band −0.2…+0.6 K.
-* **1.8 Temperature AM2315:** der Kontrollfühler selbst. Seit V3.2.0 nicht mehr die angezeigte Temperatur, sondern nur noch die zweite Meinung.
 
 > Die Nummer **1.6** ist frei: dort lag bis V2.2.1 die Steigung der Flankenerkennung. Die verbleibenden Entitäten rücken bewusst nicht nach - eine Umbenennung ändert die Entity-ID und kostet den Verlauf.
 
@@ -226,7 +226,7 @@ Die Entitäten sind bewusst darauf ausgelegt, wenig zu senden. Die Regelung läu
 | Temperatur, Feuchte, Luftdruck, Taupunkt | 60 s | je 1'440 |
 | Sensor Frequency, Temperature Rainsensor | 60 s (Mittelwert) | je 1'440 |
 | 1.0 Dry Frequency | 300 s | 288 |
-| Temperature SHT31, 1.7 Temperature Delta, 1.8 Temperature AM2315 | 60 s | je 1'440 |
+| Temperature SHT31, Temperature AM2315, 1.7 Temperature Delta | 60 s | je 1'440 |
 | 1.1 Calibration Status, 1.2 Calibration Active | nur bei Änderung | wenige |
 | Regen Shed, Regen kürzlich, 1.4 SHT Wartungszyklus aktiv | nur bei Flankenwechsel | wenige |
 

@@ -50,7 +50,7 @@ preferences:
   flash_write_interval: 10min
 
 substitutions:
-  fw_version: "3.2.0"
+  fw_version: "3.2.1"
   # ESP32
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
@@ -673,11 +673,14 @@ sensor:
   # Ohne zweiten Fühler fiele eine driftende oder abgehängte Messung gar nicht
   # auf. Die Feuchte des AM2315 wird bewusst nicht ausgelesen - ihre ±2 %RH
   # gelten nur bei 25 °C und 5 V, ohne Hysterese und Nichtlinearität.
+  # Bewusst ohne Kapitelnummer und ohne entity_category: die Nummern 1.x sind
+  # den Diagnose-Entitäten vorbehalten, und dies hier ist ein normaler
+  # Messwert - er steht in Home Assistant bei den Sensoren, nicht bei der
+  # Diagnose. Die abgeleitete Grösse «1.7» bleibt dagegen Diagnose.
   - platform: am2320
     temperature:
-      name: "1.8 Temperature AM2315"
+      name: "Temperature AM2315"
       state_class: measurement
-      entity_category: diagnostic
       id: temp_am
 
   # --------------------------------------------------------

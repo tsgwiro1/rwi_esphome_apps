@@ -2,6 +2,24 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [3.2.1] - 2026-09-05
+
+Der Kontrollfühler steht bei den Sensoren, nicht bei der Diagnose.
+
+### Achtung beim Update
+
+**Die Entität `1.8 Temperature AM2315` aus V3.2.0 wird durch `Temperature AM2315` ersetzt.** Sie hat rund 20 Minuten existiert, nichts greift darauf zu; der Verlauf dieser Viertelstunde geht verloren.
+
+### Geändert
+
+* **`1.8 Temperature AM2315` heisst neu `Temperature AM2315`** und ist nicht mehr als `entity_category: diagnostic` eingestuft. Er erscheint damit in Home Assistant bei den Sensoren.
+
+### Warum
+
+Die Kapitelnummern `1.x` sind in diesem Repository den Diagnose-Entitäten vorbehalten. Der AM2315 misst aber weiterhin eine echte Umgebungsgrösse und ist kein Diagnosewert des Geräts über sich selbst - er gehört zu den Messwerten. Die abgeleitete Differenz `1.7 Temperature Delta SHT31 - AM2315` bleibt dagegen Diagnose und behält ihre Nummer.
+
+Keine funktionale Änderung: `1.7` rechnet unverändert gegen denselben Fühler, und in keine andere Rechnung geht er ein.
+
 ## [3.2.0] - 2026-09-05
 
 Die angezeigte Temperatur kommt jetzt ebenfalls aus dem SHT31; der AM2315 wird zum reinen Kontrollfühler.
