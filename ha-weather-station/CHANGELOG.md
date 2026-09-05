@@ -2,6 +2,26 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [3.1.0] - 2026-09-05
+
+Der Taupunkt nimmt Temperatur und Feuchte aus demselben Chip.
+
+### Geändert
+
+* **Die Taupunktrechnung verwendet die Temperatur des SHT31 statt die des AM2315.** Die Feuchte kam schon immer von dort; sie wird damit bei ihrer eigenen Messtemperatur ausgewertet. Keine Entität kommt hinzu oder fällt weg, kein Name und keine Entity-ID ändert sich - `sensor.dew_point_shed` behält seinen Verlauf.
+
+### Warum
+
+`1.7 Temperature Delta SHT31 - AM2315` hat seit V2.2.0 gemessen, was die gemischte Rechnung kostet. Ausgewertet über 169 Stunden (29.08.-05.09.2026, sechs vollständige Tagesgänge mit 10.6 bis 14.4 K Hub):
+
+* Die Differenz zerfällt in einen **konstanten Versatz von +0.19 K** und einen **Nachlauf von rund 3 Minuten**. Der Nachlauf zeigt sich als Abhängigkeit von der Temperaturrampe (−0.046 K je K/h) und machte über die beobachtete Spanne von −2.6 bis +3.7 K/h **0.34 K** aus. Ein Tages- oder Strahlungsterm ist mit −0.04 K nicht nachweisbar.
+* **Der SHT31 ist der trägere der beiden Fühler** - entgegen der Erwartung aus dem mechanischen Aufbau. Seine Metallhülse mit Sinterkappe hat mehr Wärmekapazität als das grössere Kunststoffgehäuse des AM2315.
+* Ein Temperaturversatz geht zu **95 %** in den Taupunkt. Die Umstellung verschiebt ihn im Mittel um **+0.17 K**, äusserstenfalls um **+0.51 K**. Als Feuchtefehler ausgedrückt, den die gemischte Rechnung machte: im Mittel 0.75 %RH, Extremwert 2.0 %RH - bei einer Herstellergenauigkeit von ±2 %RH.
+
+Die Umstellung entfernt den Nachlauf vollständig. **Der konstante Versatz bleibt** und wird nur gegen den Offset des anderen Exemplars getauscht; ohne Referenzfühler ist er nicht auflösbar. Für die Heizungsregelung sind beide Beträge klein - 0.17 K auf 3.0 K Überhöhung.
+
+Die angezeigte `Temperature Shed` kommt weiterhin vom AM2315. Ein Wechsel wäre nach Datenblatt begründbar (±0.2 K gegen max. ±1 K, Drift 0.03 gegen 0.1 K/Jahr), kostet aber den Verlauf der Entität in Home Assistant und ist deshalb ein eigener Schritt. Bestückt bleibt der AM2315 in jedem Fall: `1.7` ist die einzige Kreuzprüfung, mit der eine driftende oder abgehängte Messung überhaupt auffiele.
+
 ## [3.0.0] - 2026-08-31
 
 Die Flankenerkennung aus V2.1.0 ist wieder entfernt.

@@ -1,6 +1,6 @@
 # ha-weather-station - Wetterstation mit beheiztem Regensensor
 
-![Version](https://img.shields.io/badge/version-3.0.0-blue)
+![Version](https://img.shields.io/badge/version-3.1.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -26,7 +26,7 @@ Mit der Verwendung dieses Codes oder Nachbau der Hardware erklärst du dich dami
 
 ## 1. Funktionsprinzip
 
-* **Messwerte:** Temperatur (AM2315), Luftfeuchte (SHT31) und Luftdruck (BMP280) werden über einen gemeinsamen I²C-Bus erfasst. Der Taupunkt wird nach der Magnus-Formel mit den Konstanten des Sensorherstellers aus AM2315-Temperatur und SHT31-Feuchte berechnet.
+* **Messwerte:** Temperatur (AM2315), Luftfeuchte (SHT31) und Luftdruck (BMP280) werden über einen gemeinsamen I²C-Bus erfasst. Der Taupunkt wird nach der Magnus-Formel mit den Konstanten des Sensorherstellers aus Temperatur **und** Feuchte des SHT31 berechnet - beide Grössen aus demselben Chip, damit die relative Feuchte bei ihrer eigenen Messtemperatur ausgewertet wird.
 * **Regenerkennung:** Der Regensensor liefert eine Frequenz, die mit zunehmender Nässe **sinkt**. Erkannt wird nicht gegen einen festen Absolutwert, sondern gegen die gelernte Trockenfrequenz des Sensors. Das Ergebnis wird in zwei Entitäten gemeldet: «ist der Sensor jetzt nass» und «hat es in den letzten Minuten geregnet» (siehe Abschnitt 2).
 * **Beheizter Sensor:** Ein nativer ESPHome-PID-Regler hält den Regensensor über einem einstellbaren Sollwert (wahlweise Taupunkt oder Umgebungstemperatur, plus Überhöhung). So trocknet er nach Regen ab und beschlägt in feuchten Nächten nicht.
 * **Selbstkalibrierung:** Die Trockenfrequenz wird nur unter kontrollierten Bedingungen nachgeführt (siehe Abschnitt 2). Dadurch bleibt die Auslöseschwelle über die Lebensdauer des Sensors stabil.
@@ -174,13 +174,13 @@ Alle Werte sind als Eingabefeld (`mode: box`) ausgeführt, in der Kategorie *Kon
 
 ### Messwerte (Read-Only in HA)
 
-* **Temperature Shed (`sensor.temperature_shed`):** Umgebungstemperatur vom AM2315.
+* **Temperature Shed (`sensor.temperature_shed`):** Umgebungstemperatur vom AM2315. Bleibt bewusst bei diesem Fühler, obwohl der SHT31 der besser spezifizierte wäre: ein Wechsel ändert die Quelle einer langen Reihe und ist samt Migration der Historie ein eigener Schritt.
 * **Humidity Shed (`sensor.humidity_shed`):** Relative Luftfeuchte vom SHT31. Während eines Wartungszyklus werden keine Werte publiziert, HA hält den letzten Stand.
 * **Barometic Pressure Shed (`sensor.barometic_pressure_shed`):** Luftdruck vom BMP280 inkl. Höhenkorrektur.
 * **Dew Point Shed (`sensor.dew_point_shed`):** Berechneter Taupunkt (Magnus-Formel).
 * **Regen Shed (`binary_sensor.raining`):** Ist der Sensor jetzt nass? `device_class: moisture`.
 * **Regen kürzlich:** Hat es innerhalb der *Rain Hold Time* geregnet? `device_class: moisture`.
-* **Temperature SHT31:** Temperatur des SHT31, gemessen im selben Chip wie die Luftfeuchte. Wird nur beobachtet und geht in keine Rechnung ein (siehe Abschnitt 8). Während eines Wartungszyklus werden keine Werte publiziert.
+* **Temperature SHT31:** Temperatur des SHT31, gemessen im selben Chip wie die Luftfeuchte. Seit V3.1.0 die Temperatur der Taupunktrechnung. Während eines Wartungszyklus werden keine Werte publiziert.
 * **Weather Station Frequency (`sensor.weather_station_frequency`):** Aktuelle Sensorfrequenz, sekündlich gemessen und über 60 s gemittelt.
 * **Weather Station Sensor Heater (`sensor.weather_station_sensor_heater`):** Isttemperatur der Sensorheizung, über 60 s gemittelt.
 * **Rain Sensor Heater PID (`climate.ha_weather_station_rain_sensor_heater_pid`):** Der PID-Regler als Climate-Entität, inkl. Soll-/Isttemperatur und Betriebszustand.
@@ -197,7 +197,7 @@ Die Kategorie 1.x ist projektlokal, 2.x bis 6.x kommen aus `common/diagnostics.y
 * **1.3 SHT Wartungsstatus:** `Normalbetrieb`, `Heizt (Wartungszyklus)` oder `Abkühlphase`.
 * **1.4 SHT Wartungszyklus aktiv:** EIN während des gesamten Zyklus (Heiz- **und** Abkühlphase).
 * **1.5 Heizung Störung** (`device_class: problem`): EIN, wenn der NTC-Wert das Plausibilitätsfenster verlässt und die Heizung deshalb zwangsweise aus ist. Im Normalbetrieb kippt der Zustand nie - eignet sich daher direkt als Auslöser für eine Benachrichtigung in Home Assistant.
-* **1.7 Temperature Delta SHT31 - AM2315:** Temperaturunterschied zwischen den beiden Sensoren. Entscheidungsgrundlage für die Taupunktrechnung (siehe Abschnitt 8).
+* **1.7 Temperature Delta SHT31 - AM2315:** Temperaturunterschied zwischen den beiden Sensoren. Hat die Umstellung in V3.1.0 ausgelöst und geht seither in keine Rechnung mehr ein. Bleibt als Kreuzprüfung - die einzige Redundanz der Station (siehe Abschnitt 8).
 
 > Die Nummer **1.6** ist frei: dort lag bis V2.2.1 die Steigung der Flankenerkennung. Die verbleibenden Entitäten rücken bewusst nicht nach - eine Umbenennung ändert die Entity-ID und kostet den Verlauf.
 
@@ -241,7 +241,7 @@ Nicht angefasst ist das gemeinsame `common/diagnostics.yaml` (Kategorien 2.x bis
 
 ## 8. Bekannte Punkte
 
-* **Taupunkt aus zwei Sensoren:** Die Rechnung nimmt die Temperatur vom AM2315 und die Feuchte vom SHT31. Eine relative Feuchte gilt aber nur bei der Temperatur, bei der sie gemessen wurde - laut Sensirion kostet 1 K Versatz bei hoher Feuchte bis zu 5 %RH, im Taupunkt rund 0.9 K. Da der Taupunkt der Sollwert der Sensorheizung ist, wirkt der Fehler bis in die Regelung. Wie gross er tatsächlich ist, misst seit V2.2.0 `1.7 Temperature Delta SHT31 - AM2315`. Fällt die Differenz ins Gewicht, wird der Taupunkt auf Temperatur **und** Feuchte des SHT31 umgestellt.
+* **Der konstante Versatz zwischen den beiden Temperaturfühlern bleibt offen.** Über 169 Stunden gemessen trennt SHT31 und AM2315 ein Versatz von **+0.19 K**, der nicht von der Temperaturrampe abhängt. Er enthält die Kalibrieroffsets zweier Exemplare zweier Hersteller; welcher der beiden recht hat, sagt nur ein Referenzfühler. V3.1.0 hat den *dynamischen* Anteil beseitigt, indem der Taupunkt beide Grössen aus dem SHT31 nimmt - der konstante Anteil ist geblieben. Weil die angezeigte `Temperature Shed` weiterhin vom AM2315 kommt, trägt die Spanne Temperatur minus Taupunkt diesen Versatz weiterhin.
 * **Der Wartungszyklus zählt ab dem Systemstart.** Die Firmware misst den Abstand über die Laufzeit, nicht über die Uhrzeit - jeder Neustart und jedes OTA setzt den Zähler zurück. Wird das Gerät häufiger als alle sieben Tage neu gestartet, läuft der Zyklus nie. Ein Nachziehen bräuchte eine echte Zeitquelle (`time:`), die das Projekt bisher nicht einbindet.
 * **Kondensat auf dem SHT31 wird nicht behandelt.** Der interne Heizer würde Kondensat verdampfen, ist dafür aber nicht spezifiziert, und die Feuchteschwelle von 98 % traf den Fall nicht: In 31 Tagen löste sie genau einen Zyklus aus, und dieser korrigierte nichts - die Feuchte stand davor und nach voller Erholung auf demselben Wert. Wer echten Kondensationsschutz will, müsste auf «Feuchte klebt über mehrere Minuten bei rund 100 %» auslösen statt auf das Überschreiten einer Schwelle.
 * **Schreibweise `Barometic`** statt `Barometric` im Entitätsnamen. Eine Korrektur ändert die Entity-ID in Home Assistant und kostet den bisherigen Verlauf, ist deshalb kein reiner Kosmetik-Fix.

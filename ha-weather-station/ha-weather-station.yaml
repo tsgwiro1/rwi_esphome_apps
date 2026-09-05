@@ -50,7 +50,7 @@ preferences:
   flash_write_interval: 10min
 
 substitutions:
-  fw_version: "3.0.0"
+  fw_version: "3.1.0"
   # ESP32
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
@@ -676,11 +676,12 @@ sensor:
   # LUFTFEUCHTIGKEIT (SHT31)
   # --------------------------------------------------------
   - platform: sht3xd
-    # Die Temperatur des SHT31 wird nur beobachtet, nicht verwendet. Sie
-    # beantwortet die Frage, ob die Taupunktrechnung Feuchte und Temperatur
-    # zweier verschiedener Sensoren mischen darf: eine relative Feuchte gilt
-    # nur bei der Temperatur, bei der sie gemessen wurde. Laut Sensirion
-    # kostet 1 K Versatz bei hoher Feuchte bis zu 5 %RH.
+    # Seit V3.1.0 speist dieser Kanal den Taupunkt: Temperatur und Feuchte
+    # kommen aus demselben Chip. Eine relative Feuchte gilt nur bei der
+    # Temperatur, bei der sie gemessen wurde - laut Sensirion kostet 1 K
+    # Versatz bei hoher Feuchte bis zu 5 %RH. Die angezeigte
+    # «Temperature Shed» bleibt bewusst beim AM2315; ein Wechsel dort kostet
+    # den Verlauf in Home Assistant und ist eine eigene Aufgabe.
     temperature:
       name: "Temperature SHT31"
       id: temp_sht
@@ -727,7 +728,7 @@ sensor:
         - lambda: 'return x + id(baro_corr).state;'
 
   # --------------------------------------------------------
-  # TAUPUNKT (Kombiniert AM2315 Temp & SHT31 Hum)
+  # TAUPUNKT (SHT31: Temperatur und Feuchte aus demselben Chip)
   # --------------------------------------------------------
   - platform: template
     name: "Dew Point Shed"
@@ -741,7 +742,17 @@ sensor:
       // mit unter 0.6 % Unsicherheit). Zuvor standen hier 17.67 und 243.5;
       // der Unterschied betraegt am Betriebspunkt rund 0.01 K, die Konstanten
       // des Sensorherstellers sind aber die passende Referenz.
-      float t  = id(temp_shed).state;
+      // Beide Groessen stammen aus dem SHT31. Bis V3.0.0 stand hier die
+      // AM2315-Temperatur; eine beim SHT31 gemessene Feuchte traf damit auf
+      // eine fremde Bezugstemperatur. Aus 169 Stunden (29.08.-05.09.2026,
+      // sechs Tagesgaenge mit 10.6-14.4 K Hub) gemessen: die beiden Fuehler
+      // trennt ein konstanter Versatz von +0.19 K und ein Nachlauf von rund
+      // 3 min - der SHT31 in seiner Metallhuelse ist der traegere, nicht der
+      // AM2315. Ueber die beobachteten Rampen (-2.6...+3.7 K/h) machte der
+      // Nachlauf 0.34 K aus, im Taupunkt bis 0.51 K. Diese Zeile entfernt ihn
+      // ganz. Der konstante Versatz bleibt - welcher der beiden Fuehler recht
+      // hat, sagt nur ein Referenzfuehler.
+      float t  = id(temp_sht).state;
       float rh = id(hum_shed).state;
       if (std::isnan(t) || std::isnan(rh)) {
         return NAN;
@@ -801,10 +812,11 @@ sensor:
   # Flankenerkennung. Nachrücken würde die Entity-ID und damit den Verlauf
   # dieser Reihe kosten.
   #
-  # Die Messgrösse der Beobachtung: solange diese Differenz klein bleibt, ist
-  # die gemischte Taupunktrechnung unbedenklich. Der Fehler im Taupunkt liegt
-  # bei rund dem 0.9-fachen dieses Werts und geht über den Sollwert direkt in
-  # die Heizungsregelung.
+  # Diese Differenz hat V3.1.0 ausgelöst und geht seither in keine Rechnung
+  # mehr ein: der Taupunkt nimmt beide Grössen aus dem SHT31. Sie bleibt als
+  # Kreuzprüfung stehen - die einzige Redundanz der Station. Verlässt sie das
+  # gemessene Band von -0.2…+0.6 K, driftet oder hängt einer der beiden
+  # Fühler.
   - platform: template
     name: "1.7 Temperature Delta SHT31 - AM2315"
     unit_of_measurement: "K"
