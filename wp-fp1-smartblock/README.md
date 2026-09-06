@@ -1,6 +1,6 @@
 # wp-fp1-smartblock - Intelligente Heizkreispumpensteuerung
 
-![Version](https://img.shields.io/badge/version-1.0.3-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -30,7 +30,7 @@ Um eine Wärmepumpe (WP) im Sommer effizient mit Überschussenergie aus einer Ph
 
 **Das Problem:** Im Winterbetrieb läuft die Heizkreis-Zirkulationspumpe (FP1) permanent durch. Obwohl das Haus im Sommer nicht geheizt wird (da der Heizkreismischer aufgrund der niedrigen Sollwerte schließt), verbraucht die Pumpe unnötig Strom. 
 
-**Die Lösung:** Der `wp-fp1-smartblock` wird in Serie in die Stromversorgung der Pumpe geschaltet. Sobald die von Home Assistant gelieferte Mitteltemperatur einen definierten Schwellwert überschreitet, trennt der ESP32-C6 den Stromkreis der Pumpe und schaltet sie somit effektiv aus.
+**Die Lösung:** Der `wp-fp1-smartblock` wird in Serie in die Stromversorgung der Pumpe geschaltet. Sobald die von Home Assistant gelieferte Mitteltemperatur die in HA gepflegte Heizgrenze überschreitet, trennt der ESP32-C6 den Stromkreis der Pumpe und schaltet sie somit effektiv aus.
 
 ---
 
@@ -67,11 +67,11 @@ Die interne Steuerungslogik prüft jede Sekunde eine strikte Hierarchie ab. Höh
 7. **Priorität 7: Automatikmodus (Normalbetrieb)**
    * *Bedingung:* Alle obigen Prüfungen sind im grünen Bereich.
    * *Logik:*
-     * Wenn `Mitteltemperatur` > `Schwellwert` -> Relais EIN (**Pumpe AUS**).
-     * Wenn `Mitteltemperatur` < (`Schwellwert` - `Hysterese`) -> Relais OFF (**Pumpe EIN**).
-     * Fehlt die `Mitteltemperatur` aus HA länger als 60 Sekunden (z.B. Sensor in HA `unavailable`), fällt das Relais ab (**Pumpe EIN**). Kürzere Aussetzer (z.B. HA-Neustart) werden überbrückt, indem der letzte Zustand gehalten wird – so klackert das Relais nicht unnötig.
+     * Wenn `Mitteltemperatur` > `Heizgrenze` -> Relais EIN (**Pumpe AUS**).
+     * Wenn `Mitteltemperatur` < (`Heizgrenze` - `Hysterese`) -> Relais OFF (**Pumpe EIN**).
+     * Beide Vergleichswerte kommen aus Home Assistant: die `Mitteltemperatur` als Messwert der Wärmepumpe, die `Heizgrenze` als Helfer `input_number.heizgrenze` (seit V1.1.0, vorher ein lokaler Slider). Fehlt einer von beiden länger als 60 Sekunden (z.B. `unavailable` in HA), fällt das Relais ab (**Pumpe EIN**) – mit eigenem Fehlercode je Quelle, damit im Logbuch ablesbar ist, welcher Wert fehlt. Kürzere Aussetzer (z.B. HA-Neustart) werden überbrückt, indem der letzte Zustand gehalten wird – so klackert das Relais nicht unnötig.
 
-Jeder Zustandswechsel wird zusätzlich als Klartext über den Text-Sensor **Status** an Home Assistant gemeldet (sichtbar im Logbuch) und ins ESPHome-Log geschrieben. Die Zeitfenster für die Fehlererkennung sind über die Substitutions `temp_sensor_timeout` und `mittel_temp_timeout` konfigurierbar.
+Jeder Zustandswechsel wird zusätzlich als Klartext über den Text-Sensor **Status** an Home Assistant gemeldet (sichtbar im Logbuch) und ins ESPHome-Log geschrieben. Die Zeitfenster für die Fehlererkennung sind über die Substitutions `temp_sensor_timeout`, `mittel_temp_timeout` und `heizgrenze_timeout` konfigurierbar.
 
 ---
 
@@ -96,6 +96,8 @@ Das Projekt basiert auf dem kompakten Seeed Studio XIAO ESP32-C6 Modul und einem
 
 > ⚠️ **Fehlendes `cs_pin` hat eine Nebenwirkung:** Seit ESPHome 2026.6.0 wählt `mipi_spi` in genau diesem Fall automatisch **MODE3** statt MODE0. Mit der falschen Clock-Polarität bleibt das Display schwarz. Deshalb steht `spi_mode: MODE0` explizit in der YAML — nicht entfernen. Ebenso festgenagelt sind `pad_width: 26` / `pad_height: 1`, weil der verbaute ST7735S 132×162 GRAM hat, das ESPHome-Modell `ST7735` aber von 128×160 ausgeht und die Pads bei `rotation: 180` als Offsets verwendet werden. Details in [CHANGELOG 1.0.3](./CHANGELOG.md).
 
+> ⚠️ **`buffer_size: 1.0` ebenfalls nicht entfernen.** Der XIAO ESP32-C6 hat kein PSRAM; ohne diese Angabe begrenzt ESPHome den Bildpuffer selbsttätig auf rund 20 KB und baut das Bild in vier Bändern zu 40 Zeilen auf. An den Bandgrenzen (Zeilen 40, 80, 120) entsteht bei `rotation: 180` eine haarfeine waagrechte Naht, die wie ein Pixelfehler des Panels aussieht. Der Vollbildpuffer kostet rund 20 KB Heap und beseitigt sie.
+
 **Hinweis zur Antenne:** Beim Boot (`on_boot`, Priorität 800) wird der RF-Switch über `GPIO3` aktiviert und mit `GPIO14` fest die **interne Keramikantenne** ausgewählt. So ist der Funkpfad unabhängig vom Auslieferungszustand des Moduls eindeutig definiert; eine externe U.FL-Antenne wird nicht verwendet.
 
 ---
@@ -109,7 +111,7 @@ Wenn ein kritischer Zustand oder eine manuelle Übersteuerung aktiv ist, wird de
 * `mdi:thermometer-alert` (Rot): Gehäuse zu heiß!
 * `mdi:thermometer-off` (Rot): Gehäusesensor (DS18B20) ausgefallen.
 * `mdi:wifi-off` (Rot): Kein WLAN-Empfang.
-* `mdi:api-off` (Orange): Keine Verbindung zu Home Assistant oder Mitteltemperatur nicht verfügbar (die Unterscheidung ist im HA-Logbuch über den Status-Sensor ersichtlich).
+* `mdi:api-off` (Orange): Ein Wert aus Home Assistant fehlt. Darunter steht seit V1.1.0 ein Kürzel, das die Quelle nennt – `API` (Verbindung länger als eine Stunde weg), `MITTEL` (Mitteltemperatur) oder `GRENZE` (Heizgrenze). Der ausformulierte Text steht zusätzlich im HA-Logbuch über den Status-Sensor.
 * `mdi:power` (Grau): System über Hauptschalter deaktiviert.
 * `mdi:pump-off` (Orange): Manuelle Übersteuerung aktiv (Pumpe dauerhaft aus).
 
@@ -118,9 +120,9 @@ Im regulären Automatikbetrieb ist das Display in 5 klar strukturierte Zonen unt
 
 1. **Zone 1 (Oben):** Aktueller Modus als Icon. `mdi:white-balance-sunny` (Gelb) bei Sommerbetrieb/Pumpe aus oder `mdi:snowflake` (Hellblau) bei Winterbetrieb/Pumpe ein.
 2. **Zone 2 (Mitte-Oben):** Die aktuelle **Mitteltemperatur** (Groß & Leuchtend Hellgrün) – die wichtigste Information des Systems.
-3. **Zone 3 (Mitte-Unten):** Der eingestellte **Schwellwert** (Mittelgroß & Hellgrau, z.B. `S: 15°C`).
+3. **Zone 3 (Mitte-Unten):** Die aus HA gelesene **Heizgrenze** (Mittelgroß & Hellgrau, z.B. `S: 16.0°C`; `S: --.-°C`, solange der Helfer noch nicht geliefert hat).
 4. **Zone 4 (Unten):** Der reale **Pumpenstatus** als Icon (`mdi:pump` für läuft, `mdi:pump-off` für gestoppt).
-5. **Zone 5 (Ganz unten):** Die lokale **Gehäusetemperatur** (Sehr klein & Dunkelgrau, z.B. `G: 34.2°C`), um den unauffälligen Betrieb des Überhitzungsschutzes zu kontrollieren.
+5. **Zone 5 (Ganz unten):** Die lokale **Gehäusetemperatur** (Sehr klein & Grau, z.B. `G: 34.2°C`), um den unauffälligen Betrieb des Überhitzungsschutzes zu kontrollieren. Sie sitzt mit `BOTTOM_CENTER` auf Zeile 158 – eine Grundlinie auf 160 läge unterhalb der letzten sichtbaren Zeile (0–159) und würde die Unterkanten abschneiden.
 
 ### Lokale LDR-Hintergrundbeleuchtung
 Um das Display zu schonen und im Heizungskeller keinen unnötigen Lichtschein zu erzeugen, filtert der ESP die ADC-Werte des LDR über einen asymmetrischen exponentiellen Glättungsfilter (EMA): Steigende Helligkeit wird sehr schnell übernommen (α = 0.99), fallende Helligkeit nur langsam (α = 0.45). So erwacht das Display beim Einschalten des Lichts sofort, flackert aber bei kurzen Schatten nicht.
@@ -138,12 +140,11 @@ Der Smartblock deklariert seine Steuerelemente direkt als native Entitäten, wod
 ### Konfiguration (Bedienbar in HA)
 * **Hauptschalter (`switch.hauptschalter`):** Aktiviert oder deaktiviert das gesamte Automatiksystem (Default: ON).
 * **Übersteuerung (`switch.ubersteuerung`):** Erzwingt das sofortige Ausschalten der Pumpe (Default: OFF).
-* **Schwellwert (`number.schwellwert`):** Slider (0–40°C, Schrittweite 1°C) zur Festlegung der sommerlichen Ausschalttemperatur (Default: 15°C).
-* **Hysterese (`number.hysterese`):** Slider (0–10°C, Schrittweite 1°C) zur Vermeidung von ständigem Schalten um den Gefrierpunkt (Default: 2°C).
+* **Hysterese (`number.hysterese`):** Slider (0–10°C, Schrittweite 1°C) zur Vermeidung von ständigem Schalten um den Gefrierpunkt (Default: 2°C). Bleibt bewusst lokal – sie ist eine Eigenschaft dieses Geräts und wird nirgends sonst gelesen.
 * **Überhitzung Limit (`number.uberhitzung_limit`):** Slider (30–80°C, Schrittweite 1°C) für den lokalen Hardwareschutz (Default: 50°C).
 
 ### Diagnose & Status (Read-Only in HA)
-* **Status (`sensor.status`):** Klartext-Systemzustand für Logbuch & Dashboard (z.B. `Automatik`, `FEHLER: Temperatursensor defekt`, `FEHLER: Mitteltemperatur fehlt`). Wird nur bei Zustandswechseln aktualisiert, sodass im HA-Logbuch genau ein Eintrag pro Ereignis entsteht.
+* **Status (`sensor.status`):** Klartext-Systemzustand für Logbuch & Dashboard (z.B. `Automatik`, `FEHLER: Temperatursensor defekt`, `FEHLER: Mitteltemperatur fehlt`, `FEHLER: Heizgrenze fehlt`). Wird nur bei Zustandswechseln aktualisiert, sodass im HA-Logbuch genau ein Eintrag pro Ereignis entsteht.
 * **Relais (`binary_sensor.relais`):** Zeigt an, ob das Relais angezogen (Stromkreis offen / Pumpe aus) ist.
 * **1.0 Backlight (`binary_sensor.1_0_backlight`):** Gibt Rückmeldung, ob das Display-Backlight gerade aktiv ist.
 * **Gehäuse Temperatur (`sensor.gehause_temperatur`):** Der aktuelle Temperaturwert des DS18B20 auf der Platine, geglättet über einen gleitenden Mittelwert (10 Messungen, Update alle 10 s).
@@ -151,6 +152,7 @@ Der Smartblock deklariert seine Steuerelemente direkt als native Entitäten, wod
 
 ### Erforderliche HA-Entitäten (Importiert)
 * `sensor.wp_mitteltemperatur`: Liefert den berechneten Mittelwert der Außentemperatur an den ESP.
+* `input_number.heizgrenze`: Die Heizgrenze (Default 16°C, Schrittweite 0.5°C). **Sie wird ausschließlich in HA verstellt**, das Gerät hat dafür keinen eigenen Slider mehr. Dieselbe Zahl führt die Wärmepumpe als Luxtronik-Parameter 700 `ID_Einst_Heizgrenze_Temp`. Fehlt der Helfer, greift nach 60 s der Fail-Safe (`FEHLER: Heizgrenze fehlt`, Pumpe ein).
 
 ---
 

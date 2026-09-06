@@ -2,6 +2,27 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert. Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/) und diese Versionierung folgt dem [Semantic Versioning](https://semver.org/lang/de/).
 
+## [1.1.0] - 2026-09-06
+
+### Geändert
+- **Die Heizgrenze kommt jetzt aus Home Assistant.** Der lokale Slider `number.schwellwert` ist entfallen; das Gerät importiert stattdessen `input_number.heizgrenze` – genauso, wie es `sensor.wp_mitteltemperatur` schon importiert. Damit existiert die Zahl im Haus nur noch **einmal** und wird ausschliesslich in HA verstellt. Sie ist dieselbe, die die Wärmepumpe als Luxtronik-Parameter 700 `ID_Einst_Heizgrenze_Temp` führt.
+- **Wirksame Änderung des Verhaltens:** Der Vergleichswert wechselt damit von **27 °C auf 16 °C**. Die 27 °C waren ein Testwert, bei dem der Sommerfall nie eintrat – die Mitteltemperatur erreicht im Hochsommer 20.5 °C, das Relais stand also dauerhaft auf «Heizung steuert». Ab jetzt schaltet der FP1 die Pumpe im Sommer tatsächlich ab.
+- **Display:** Zone 3 zeigt weiterhin den Vergleichswert, nun mit einer Nachkommastelle (`S: 16.0°C`), weil der HA-Helfer in Schritten von 0.5 K verstellt wird. Fehlt der Wert, steht dort `S: --.-°C`.
+- Die **Hysterese bleibt ein lokaler Slider**. Sie ist eine Eigenschaft dieses Geräts, wird nirgends sonst gelesen und gehört daher nicht nach HA.
+
+### Hinzugefügt
+- **Fehlercode 8 «Heizgrenze fehlt»** mit eigenem Watchdog (`heizgrenze_timeout`, Default 60 s), aufgebaut wie die bestehende Überwachung der Mitteltemperatur: Kurze Aussetzer (z.B. HA-Neustart) überbrückt das Gerät durch Halten des letzten Relaiszustands, erst danach greift der Fail-Safe und die Pumpe läuft wieder unter Kontrolle der Heizung. Eigener Code statt Wiederverwendung von 7, damit im Logbuch ablesbar ist, **welcher** der beiden HA-Werte fehlt; auf dem Display teilt er sich das Symbol `mdi:api-off` mit den Codes 3 und 7.
+- **Kürzel unter dem `mdi:api-off`-Symbol.** Die drei Fälle „ein Wert aus HA fehlt" (Codes 3, 7 und 8) zeigten bisher ein identisches Bild und waren am Gerät nicht auseinanderzuhalten – der Grund stand nur im HA-Logbuch. Unter dem Symbol steht jetzt `API`, `MITTEL` oder `GRENZE`. Kostet keine zusätzliche Glyphe, da die vorhandene Schrift `font_medium` verwendet wird.
+
+### Behoben
+- **Waagrechte Störlinie im Pumpensymbol.** Sie sah nach einem Panel-Defekt aus, war aber eine Nahtstelle des Bildaufbaus: Ohne PSRAM begrenzt ESPHome den Bildpuffer automatisch auf rund 20 KB (`mipi_spi/display.py`, Zeilen 327–337). Unser Bild braucht 80 × 160 × 2 = 25 600 Byte, also wählte ESPHome stillschweigend ein Viertel und zeichnete in vier Bändern zu 40 Zeilen (Grenzen bei 40, 80 und 120). Bei `rotation: 180` wird jedes Band einzeln adressiert und vom Controller gespiegelt; ein Zeilenversatz zwischen zwei Bändern fällt dort auf, wo eine kontrastreiche Kante darüberläuft – die Grenze bei Zeile 120 lag mitten im Pumpensymbol (Zeilen 110–150). Mit `buffer_size: 1.0` gibt es nur noch ein Band und damit keine Nahtstelle. Kostet rund 20 KB Heap (gemessen: 280 272 → 259 684 Byte frei), bei einer Warnschwelle von 80 000 unkritisch.
+- **Abgeschnittene Fusszeile.** Die Gehäusetemperatur wurde mit `TextAlign::BASELINE_CENTER` auf `y = 160` gezeichnet. Das Panel hat die Zeilen 0–159, die Grundlinie lag also eine Zeile unterhalb der letzten sichtbaren und schnitt die Unterkanten ab. Jetzt `BOTTOM_CENTER` auf `y = 158`; das Pumpensymbol rückte dafür von 130 auf 126, und die Zeile wurde von RGB 100 auf 150 aufgehellt, weil sie gegen das aufgehellte Schwarz des Panels kaum lesbar war.
+
+### Migration
+- Die Entität `number.infrastructure_wp_fp1_smartblock_schwellwert` verschwindet nach dem Flashen aus Home Assistant. Sie wurde vorher geprüft und war in keiner Automation, keinem Skript, keiner Szene und keinem Dashboard referenziert.
+
+---
+
 ## [1.0.3] - 2026-08-01
 
 ### Behoben

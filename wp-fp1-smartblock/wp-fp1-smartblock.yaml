@@ -1,5 +1,5 @@
 substitutions:
-  fw_version: "1.0.3"
+  fw_version: "1.1.0"
   # ESP32-C6 
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"        # Mindestens 80 KB freien RAM erwarten wir im Normalbetrieb
@@ -7,6 +7,7 @@ substitutions:
   # FEHLERERKENNUNG (Sekunden)
   temp_sensor_timeout: "60"         # Ohne gültigen DS18B20-Wert -> Fehler 6 (Sensor defekt)
   mittel_temp_timeout: "60"         # Ohne Mitteltemperatur aus HA -> Fehler 7 (entprellt HA-Neustarts)
+  heizgrenze_timeout: "60"          # Ohne Heizgrenze aus HA -> Fehler 8 (entprellt HA-Neustarts)
     
 esphome:
   name: wp-fp1-smartblock
@@ -47,6 +48,9 @@ globals:
     type: int
     initial_value: '0'
   - id: mittel_temp_timer
+    type: int
+    initial_value: '0'
+  - id: heizgrenze_timer
     type: int
     initial_value: '0'
 
@@ -130,22 +134,12 @@ switch:
 # ==========================================
 # ESPHOME NUMBERS (Werte in HA einstellbar)
 # ==========================================
+# Der Schwellwert steht seit V1.1.0 nicht mehr hier: Er kommt als
+# input_number.heizgrenze aus HA (siehe Sensor "heizgrenze" weiter unten),
+# damit die Zahl im Haus nur noch einmal existiert. Die Hysterese bleibt
+# lokal - sie ist eine Eigenschaft dieses Geraets und wird nirgends sonst
+# gelesen.
 number:
-  # Schwellwert Slider
-  - platform: template
-    name: "Schwellwert"
-    id: ha_schwellwert
-    device_class: TEMPERATURE
-    entity_category: "config"
-    optimistic: true
-    restore_value: true
-    initial_value: 15
-    min_value: 0
-    max_value: 40
-    step: 1
-    mode: slider
-    unit_of_measurement: "°C"
-
   # Hysterese Slider
   - platform: template
     name: "Hysterese"
@@ -239,6 +233,14 @@ sensor:
     entity_id: sensor.wp_mitteltemperatur
     unit_of_measurement: "°C"
 
+  # Heizgrenze (frueher lokaler Slider "Schwellwert"). Dieselbe Zahl fuehrt
+  # die Waermepumpe als Luxtronik-Parameter 700; verstellt wird sie nur noch
+  # in HA.
+  - platform: homeassistant
+    id: heizgrenze
+    entity_id: input_number.heizgrenze
+    unit_of_measurement: "°C"
+
 # ==========================================
 # STATUS-RÜCKMELDUNGEN (Read-Only in HA)
 # ==========================================
@@ -284,12 +286,17 @@ interval:
           } else {
             id(mittel_temp_timer) = 0;
           }
+          if (isnan(id(heizgrenze).state)) {
+            id(heizgrenze_timer) += 1;
+          } else {
+            id(heizgrenze_timer) = 0;
+          }
 
           // 2. Variablen laden
           float t_innen = id(innen_temp).state; // NaN solange kein gültiger Messwert
           float limit = id(ha_limit).state;
           float t_mittel = id(wp_mitteltemperatur).state; // NaN falls HA noch lädt
-          float schwelle = id(ha_schwellwert).state;
+          float schwelle = id(heizgrenze).state;      // NaN falls HA noch lädt
           float hyst = id(ha_hysterese).state;
           
           bool fail_safe = false;
@@ -329,7 +336,11 @@ interval:
           }
           // Prio 7: Automatik (Normalbetrieb)
           else {
-            if (!isnan(t_mittel)) {
+            // Beide Vergleichswerte kommen aus HA: die Mitteltemperatur als
+            // Messwert der Waermepumpe, die Heizgrenze als input_number.
+            // Fehlt einer davon, wird der letzte Zustand gehalten und erst
+            // nach Ablauf des jeweiligen Timeouts abgeschaltet.
+            if (!isnan(t_mittel) && !isnan(schwelle)) {
               id(current_error) = 0;
               if (t_mittel > schwelle) {
                 target_relay_state = true; // Sommer, Pumpe aus
@@ -338,11 +349,14 @@ interval:
               } else {
                 target_relay_state = id(relais).state; // Hysterese-Band halten
               }
-            } else if (id(mittel_temp_timer) > ${mittel_temp_timeout}) {
+            } else if (isnan(t_mittel) && id(mittel_temp_timer) > ${mittel_temp_timeout}) {
               fail_safe = true;
               id(current_error) = 7; 
+            } else if (isnan(schwelle) && id(heizgrenze_timer) > ${heizgrenze_timeout}) {
+              fail_safe = true;
+              id(current_error) = 8;
             } else {
-              // Mitteltemperatur kurz nicht verfügbar (z.B. HA-Neustart): letzten Zustand halten
+              // Ein HA-Wert kurz nicht verfügbar (z.B. HA-Neustart): letzten Zustand halten
               id(current_error) = 0;
               target_relay_state = id(relais).state;
             }
@@ -374,6 +388,7 @@ interval:
               case 5: status = "Übersteuerung aktiv"; break;
               case 6: status = "FEHLER: Temperatursensor defekt"; break;
               case 7: status = "FEHLER: Mitteltemperatur fehlt"; break;
+              case 8: status = "FEHLER: Heizgrenze fehlt"; break;
               default: status = "Automatik"; break;
             }
             if (id(current_error) == 0 || id(current_error) == 4 || id(current_error) == 5) {
@@ -444,6 +459,13 @@ display:
     # for octal bus or single bus with no cs pin") – falsche Clock-Polaritaet,
     # das Panel bekommt Bitmuell. Modus darum explizit festnageln.
     spi_mode: MODE0
+    # Ohne PSRAM waehlt ESPHome den Puffer automatisch auf hoechstens ~20 KB
+    # (display.py, Zeilen 327-337) und zeichnet das Bild dann in vier Baendern
+    # zu 40 Zeilen: 0-39, 40-79, 80-119, 120-159. An den Bandgrenzen entsteht
+    # eine haarfeine waagrechte Naht - die bei 120 lag mitten im Pumpensymbol.
+    # 80 x 160 x 2 Byte = 25 KB Vollbildpuffer sind hier problemlos leistbar
+    # (rund 280 KB Heap frei), damit gibt es nur noch ein Band und keine Naht.
+    buffer_size: 1.0
     invert_colors: false
     color_order: bgr
     rotation: 180
@@ -460,8 +482,13 @@ display:
         it.printf(center_x, center_y + 55, id(font_large), Color(255, 180, 50), TextAlign::CENTER, "%.1f°C", id(innen_temp).state);
       } else if (err == 2) {
         it.printf(center_x, center_y, id(icons_xlarge), Color(255, 50, 50), TextAlign::CENTER, "\U000F05AA");
-      } else if (err == 3 || err == 7) {
+      } else if (err == 3 || err == 7 || err == 8) {
         it.printf(center_x, center_y, id(icons_xlarge), Color(255, 100, 50), TextAlign::CENTER, "\U000F1257");
+        // Die drei Faelle teilen sich das Symbol "es fehlt etwas aus HA".
+        // Das Kuerzel darunter nennt die Quelle, damit der Grund ohne Blick
+        // ins HA-Logbuch direkt am Geraet ablesbar ist.
+        const char *quelle = (err == 3) ? "API" : (err == 7) ? "MITTEL" : "GRENZE";
+        it.printf(center_x, center_y + 52, id(font_medium), Color(255, 180, 50), TextAlign::CENTER, "%s", quelle);
       } else if (err == 6) {
         it.printf(center_x, center_y, id(icons_xlarge), Color(255, 50, 50), TextAlign::CENTER, "\U000F1531");
       } else if (err == 4) {
@@ -481,16 +508,21 @@ display:
           it.print(center_x, 72, id(font_large), Color(100, 255, 100), TextAlign::CENTER, "--.-°C");
         }
 
-        float schwelle = id(ha_schwellwert).state;
-        it.printf(center_x, 97, id(font_medium), Color(180, 180, 180), TextAlign::CENTER, "S: %.0f°C", schwelle);
+        // Der HA-Helfer hat Schrittweite 0.5 K, daher eine Nachkommastelle.
+        if (id(heizgrenze).has_state()) {
+          it.printf(center_x, 97, id(font_medium), Color(180, 180, 180), TextAlign::CENTER, "S: %.1f°C", id(heizgrenze).state);
+        } else {
+          it.print(center_x, 97, id(font_medium), Color(180, 180, 180), TextAlign::CENTER, "S: --.-°C");
+        }
 
         if (id(relais).state) {
-          it.printf(center_x, 130, id(icons_medium), Color(180, 180, 180), TextAlign::CENTER, "\U000F1B22");
+          it.printf(center_x, 126, id(icons_medium), Color(180, 180, 180), TextAlign::CENTER, "\U000F1B22");
         } else {
-          it.printf(center_x, 130, id(icons_medium), Color(180, 180, 180), TextAlign::CENTER, "\U000F1402");
+          it.printf(center_x, 126, id(icons_medium), Color(180, 180, 180), TextAlign::CENTER, "\U000F1402");
         }
 
         if (id(innen_temp).has_state()) {
-          it.printf(center_x, 160, id(font_tiny), Color(100, 100, 100), TextAlign::BASELINE_CENTER, "G: %.1f°C", id(innen_temp).state);
+          // Zeilen 0..159: BOTTOM_CENTER auf 158 haelt die Unterkante im Bild.
+          it.printf(center_x, 158, id(font_tiny), Color(150, 150, 150), TextAlign::BOTTOM_CENTER, "G: %.1f°C", id(innen_temp).state);
         }
       }
