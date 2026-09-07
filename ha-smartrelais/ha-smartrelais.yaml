@@ -1,5 +1,5 @@
 substitutions:
-  fw_version: "1.0.1"
+  fw_version: "1.1.0"
   # ESP32-C6
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"        # Mindestens 80 KB freien RAM erwarten wir im Normalbetrieb
@@ -9,6 +9,8 @@ substitutions:
   # FEHLERERKENNUNG & SCHUTZ
   temp_sensor_timeout: "60"        # Ohne gültigen DS18B20-Wert -> Fehler 2 (Sensor defekt)
   abkuehl_hysterese: "10"          # Kelvin unter Limit, bis die Übertemperatur-Sperre löst
+  # TAGESMAXIMUM
+  spitzentemp_schritt: "0.2"       # Kelvin; grob genug, um Flash-Schreibvorgänge zu sparen
 
 esphome:
   name: ha-smartrelais
@@ -22,9 +24,8 @@ esphome:
       then:
         - lambda: |-
             id(restzeit_sensor).publish_state(0);
-            id(schaltspiele_sensor).publish_state(id(schaltspiele_heute));
-            id(einschaltzeit_heute_sensor).publish_state(id(tages_einschaltzeit_s) / 3600.0f);
             id(betriebsstunden_sensor).publish_state(id(betriebszeit_total_s) / 3600.0f);
+            // Tageszaehler publiziert on_time_sync, sobald das Datum bekannt ist
     # Antenne setzen
     - priority: 800
       then:
@@ -42,9 +43,10 @@ esp32:
 packages:
   diagnostics: !include common/diagnostics.yaml
 
-# Betriebsstundenzähler schonend ins Flash schreiben
+# Zaehlerstaende ins Flash schreiben. 1 min begrenzt den Verlust bei einem
+# Kaltstart; die NVS-Last bleibt dabei um Groessenordnungen unkritisch.
 preferences:
-  flash_write_interval: 10min
+  flash_write_interval: 1min
 
 # Webserver aktivieren
 web_server:
@@ -66,6 +68,7 @@ globals:
     initial_value: '0'
   - id: tages_einschaltzeit_s
     type: int
+    restore_value: yes
     initial_value: '0'
   - id: betriebszeit_total_s
     type: int
@@ -73,10 +76,17 @@ globals:
     initial_value: '0'
   - id: schaltspiele_heute
     type: int
+    restore_value: yes
     initial_value: '0'
   - id: tagesmax_temp
     type: float
+    restore_value: yes
     initial_value: 'NAN'
+  # Tag, zu dem die gespeicherten Tageszaehler gehoeren (JJJJMMTT)
+  - id: letzter_tag
+    type: int
+    restore_value: yes
+    initial_value: '0'
   - id: current_status
     type: int
     initial_value: '-1'
@@ -105,21 +115,21 @@ captive_portal:
 time:
   - platform: homeassistant
     id: ha_time
+    # Nach dem Boot pruefen, ob die gespeicherten Tageswerte noch zum heutigen
+    # Tag gehoeren; laeuft danach bei jeder Resynchronisation folgenlos mit.
+    on_time_sync:
+      then:
+        - script.execute:
+            id: tageswechsel_pruefen
+            erzwingen: false
     on_time:
       - hours: 0
         minutes: 0
         seconds: 0
         then:
-          - lambda: |-
-              id(tages_einschaltzeit_s) = 0;
-              id(schaltspiele_heute) = 0;
-              id(tagesmax_temp) = id(ssr_temp).state;  // Neustart mit aktuellem Wert (NaN erlaubt)
-              id(einschaltzeit_heute_sensor).publish_state(0);
-              id(schaltspiele_sensor).publish_state(0);
-              if (!isnan(id(tagesmax_temp))) {
-                id(spitzentemp_sensor).publish_state(id(tagesmax_temp));
-              }
-              ESP_LOGI("smartrelais", "Mitternacht: Tageszähler zurückgesetzt");
+          - script.execute:
+              id: tageswechsel_pruefen
+              erzwingen: true
 
 # ==========================================
 # HARDWARE PINS & BUSSES
@@ -232,6 +242,30 @@ binary_sensor:
 # FLANKEN-LOGIK (Schalter, Button & HA)
 # ==========================================
 script:
+  # Einziger Ort, an dem die Tageszähler zurückgesetzt werden: Mitternacht
+  # (erzwingen) und nach dem Boot (nur wenn die gespeicherten Werte von einem
+  # anderen Tag stammen).
+  - id: tageswechsel_pruefen
+    parameters:
+      erzwingen: bool
+    then:
+      - lambda: |-
+          auto t = id(ha_time).now();
+          if (!t.is_valid()) return;
+          int heute = t.year * 10000 + t.month * 100 + t.day_of_month;
+          if (erzwingen || id(letzter_tag) != heute) {
+            id(letzter_tag) = heute;
+            id(tages_einschaltzeit_s) = 0;
+            id(schaltspiele_heute) = 0;
+            id(tagesmax_temp) = NAN;  // füllt die nächste Messung
+            ESP_LOGI("smartrelais", "Tageszähler zurückgesetzt (%d)", heute);
+          }
+          id(einschaltzeit_heute_sensor).publish_state(id(tages_einschaltzeit_s) / 3600.0f);
+          id(schaltspiele_sensor).publish_state(id(schaltspiele_heute));
+          if (!isnan(id(tagesmax_temp))) {
+            id(spitzentemp_sensor).publish_state(id(tagesmax_temp));
+          }
+
   - id: flanke_ausloesen
     mode: single
     then:
@@ -383,10 +417,16 @@ sensor:
     on_value:
       then:
         - lambda: |-
-            // Tagesmaximum mitführen (Vorschlag 6)
-            if (!isnan(x) && (isnan(id(tagesmax_temp)) || x > id(tagesmax_temp))) {
-              id(tagesmax_temp) = x;
-              id(spitzentemp_sensor).publish_state(x);
+            // Tagesmaximum mitführen (Vorschlag 6), abgerundet auf die
+            // Schrittweite aus den Substitutionen. Die Quantisierung hält die Zahl
+            // der Flash-Schreibvorgänge klein; abgerundet, damit der Wert nie eine
+            // Temperatur behauptet, die nicht gemessen wurde.
+            if (!isnan(x)) {
+              float q = floorf(x / ${spitzentemp_schritt}) * ${spitzentemp_schritt};
+              if (isnan(id(tagesmax_temp)) || q > id(tagesmax_temp)) {
+                id(tagesmax_temp) = q;
+                id(spitzentemp_sensor).publish_state(q);
+              }
             }
 
 # ==========================================

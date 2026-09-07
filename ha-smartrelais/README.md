@@ -1,6 +1,6 @@
 # ha-smartrelais - Zeitgesteuertes SSR-Relais mit Schalterbedienung
 
-![Version](https://img.shields.io/badge/version-1.0.1-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -134,16 +134,18 @@ Alle Steuerelemente erscheinen als native Entitäten in den Kategorien **Konfigu
 * **Relais Status (`binary_sensor.relais_status`):** Zeigt an, ob das SSR angezogen ist.
 * **Restzeit (`sensor.restzeit`):** Verbleibende Laufzeit in Minuten (0.1-min-Auflösung).
 * **SSR Temperatur (`sensor.ssr_temperatur`):** Geglätteter Messwert des DS18B20 (gleitender Mittelwert, 10 Messungen, Update alle 10 s).
-* **1.0 Betriebsstunden total (`sensor.betriebsstunden_total`):** Kumulierte Relais-Laufzeit, übersteht Neustarts (Flash-Schreibintervall: 10 min).
+* **1.0 Betriebsstunden total (`sensor.betriebsstunden_total`):** Kumulierte Relais-Laufzeit.
 * **1.1 Einschaltzeit heute (`sensor.einschaltzeit_heute`):** Relais-Laufzeit seit Mitternacht in Stunden.
 * **1.2 Schaltspiele heute (`sensor.schaltspiele_heute`):** Anzahl Einschaltvorgänge seit Mitternacht.
 * **1.3 Temperatur-Warnung (`binary_sensor.temperatur_warnung`):** EIN sobald die Frühwarnschwelle überschritten ist.
-* **1.4 SSR Spitzentemperatur heute (`sensor.ssr_spitzentemperatur_heute`):** Tagesmaximum, Reset um Mitternacht.
+* **1.4 SSR Spitzentemperatur heute (`sensor.ssr_spitzentemperatur_heute`):** Tagesmaximum in 0.2-K-Schritten, abgerundet, Reset um Mitternacht.
+
+Alle vier Zähler überstehen einen Neustart; geschrieben wird höchstens jede Minute, ein Kaltstart kostet also bis zu eine Minute Einschaltzeit. Die drei Tageswerte tragen dabei den Tag mit, zu dem sie gehören — nach einem Neustart an einem anderen Tag werden sie verworfen statt wiederbelebt.
 
 *(Die Nummerierung folgt dem Schema des Diagnose-Pakets, das die Kategorie 1.x für projektlokale Sensoren reserviert. Die Entity-IDs bestehender Installationen bleiben davon unberührt, es ändern sich nur die Anzeigenamen.)*
 
 ### Zeitquelle
-Die Mitternachts-Resets (Tageszähler, Spitzentemperatur, Tageslimit) benötigen `time: homeassistant`. Ohne HA-Verbindung läuft die Logik normal weiter; der Reset erfolgt dann erst nach Wiederverbindung.
+Die Mitternachts-Resets (Tageszähler, Spitzentemperatur, Tageslimit) benötigen `time: homeassistant`. Ohne HA-Verbindung läuft die Logik normal weiter; der Reset erfolgt dann erst nach Wiederverbindung. Aus demselben Grund erscheinen die drei Tageswerte nach einem Neustart erst, wenn die Zeit steht — vorher ist nicht entscheidbar, ob sie noch zum laufenden Tag gehören.
 
 ---
 

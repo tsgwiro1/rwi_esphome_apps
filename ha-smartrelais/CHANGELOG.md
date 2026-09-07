@@ -2,6 +2,23 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.1.0] - 2026-09-07
+
+### Geändert
+* **Tageszähler überleben einen Neustart.** `1.1 Einschaltzeit heute`, `1.2 Schaltspiele heute` und `1.4 SSR Spitzentemperatur heute` sind jetzt persistent (`restore_value`), bisher war es nur `1.0 Betriebsstunden total`. Anlass: Das Gerät hängt an derselben Phase wie der Bewegungsmelder, dessen Taster es stromlos macht — ein solcher Kaltstart mitten am Tag setzte die Tagesbilanz auf null, obwohl der Tag weiterlief.
+* **Neuer Tagesstempel `letzter_tag` (JJJJMMTT), ebenfalls persistent.** Ohne ihn würde ein Neustart die Werte des Vortages wiederbeleben. Ein neuer `on_time_sync`-Trigger vergleicht ihn mit dem aktuellen Datum, sobald die Zeit von Home Assistant steht, und setzt die drei Zähler nur dann zurück. Der Mitternachts-Reset führt den Stempel mit.
+* **Rücksetzen der Tageszähler an genau einer Stelle.** Der Block lag doppelt vor (Mitternacht und Tageswechsel-Erkennung); beide rufen jetzt das Skript `tageswechsel_pruefen` auf, das per Parameter `erzwingen` unterscheidet. Damit steht auch die Berechnung des Tagesstempels nur noch einmal in der Datei. Die Schrittweite des Tagesmaximums liegt als Substitution `spitzentemp_schritt` vor.
+* **`1.4` startet nach einem Reset auf `NAN`** statt auf dem aktuellen Messwert und wird von der nächsten Messung gefüllt (spätestens nach 10 s). Vorher hätte der Startwert quantisiert werden müssen, also an einer zweiten Stelle.
+* **Die Tageszähler werden nicht mehr im `on_boot`-Block publiziert**, sondern erst von `on_time_sync`. Vorher wären für wenige Sekunden Werte sichtbar, deren Tageszugehörigkeit noch gar nicht feststeht.
+
+* **`flash_write_interval` von 10 min auf 1 min.** Damit kostet ein Kaltstart höchstens eine Minute Einschaltzeit statt zehn. Die NVS-Last bleibt unkritisch: rund 180 Schreibvorgänge pro Tag bei einem Zyklus zu 60 min, gegen eine NVS-Partition von 458 kB sind das etwa 14 Löschzyklen je Sektor und Jahr — drei Grössenordnungen unter der üblichen Ausdauer von 100'000 Zyklen.
+* **`1.4 SSR Spitzentemperatur heute` wird in 0.2-K-Schritten geführt** statt in der vollen Auflösung des Fühlers. Das hält die Schreibvorgänge im Leerlauf klein, wo der Tagesgang der Raumtemperatur sonst laufend neue Maxima erzeugt. Abgerundet, damit der Wert nie eine Temperatur behauptet, die nicht gemessen wurde; die Anzeige liegt also bis zu 0.2 K unter dem echten Maximum.
+
+### Bekannte Einschränkung
+* Gespeichert wird im Rhythmus von `flash_write_interval` (1 min). Ein Kaltstart kann also bis zu eine Minute Einschaltzeit kosten. Die laufende Restzeit eines Zyklus (`restzeit_s`) bleibt bewusst flüchtig — ein Stromunterbruch beendet den Zyklus, das Gerät kommt als „Bereit" zurück.
+
+---
+
 ## [1.0.1] - 2026-07-28
 
 Dieser Eintrag holt Änderungen nach, die bereits auf dem Gerät liefen, aber nie ins Repository zurückgeflossen sind. Die Repo-Fassung beschrieb damit einen Stand, den es real nicht mehr gab.
