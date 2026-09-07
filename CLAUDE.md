@@ -82,6 +82,21 @@ Passwörter, API-Keys, SSIDs und OTA-Keys gehören ausschliesslich nach
 `~/esphome/secrets.yaml` und werden per `!secret` referenziert. Niemals im
 Klartext in eine Repo-YAML.
 
+Dasselbe gilt für alles übrige Personenbezogene — private Netzadressen,
+MAC-Adressen, Koordinaten, Seriennummern, Namen, E-Mail-Adressen —, und zwar
+**auch in README, CHANGELOG und Kommentaren**, nicht nur in der YAML. Die
+Begründung steht im globalen `CLAUDE.md`: Git-Historie ist dauerhaft, ein
+späterer Commit entfernt nichts.
+
+**Wie umsetzen:** `.claude/hooks/sensitive-guard.sh` durchsucht vor jedem
+Commit die gestagten Zeilen und blockiert bei Funden; die Muster stehen
+daneben in `scan-sensitive.py`. Quittiert wird nach der Klärung mit `--ok`.
+Erzeugte Dateien — PDF, STEP, Bilder, minifiziertes JSON — kann er nicht
+durchsuchen und meldet sie darum pauschal zum Selberansehen: Bilder tragen
+EXIF mit Ort und Gerät, PDFs den Autornamen. Was die Doku an einem echten Wert
+zeigen müsste, wird anonymisiert — `192.0.2.0/24` für Adressen,
+`AA:BB:CC:DD:EE:FF` für MACs, ein erfundener Ort für Koordinaten.
+
 ## Versionierung
 
 Jede inhaltliche Änderung an einem Projekt hebt dessen Version nach SemVer
