@@ -48,6 +48,34 @@ PLATFORMIO_CORE_DIR="$HOME/.platformio_esphome" ~/.local/bin/esphome upload <ger
 `config` prüft nur das Schema, `compile` auch den C++-Code in den Lambdas.
 Änderungen an Lambdas immer kompilieren.
 
+## Ein Wert, eine Stelle
+
+**Jeder Parameter und jede Konfiguration steht genau einmal in der YAML. Keine
+Doppelung.** Ein Schwellwert, eine Zeitspanne, ein Grenzwert: eine Definition,
+alle anderen Stellen verweisen darauf. Je nach Fall ist die Quelle
+
+* eine Zeile unter `substitutions:`, referenziert als `${name}`,
+* ein `number`, `select` oder `globals`, gelesen mit `id(name).state`,
+* oder der Wert in `common/`, wenn er mehrere Geräte betrifft.
+
+Ein zweites Mal hingeschriebenes Literal ist keine Kopie, sondern ein zweiter
+Wert.
+
+**Warum:** Wer den Sollwert ändert, ändert die Stelle, die er sieht. Die
+andere bleibt stehen und wirkt weiter — das Gerät verhält sich dann nach einem
+Wert, der nirgends mehr als Sollwert geführt wird. Das fällt erst im Betrieb
+auf, und dort am teuersten.
+
+**Wie umsetzen:** `.claude/hooks/yaml-single-source.sh` erzwingt die Prüfung.
+Der Hook blockiert `git commit`, solange eine YAML gestagt und die Prüfung
+nicht quittiert ist, und legt die neuen und geänderten Zeilen vor. Quittiert
+wird mit `.claude/hooks/yaml-single-source.sh --ok` — **erst nach der
+Prüfung**; eine Quittung ohne Prüfung belügt den nächsten Chat. Die Marke
+hängt am Inhalt des Index und verfällt, sobald danach noch etwas gestagt wird.
+
+Grenzfälle benennen statt stillschweigend durchwinken. Pixelkoordinaten,
+Farbwerte und Pin-Nummern sind oft zufällig gleich und keine Doppelung.
+
 ## Geheimnisse
 
 Passwörter, API-Keys, SSIDs und OTA-Keys gehören ausschliesslich nach
