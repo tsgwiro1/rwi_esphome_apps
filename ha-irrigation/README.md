@@ -353,15 +353,15 @@ wifi_password: "DEIN_PASSWORT"
 ```
 
 ### 3. Flashen
-Kopiere die Datei `ha_irrigation.yaml` in deinen ESPHome-Konfigurationsordner und flashe den ESP:
+Kopiere die Datei `ha-irrigation.yaml` in deinen ESPHome-Konfigurationsordner und flashe den ESP:
 ```bash
-esphome run ha_irrigation.yaml
+esphome run ha-irrigation.yaml
 ```
 
 ### 4. Integration und Abschluss
 1. **In HA integrieren:** Das Gerät wird nach dem Neustart automatisch in Home Assistant erkannt → Auf “Konfigurieren” (Configure) klicken.
 2. **Dashboard einrichten:** Den Lovelace-Code (siehe oben) als manuelle Karte hinzufügen.
-3. **Standort-Check:** Die `sun`-Komponente berechnet den Sonnenaufgang für Koordinaten in der Schweiz (47.5505°N, 9.3866°E). Falls du in einer anderen Region wohnst, passe `latitude` und `longitude` im Code an.
+3. **Standort-Check:** Die `sun`-Komponente braucht die Koordinaten deines Standorts, um den Sonnenaufgang zu berechnen. Sie stehen als `home_latitude` und `home_longitude` in `secrets.yaml`.
 
 ---
 
