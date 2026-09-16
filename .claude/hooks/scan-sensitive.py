@@ -32,7 +32,7 @@ MUSTER = [
     ("Geodaten",
      re.compile(r'^\s*[-#/ ]*\b(latitude|longitude|lat|lon|lng|gps'
                 r'|koordinat\w*)\s*[:=]\s*["\']?-?\d', re.I)),
-    # Ausgeschriebene Position: 47.5505°N, 9.3866°E. Verlangt die
+    # Ausgeschriebene Position: <Grad>.<Nachkomma>°N. Verlangt die
     # Himmelsrichtung - reine Zahlenpaare sind in CAD-Dateien Massangaben.
     ("ausgeschriebene Koordinate",
      re.compile(r'\b\d{1,3}\.\d{3,}\s*(?:°\s*[NSEWOnsewo]|[NSEWO])\b')),
