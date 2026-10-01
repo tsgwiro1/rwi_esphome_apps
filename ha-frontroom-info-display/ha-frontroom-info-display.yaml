@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.10.0"
+  fw_version: "1.10.1"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -21,6 +21,9 @@ substitutions:
   evcc_url: "http://homeassistant.local:7070"
   evcc_loadpoint: "1"
   evcc_vehicle: "db:1"
+  evcc_mode_smart: "SMART"        # Ueberschussladen, wie select.evcc_mode es nach
+                                  # to_upper meldet. Seit evcc 0.316 "smart",
+                                  # vorher "pv". Das Modusfeld heisst weiter PV.
 
 # ---- Entitaeten: PV-Anlage und Hausbatterie ----------------
   ent_pv_power: sensor.input_power
@@ -161,14 +164,14 @@ script:
           on_error:
             - script.execute: hint_unreachable
 
-  # Logik: Modus auf PV setzen
+  # Logik: Modus auf Ueberschussladen setzen (evcc "smart", Taste "PV")
   - id: set_mode_pv
     then:
       - http_request.send:
           method: POST
-          url: ${evcc_url}/api/loadpoints/${evcc_loadpoint}/mode/pv
+          url: ${evcc_url}/api/loadpoints/${evcc_loadpoint}/mode/smart
           on_response:
-            - lambda: 'id(evcc_mode_answer)->execute(response->status_code, "PV");'
+            - lambda: 'id(evcc_mode_answer)->execute(response->status_code, "${evcc_mode_smart}");'
           on_error:
             - script.execute: hint_unreachable
 
@@ -1768,7 +1771,7 @@ display:
             } else {
               it.rectangle(60,180,56,56,GRAY); it.printf(88,196,id(lato20), GRAY, BLACK, TextAlign::TOP_CENTER, "OFF");
             }
-            if (id(wallbox_mode).state == "PV") {
+            if (id(wallbox_mode).state == "${evcc_mode_smart}") {
               it.filled_rectangle(132,180,56,56,GRAY); it.printf(160,196,id(lato20), WHITE, BLACK, TextAlign::TOP_CENTER, "PV");
             } else {
               it.rectangle(132,180,56,56,GRAY); it.printf(160,196,id(lato20), GRAY, BLACK, TextAlign::TOP_CENTER, "PV");

@@ -2,6 +2,24 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.10.1] - 2026-10-01
+
+### Behoben
+
+* **Das Gerät versteht den Modusnamen von evcc 0.316.** evcc heisst den Modus
+  für Überschussladen seit 0.316 `smart` statt `pv` und meldet nur noch `off`,
+  `smart` und `now`. Das Gerät verglich die Spiegelung aus `select.evcc_mode`
+  weiter mit `PV`. Zwei Folgen: Auf der Wallbox-Seite war im Überschussmodus
+  keines der drei Modusfelder gefüllt. Und nach jedem Wechsel auf
+  Überschussladen — über das Modusfeld, die NOW-Taste im Rückweg oder das
+  Ausschalten von «EVCC Schnellladen» — erschien nach zehn Sekunden «Mode not
+  confirmed», obwohl evcc umgeschaltet hatte.
+
+  Der Vergleichswert steht jetzt einmal als Substitution `evcc_mode_smart`,
+  das Anzeigefeld und die Bestätigungsprüfung verweisen darauf. Das Skript
+  `set_mode_pv` schickt `POST …/mode/smart`; den alten Pfad nimmt evcc zwar
+  noch an, übersetzt ihn aber bloss. Das Modusfeld heisst weiter **PV**.
+
 ## [1.10.0] - 2026-09-02
 
 ### Behoben

@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.10.0-blue)
+![Version](https://img.shields.io/badge/version-1.10.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -65,7 +65,8 @@ verzichten.
 * **Drei Wege zum Lademodus.** Hardware-Taster «Schnellladen» mit Status-LED,
   Template-Schalter in Home Assistant und die drei Flächen auf `ev_page` lösen
   dieselben Skripte aus. Die Taster und der HA-Schalter kennen nur `NOW` und
-  `PV`, die Touchflächen zusätzlich `OFF` — und sie sind nur wirksam, wenn ein
+  `PV` (Überschussladen, in evcc seit 0.316 `smart`), die Touchflächen
+  zusätzlich `OFF` — und sie sind nur wirksam, wenn ein
   Fahrzeug angesteckt ist. Der **Ladeplan** hat zwei Wege: Hardware-Taster
   «Ladeplan» und Template-Schalter. Beide öffnen die Eingabeseite nur, wenn
   evcc ein angestecktes Fahrzeug meldet; **löschen** lässt sich ein Plan immer.
@@ -195,7 +196,7 @@ aktive Modus ist gefüllt dargestellt:
 | Fläche (x / y) | Aktion |
 | :--- | :--- |
 | `60…116` / `180…236` | Modus `OFF` |
-| `132…188` / `180…236` | Modus `PV` |
+| `132…188` / `180…236` | Modus `PV` (evcc `smart`) |
 | `204…260` / `180…236` | Modus `NOW` |
 
 Ein aktiver Ladeplan wird links unten mit Uhrzeit und Ziel-SoC eingeblendet. Ist
@@ -328,7 +329,7 @@ Skripte decken die Funktionen ab:
 | Skript | Aufruf |
 | :--- | :--- |
 | `set_mode_now` | `POST /api/loadpoints/${evcc_loadpoint}/mode/now` |
-| `set_mode_pv` | `POST /api/loadpoints/${evcc_loadpoint}/mode/pv` |
+| `set_mode_pv` | `POST /api/loadpoints/${evcc_loadpoint}/mode/smart` |
 | `set_mode_off` | `POST /api/loadpoints/${evcc_loadpoint}/mode/off` |
 | `send_plan_request` | `POST /api/vehicles/${evcc_vehicle}/plan/soc/<soc>/<zeitstempel>` |
 | `delete_plan_request` | `DELETE /api/vehicles/${evcc_vehicle}/plan/soc` |
@@ -396,7 +397,7 @@ Erwartung stumm, sonst erscheint `Mode not confirmed`, `Plan sent, not active`
 oder `Plan still active`. Der mittlere Fall tritt auf, wenn evcc einen Plan
 annimmt, ihn aber nicht wirksam macht, weil der Ziel-SoC schon erreicht ist.
 
-Jede Antwort steht zusätzlich im Log (`Modus PV: Antwort 200`).
+Jede Antwort steht zusätzlich im Log (`Modus SMART: Antwort 200`).
 
 **`timeout: 2s`:** `http_request` ist synchron, `perform()` blockiert die
 Schleife bis zur Antwort — mit der Vorgabe von 4.5 s fror ein nicht
@@ -414,7 +415,7 @@ Bedeutung, da ohnehin nur `http://` aufgerufen wird.
 | :--- | :--- | :--- |
 | **Display Backlight** | `light` (monochromatic) | Helligkeit der Hintergrundbeleuchtung. `restore_mode: ALWAYS_ON` erzwingt nur den Zustand «ein» — **die Helligkeit kommt aus dem gespeicherten Wert**, die LDR-Regelung zieht sie nach dem Start nach |
 | **1.0 Room Brightness** | `sensor` (`copy`, Kategorie *Diagnose*) | LDR-Rohwert. Die einzige Möglichkeit, die Schwellen der Helligkeitsregelung zu prüfen. Höchstens alle 30 s und nur bei 20 Zählschritten Änderung |
-| **EVCC Schnellladen** | `switch` (template) | EIN spiegelt evcc-Modus `NOW`; Einschalten setzt `NOW`, Ausschalten `PV` |
+| **EVCC Schnellladen** | `switch` (template) | EIN spiegelt evcc-Modus `NOW`; Einschalten setzt `NOW`, Ausschalten `smart` |
 | **EVCC Planladung** | `switch` (template) | EIN spiegelt einen aktiven Ladeplan; Einschalten öffnet die Eingabeseite am Display — nur bei angestecktem Fahrzeug —, Ausschalten löscht den Plan |
 | **Ladeplan Ziel-SoC** | `number` (template, 0…100 %, Schritt 5) | Der Ziel-SoC für das **nächste** Senden. Reine Vorbelegung — das Setzen schickt nichts an evcc |
 | **Ladeplan Uhrzeit** | `datetime` (template, `type: time`) | Die Uhrzeit für das **nächste** Senden, ebenfalls ohne Wirkung auf einen laufenden Plan |
@@ -567,6 +568,7 @@ verdrahtet.
 | `evcc_url` | `http://homeassistant.local:7070` | Basisadresse der evcc-REST-Schnittstelle |
 | `evcc_loadpoint` | `1` | Nummer des Ladepunkts |
 | `evcc_vehicle` | `db:1` | Fahrzeug-ID für den SoC-Ladeplan |
+| `evcc_mode_smart` | `SMART` | evcc-Modus für Überschussladen, wie `select.evcc_mode` ihn meldet (in Grossbuchstaben). Bis evcc 0.315 hiess er `PV` |
 
 **Entitäten aus Home Assistant** — die Vorgaben sind die Namen der Anlage des
 Autors und werden in jeder anderen Installation abweichen:
