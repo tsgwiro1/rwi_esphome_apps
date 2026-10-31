@@ -2,6 +2,17 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.0.1] - 2026-10-31
+
+### OTA verschlüsselt mit dem API-Schlüssel
+
+* **OTA über `common/ota.yaml`** (common 1.5.0). Der Upload ist mit dem
+  API-Schlüssel des Geräts verschlüsselt; das OTA-Passwort und das Secret
+  `flowmeter_ota_key` entfallen. ESPHome warnte seit 2026.9 vor `ota: password`.
+* Umgestellt in zwei Uploads, wie in `common/README.md` unter
+  «OTA-Verschlüsselung» beschrieben. Flashen setzt jetzt ESPHome ab 2026.10
+  voraus.
+
 ## [1.0.0] - 2026-07-30
 
 ### Erstrelease

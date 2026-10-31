@@ -1,6 +1,6 @@
 # ha-flowmeter - Impulszähler für Wasserdurchfluss und Gesamtmenge
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -124,9 +124,8 @@ vollständig autonom.
 
 ## 4. Secrets & Inbetriebnahme
 
-**Benötigte Secrets:** `flowmeter_api_key`, `flowmeter_ota_key`,
-`flowmeter_fallback_ap_ssid`, `flowmeter_fallback_ap_password` sowie
-`wifi_ssid` / `wifi_password`. Das eingebundene Diagnose-Paket benötigt
+**Benötigte Secrets:** `flowmeter_api_key`, `flowmeter_fallback_ap_ssid`,
+`flowmeter_fallback_ap_password` sowie `wifi_ssid` / `wifi_password`. Das eingebundene Diagnose-Paket benötigt
 zusätzlich `mac_bssid_ug`, `mac_bssid_eg` und `mac_bssid_dg`.
 
 **Kalibrierung:** Nach dem ersten Flash steht der Faktor auf 1.0 imp/L. Der
