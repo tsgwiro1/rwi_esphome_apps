@@ -50,7 +50,7 @@ preferences:
   flash_write_interval: 10min
 
 substitutions:
-  fw_version: "3.2.1"
+  fw_version: "3.2.2"
   # ESP32
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
@@ -81,6 +81,7 @@ substitutions:
 
 packages:
   my_diagnostics: !include common/diagnostics.yaml
+  my_ota: !include common/ota.yaml
 
 # Enable logging
 logger:
@@ -100,10 +101,6 @@ web_server:
 api:
   encryption:
     key: !secret weatherstation_api_key
-
-ota:
-  platform: esphome
-  password: !secret weatherstation_ota_key
 
 wifi:
   ssid: !secret wifi_ssid

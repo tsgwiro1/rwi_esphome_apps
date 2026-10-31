@@ -1,6 +1,6 @@
 # ha-weather-station - Wetterstation mit beheiztem Regensensor
 
-![Version](https://img.shields.io/badge/version-3.2.1-blue)
+![Version](https://img.shields.io/badge/version-3.2.2-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -208,7 +208,7 @@ Die Kategorie 1.x ist projektlokal, 2.x bis 6.x kommen aus `common/diagnostics.y
 
 Das Gerät verfügt über einen integrierten **Webserver** auf Port 80. Falls Home Assistant einmal ausfallen sollte, lassen sich Messwerte, PID-Regler und alle Konfigurationsfelder über die IP-Adresse des Geräts in jedem Webbrowser einsehen und bedienen.
 
-Benötigte Secrets: `weatherstation_api_key`, `weatherstation_ota_key`, `weatherstation_fallback_ap_ssid`, `weatherstation_fallback_ap_password` sowie `wifi_ssid`/`wifi_password`. Das eingebundene Diagnose-Paket benötigt zusätzlich `mac_bssid_ug`, `mac_bssid_eg` und `mac_bssid_dg`.
+Benötigte Secrets: `weatherstation_api_key`, `weatherstation_fallback_ap_ssid`, `weatherstation_fallback_ap_password` sowie `wifi_ssid`/`wifi_password`. Das eingebundene Diagnose-Paket benötigt zusätzlich `mac_bssid_ug`, `mac_bssid_eg` und `mac_bssid_dg`.
 
 Nach dem ersten Start sollte die Trockenfrequenz beobachtet werden: `1.0 Weather Station Dry Frequency` startet beim Vorgabewert von 32 000 Hz und läuft erst dann auf den tatsächlichen Wert des verbauten Sensors ein, wenn die Kalibrierbedingungen erfüllt sind. Weicht der reale Trockenwert stark von 32 000 Hz ab, blockiert *Range for Calibration* das Einlaufen - in dem Fall den Bereich einmalig aufweiten, bis der Wert passt, und danach wieder eng stellen.
 
