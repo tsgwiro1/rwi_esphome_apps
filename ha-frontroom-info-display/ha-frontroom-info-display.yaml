@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.10.1"
+  fw_version: "1.10.2"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -104,6 +104,7 @@ esp32:
 
 packages:
   my_diagnostics: !include common/diagnostics.yaml
+  my_ota: !include common/ota.yaml
 
 # Enable logging
 logger:
@@ -119,10 +120,6 @@ logger:
 api:
   encryption:
     key: !secret frontroom_api_key
-
-ota:
-  platform: esphome
-  password: !secret frontroom_ota_key
 
 wifi:
   ssid: !secret wifi_ssid

@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.10.1-blue)
+![Version](https://img.shields.io/badge/version-1.10.2-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -623,10 +623,10 @@ Autors und werden in jeder anderen Installation abweichen:
 | `diag_min_heap_ok` / `_critical` | `80000` / `40000` | Schwellen des Diagnose-Pakets |
 
 > **Zugangsdaten gehören nicht in den Substitutionsblock**, sondern in
-> `~/esphome/secrets.yaml`: API-Key, OTA-Passwort und die Zugangsdaten des
-> Fallback-AP. Welche Schlüssel gebraucht werden, steht unter «Benötigte
-> Secrets». Substituieren liessen sich ihre Namen ohnehin nicht — ESPHome löst
-> `!secret` beim Laden auf, der Substitutionsdurchlauf kommt erst danach.
+> `~/esphome/secrets.yaml`: API-Key und die Zugangsdaten des Fallback-AP.
+> Welche Schlüssel gebraucht werden, steht unter «Benötigte Secrets».
+> Substituieren liessen sich ihre Namen ohnehin nicht — ESPHome löst `!secret`
+> beim Laden auf, der Substitutionsdurchlauf kommt erst danach.
 
 ### Assets
 
@@ -730,7 +730,7 @@ Glas. Der einzige verbliebene Hebel für mehr Tempo wäre ein verkleinertes
 Schmutzrechteck (`auto_clear_enabled: false` und selektives Neuzeichnen) — die
 Animationsfläche sind 6.4 % des Schirms.
 
-**Benötigte Secrets:** `frontroom_api_key`, `frontroom_ota_key`,
+**Benötigte Secrets:** `frontroom_api_key`,
 `frontroom_fallback_ap_ssid`, `frontroom_fallback_ap_password` sowie
 `wifi_ssid` / `wifi_password`. Das eingebundene Diagnose-Paket benötigt
 zusätzlich `mac_bssid_ug`, `mac_bssid_eg` und `mac_bssid_dg`.
@@ -756,7 +756,7 @@ zweites Exemplar erfahrungsgemäss hängen bleibt.
    [HARDWARE.md](HARDWARE.md), Abschnitte 2 bis 5.
 
 2. **Secrets anlegen** in `~/esphome/secrets.yaml`: `frontroom_api_key`,
-   `frontroom_ota_key`, `frontroom_fallback_ap_ssid`,
+   `frontroom_fallback_ap_ssid`,
    `frontroom_fallback_ap_password`, `wifi_ssid`, `wifi_password` sowie für das
    Diagnose-Paket `mac_bssid_ug`, `mac_bssid_eg` und `mac_bssid_dg`.
 
