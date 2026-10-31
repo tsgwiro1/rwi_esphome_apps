@@ -322,17 +322,67 @@ Entität in der Recorder-Historie, statt sie aus dem Melde-Intervall zu schätze
 ## 6. Bekannte Punkte
 
 * **Der Durchfluss ist der grösste Unsicherheitsfaktor.** Ein Handeingabewert
-  geht linear in jede ausgewiesene Wattstunde ein. Ein Volumenstromsensor im
-  Solarkreis wäre der eine Umbau, der aus dem Indikator ein Messgerät machen
-  würde.
-* **Werte vor dem 2026-09-02 sind um rund 14 % zu niedrig.** Bis dahin standen
-  Dichte und Wärmekapazität auf 960 kg/m³ und 3.40 kJ/kg°K - beides der untere
-  Anschlag des jeweiligen Eingabefelds und kein Betriebspunkt von TYFOCOR LS
-  (960 kg/m³ erreicht das Medium erst bei etwa 120 °C, 3.40 kJ/kg°K erst bei
-  −20 °C). Das Produkt lag damit bei 3264 statt 3790 kJ/m³·K. Wer ältere
-  Tagesbilanzen mit neueren vergleicht, muss die alten mit **1.16**
-  multiplizieren. Die Korrektur brauchte keinen Flash, die Werte liegen im
-  NVS.
+  geht linear in jede ausgewiesene Wattstunde ein. Ein Volumenstromgeber ist
+  vorhanden, aber rein mechanisch: Ablesung am Schauglas der Solarstation, nur
+  bei laufender Pumpe, an keinem Bus. Er kann den eingestellten Wert deshalb
+  nicht selbst nachführen.
+
+  Am 2026-10-31 abgelesen und von 8.0 auf **4.2 l/min** gesetzt. Die Pumpe hat
+  eine feste Drehzahl, ein über den Wartungsschalter erzwungener Lauf zeigt
+  also den Betriebsdurchfluss.
+
+  Die Ablesung wurde am selben Tag ein zweites Mal am Glas überprüft und
+  bestätigt; massgebend ist die Oberkante des Schwebekörpers. Damit ist der
+  Durchfluss geklärt - die Restlücke der Energiebilanz unten liegt woanders.
+* **Alle bisher ausgewiesenen Werte sind zu hoch.** Das ersetzt die frühere
+  Aussage, ältere Bilanzen seien um 14 % zu niedrig - die rechnete nur die
+  Stoffwerte und liess den Durchfluss aussen vor.
+
+  Bis zum 2026-09-02 standen Dichte und Wärmekapazität auf 960 kg/m³ und
+  3.40 kJ/kg°K - beides der untere Anschlag des jeweiligen Eingabefelds und
+  kein Betriebspunkt von TYFOCOR LS (960 kg/m³ erreicht das Medium erst bei
+  etwa 120 °C, 3.40 kJ/kg°K erst bei −20 °C). Das Produkt lag bei 3264 statt
+  3790 kJ/m³·K. Der Durchfluss stand bis zum 2026-10-31 auf 8.0 statt 4.2
+  l/min. Zusammen ergibt das:
+
+  | Zeitraum | gemeldet / wahr | Korrekturfaktor |
+  | :--- | ---: | ---: |
+  | bis 2026-09-02 | 1.64 | × 0.61 |
+  | 2026-09-02 bis 2026-10-31 | 1.90 | × 0.53 |
+
+  Der 2026-10-31 ist selbst ein Mischtag, bis zur Umstellung am Nachmittag
+  zählte das Gerät mit 8.0. Keine der Korrekturen brauchte einen Flash, die
+  Werte liegen im NVS.
+* **Die Gegenprobe zum Durchfluss ist die Energiebilanz gegen die
+  Globalstrahlung.** Die MeteoSwiss-Integration in Home Assistant liefert
+  Global- und Diffusstrahlung auf die Horizontale; auf die Dachfläche von 40°
+  Süd transponiert und über den Tag integriert ergibt das die eingestrahlte
+  Energie, der die Tagesbilanz gegenübersteht.
+
+  Am 2026-10-31 waren es 1228 Wh/m² horizontal, auf 40° Süd 1730 Wh/m², auf
+  rund 4.2 m² Apertur also 7.3 kWh. Das Gerät meldete 10.04 kWh - **138 % der
+  gesamten Einstrahlung**, vor jedem Verlust und damit unmöglich. Nach der
+  Kollektorkennlinie (η₀ 0.78, a₁ 3.5, a₂ 0.015) wären 3.8 bis 4.0 kWh zu
+  erwarten gewesen. Apertur und Kennlinie sind geschätzt, die Rechnung ist
+  also eine Plausibilitätsprüfung und keine Messung - als solche hat sie den
+  Durchflussfehler aber zweifelsfrei belegt.
+
+  **Eine Restlücke bleibt offen.** Mit den bestätigten 4.2 l/min kommt der
+  2026-10-31 auf 5.3 kWh, also 73 % der Einstrahlung, wo nach der Kennlinie
+  45 bis 55 % zu erwarten wären. 73 % liegen knapp unter dem optischen
+  Wirkungsgrad und setzen damit nahezu verlustfreie Kollektoren voraus. Der
+  Durchfluss scheidet als Ursache aus. Kandidaten, grob nach Gewicht:
+
+  * Die Apertur ist aus einem Foto über die Ziegelteilung geschätzt; 15 %
+    Fehler sind dort leicht drin.
+  * Die Transposition rechnet mit isotroper Diffusstrahlung und unterschätzt
+    damit klare Nachmittage um einige Prozent.
+  * Die Spreizung der beiden DS18B20 geht genauso linear in die Bilanz ein
+    wie der Durchfluss. Ein Offset zwischen den beiden Fühlern wirkt wie ein
+    Durchflussfehler und wäre im Betrieb nicht zu sehen.
+  * Der 5-Sekunden-Takt steht an drei Stellen in der YAML (siehe oben). Weicht
+    das Lambda vom tatsächlichen Intervall ab, skaliert das die Energie
+    unbemerkt mit.
 * **Ohne Home Assistant zählt das Gerät keine Energie.** Alle drei
   Zeit-Instanzen sind `platform: homeassistant`. Ist HA nicht erreichbar, feuert
   der 5-s-Takt nicht: Leistung und Tagesenergie bleiben stehen, und der
