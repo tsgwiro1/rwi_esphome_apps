@@ -1,6 +1,6 @@
 # wp-zwe2-controller - PV-geführter Heizstab im Wärmespeicher
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -301,11 +301,10 @@ diesen Schalter und die Wallbox ansehen, nicht die Regelung.
 
 ## 4. Secrets & Inbetriebnahme
 
-Vier Einträge müssen in `~/esphome/secrets.yaml` stehen:
+Drei Einträge müssen in `~/esphome/secrets.yaml` stehen:
 
 ```yaml
-zwe2controller_api_key: "…"                 # API-Verschlüsselung
-zwe2controller_ota_key: "…"                 # OTA-Passwort
+zwe2controller_api_key: "…"                 # API- und OTA-Verschlüsselung
 zwe2controller_fallback_ap_ssid: "…"        # Fallback-Hotspot
 zwe2controller_fallback_ap_password: "…"
 ```
