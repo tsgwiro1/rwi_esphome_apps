@@ -1,0 +1,25 @@
+# Datei: common/ota.yaml
+# Gehört zu common, Version siehe diagnostics.yaml.
+#
+# OTA-Upload verschlüsselt mit dem API-Schlüssel des Geräts. Der leere Block
+# `encryption:` übernimmt `api: encryption: key`, ein eigenes OTA-Passwort
+# entfällt. Voraussetzung ist ein API-Schlüssel im Gerät und ESPHome ab
+# 2026.10.
+#
+# Geräte mit `web_server` brauchen dort `ota: false`, sonst nimmt dessen
+# Endpunkt /update dasselbe Image unverschlüsselt an.
+#
+# Umstellung eines Geräts mit Passwort: einmal flashen mit dem eigenen Block
+#
+#   ota:
+#     - platform: esphome
+#       password: !secret <gerät>_ota_key
+#       encryption:
+#         allow_plaintext_upload: true
+#
+# neben diesem Package, danach den eigenen Block entfernen und nochmals
+# flashen.
+
+ota:
+  - platform: esphome
+    encryption:

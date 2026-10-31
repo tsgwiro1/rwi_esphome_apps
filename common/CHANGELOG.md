@@ -4,6 +4,18 @@ Alle wichtigen Änderungen an diesem gemeinsamen Diagnose-Paket werden in dieser
 
 ---
 
+## [1.5.0] - 2026-10-31
+
+### Hinzugefügt
+- **`ota.yaml`: OTA-Upload verschlüsselt mit dem API-Schlüssel.** Ein leerer Block `ota: encryption:` übernimmt `api: encryption: key` des Geräts; das eigene OTA-Passwort je Gerät entfällt. ESPHome warnt seit 2026.9 vor `ota: password`, weil es viel Flash und RAM kostet.
+
+  Ein Gerät mit eigenem `ota:`-Block bleibt gültig: ESPHome führt die beiden `esphome`-Blöcke zusammen, das Passwort des Geräts bleibt dabei stehen. Damit lassen sich die Geräte einzeln umstellen, und ein offline stehendes Gerät baut weiter wie bisher. Der Ablauf in zwei Uploads steht in der README unter «OTA-Verschlüsselung».
+
+### Hinweis
+- `5.1 Common Diagnostics Version` meldet 1.5.0 auch bei einem Gerät, das `ota.yaml` noch nicht einbindet. Ob ein Gerät umgestellt ist, zeigt seine eigene YAML.
+
+---
+
 ## [1.4.1] - 2026-08-10
 
 ### Behoben

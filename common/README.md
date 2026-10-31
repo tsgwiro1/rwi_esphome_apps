@@ -1,6 +1,6 @@
 # 🩺 Common Diagnostics (ESPHome Package)
 
-![Version](https://img.shields.io/badge/version-1.4.1-blue)
+![Version](https://img.shields.io/badge/version-1.5.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -22,6 +22,7 @@ Alle in diesem Repository bereitgestellten Inhalte, Codes und Konfigurationen si
 * [Vorschau in Home Assistant](#vorschau-in-home-assistant)
 * [Verfügbare Sensoren & Entitäten](#verfügbare-sensoren--entitäten)
 * [Einbindung in Projekte](#einbindung-in-projekte)
+* [OTA-Verschlüsselung](#ota-verschlüsselung)
 * [Substitutions (Grenzwerte anpassen)](#substitutions-grenzwerte-anpassen)
 * [Access Point Namensauflösung](#access-point-namensauflösung)
 * [Versionierung](#versionierung)
@@ -90,6 +91,34 @@ packages:
   diagnostics: !include common/diagnostics.yaml
 ```
 *(Voraussetzung: Die Datei liegt in einem Unterordner namens `common` relativ zur Hauptdatei).*
+
+---
+
+## 🔐 OTA-Verschlüsselung
+
+`ota.yaml` verschlüsselt den OTA-Upload mit dem API-Schlüssel des Geräts. Ein eigenes OTA-Passwort entfällt, pro Gerät gibt es nur noch einen Schlüssel.
+
+```yaml
+packages:
+  diagnostics: !include common/diagnostics.yaml
+  ota: !include common/ota.yaml
+```
+
+Voraussetzungen: `api: encryption: key` im Gerät und ESPHome ab 2026.10. Wer `web_server` einsetzt, setzt dort `ota: false` — sonst nimmt `/update` dasselbe Image unverschlüsselt an.
+
+**Umstellung eines Geräts, das noch mit Passwort läuft.** Die laufende Firmware kann noch nicht verschlüsseln, deshalb zwei Uploads:
+
+1. Package einbinden und den eigenen Block vorübergehend so stehen lassen, dann flashen:
+   ```yaml
+   ota:
+     - platform: esphome
+       password: !secret <gerät>_ota_key
+       encryption:
+         allow_plaintext_upload: true
+   ```
+2. Den eigenen Block ganz entfernen und nochmals flashen. Dieser Upload läuft bereits verschlüsselt.
+
+`allow_plaintext_upload` nicht stehen lassen: Solange die Option gesetzt ist, kann jemand im Netz das Verschlüsselungsangebot unterdrücken und einen Upload auf Klartext zwingen.
 
 ---
 
