@@ -1,6 +1,6 @@
 # wp-speicher-monitor - Schichtungsanzeige für den Wärmespeicher
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue)
+![Version](https://img.shields.io/badge/version-1.2.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -207,11 +207,10 @@ Dazu die Diagnose-Entitäten aus `common/diagnostics.yaml` (Kategorien 2.x bis
 
 ## 4. Secrets & Inbetriebnahme
 
-Vier Einträge müssen in `~/esphome/secrets.yaml` stehen:
+Drei Einträge müssen in `~/esphome/secrets.yaml` stehen:
 
 ```yaml
-speichermonitor_api_key: "…"                 # API-Verschlüsselung
-speichermonitor_ota_key: "…"                 # OTA-Passwort
+speichermonitor_api_key: "…"                 # API- und OTA-Verschlüsselung
 speichermonitor_fallback_ap_ssid: "…"        # Fallback-Hotspot
 speichermonitor_fallback_ap_password: "…"
 ```

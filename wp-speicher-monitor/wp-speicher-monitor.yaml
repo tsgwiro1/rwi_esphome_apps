@@ -14,7 +14,7 @@ esp32:
 
 # HIER überschreiben wir die Grenzen für den starken ESP32
 substitutions:
-  fw_version: "1.2.0"
+  fw_version: "1.2.1"
   # Frist des Fuehler-Watchdogs. Die Fuehler melden durch das gleitende Mittel
   # ueber 10 Werte nur alle ~100 s; 300000 ms lassen also drei Meldungen aus,
   # bevor ein Wert als veraltet gilt. Gilt zugleich als Anlaufzeit nach dem
@@ -25,6 +25,7 @@ substitutions:
 
 packages:
   my_diagnostics: !include common/diagnostics.yaml
+  my_ota: !include common/ota.yaml
 
 # Enable logging
 logger:
@@ -33,10 +34,6 @@ logger:
 api:
   encryption:
     key: !secret speichermonitor_api_key
-
-ota:
-  platform: esphome
-  password: !secret speichermonitor_ota_key
 
 wifi:
   ssid: !secret wifi_ssid
