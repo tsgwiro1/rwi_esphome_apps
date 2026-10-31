@@ -1,6 +1,6 @@
 # ha-mini-display - Rotierender Statusmonitor auf dem TTGO T-Display
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -269,11 +269,10 @@ keinen SNTP-Fallback.
 
 ## 4. Secrets & Inbetriebnahme
 
-Vier Einträge müssen in `~/esphome/secrets.yaml` stehen:
+Drei Einträge müssen in `~/esphome/secrets.yaml` stehen:
 
 ```yaml
-minidisplay_api_key: "…"                 # API-Verschlüsselung
-minidisplay_ota_key: "…"                 # OTA-Passwort
+minidisplay_api_key: "…"                 # API- und OTA-Verschlüsselung
 minidisplay_fallback_ap_ssid: "…"        # Fallback-Hotspot
 minidisplay_fallback_ap_password: "…"
 ```

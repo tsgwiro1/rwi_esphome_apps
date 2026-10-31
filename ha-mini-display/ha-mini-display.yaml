@@ -20,12 +20,13 @@ esp32:
 
 # HIER überschreiben wir die Grenzen für den starken ESP32
 substitutions:
-  fw_version: "1.1.0"
+  fw_version: "1.1.1"
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
   diag_min_heap_critical: "40000" # 40kb ist kritisch
 
 packages:
   my_diagnostics: !include common/diagnostics.yaml
+  my_ota: !include common/ota.yaml
 
 # Enable logging
 logger:
@@ -34,10 +35,6 @@ logger:
 api:
   encryption:
     key: !secret minidisplay_api_key
-
-ota:
-  platform: esphome
-  password: !secret minidisplay_ota_key
 
 wifi:
   ssid: !secret wifi_ssid
