@@ -5,6 +5,17 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/)
 und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [1.1.3] - 2026-10-31
+
+### OTA verschlüsselt mit dem API-Schlüssel
+
+* **OTA über `common/ota.yaml`** (common 1.5.0). Der Upload ist mit dem
+  API-Schlüssel des Geräts verschlüsselt; das OTA-Passwort und das Secret
+  `irrigation_ota_key` entfallen. ESPHome warnte seit 2026.9 vor `ota: password`.
+* Umgestellt in zwei Uploads, wie in `common/README.md` unter
+  «OTA-Verschlüsselung» beschrieben. Flashen setzt jetzt ESPHome ab 2026.10
+  voraus.
+
 ## [1.1.2] - 2026-07-28
 
 ### Geändert
