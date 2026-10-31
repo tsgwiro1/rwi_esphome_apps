@@ -12,7 +12,7 @@ esp32:
 
 # HIER überschreiben wir die Grenzen für den starken ESP32
 substitutions:
-  fw_version: "1.1.0"
+  fw_version: "1.1.1"
   # Frist des Fuehler-Watchdogs. Vorlauf und Ruecklauf melden durch das
   # gleitende Mittel ueber 2 Werte alle ~10 s; 60000 ms lassen also sechs
   # Meldungen aus, bevor ein Wert als veraltet gilt. Gilt zugleich als
@@ -23,6 +23,7 @@ substitutions:
 
 packages:
   my_diagnostics: !include common/diagnostics.yaml
+  my_ota: !include common/ota.yaml
 
 #external_components:
 #  - source: github://nrandell/dallasng
@@ -36,10 +37,6 @@ logger:
 api:
   encryption:
     key: !secret solarmonitor_api_key
-
-ota:
-  platform: esphome
-  password: !secret solarmonitor_ota_key
 
 wifi:
   ssid: !secret wifi_ssid
