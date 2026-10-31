@@ -2,6 +2,20 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.1.1] - 2026-10-31
+
+### OTA verschlüsselt mit dem API-Schlüssel
+
+* **OTA über `common/ota.yaml`** (common 1.5.0). Der Upload ist mit dem
+  API-Schlüssel des Geräts verschlüsselt; das OTA-Passwort und das Secret
+  `smartrelais_ota_key` entfallen. ESPHome warnte seit 2026.9 vor `ota: password`.
+* **`web_server` mit `ota: false`.** Sonst nähme der Endpunkt `/update` des
+  Webservers dasselbe Image unverschlüsselt an.
+
+* Umgestellt in zwei Uploads, wie in `common/README.md` unter
+  «OTA-Verschlüsselung» beschrieben. Flashen setzt jetzt ESPHome ab 2026.10
+  voraus.
+
 ## [1.1.0] - 2026-09-07
 
 ### Geändert

@@ -1,6 +1,6 @@
 # ha-smartrelais - Zeitgesteuertes SSR-Relais mit Schalterbedienung
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.1-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -153,6 +153,6 @@ Die Mitternachts-Resets (Tageszähler, Spitzentemperatur, Tageslimit) benötigen
 
 Das Gerät verfügt über einen integrierten **Webserver** auf Port 80. Falls Home Assistant einmal ausfallen sollte, lassen sich Status, Relais und alle Konfigurationen (Schalter/Slider/Buttons) über die IP-Adresse des Geräts in jedem Webbrowser einsehen und bedienen.
 
-Benötigte Secrets: `smartrelais_api_key`, `smartrelais_ota_key`, `smartrelais_fallback_ap_ssid`, `smartrelais_fallback_ap_password` sowie `wifi_ssid`/`wifi_password`.
+Benötigte Secrets: `smartrelais_api_key`, `smartrelais_fallback_ap_ssid`, `smartrelais_fallback_ap_password` sowie `wifi_ssid`/`wifi_password`.
 
 Die detaillierte Design-Spezifikation liegt in `Plan_ha-smartrelais_V1.0.0.pdf`.

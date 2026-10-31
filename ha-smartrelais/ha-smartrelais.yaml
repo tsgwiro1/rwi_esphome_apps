@@ -1,5 +1,5 @@
 substitutions:
-  fw_version: "1.1.0"
+  fw_version: "1.1.1"
   # ESP32-C6
   # ANPASSUNG DER DIAGNOSE-GRENZWERTE
   diag_min_heap_ok: "80000"        # Mindestens 80 KB freien RAM erwarten wir im Normalbetrieb
@@ -42,6 +42,7 @@ esp32:
 # Einbinden des gemeinsamen Diagnose-Files
 packages:
   diagnostics: !include common/diagnostics.yaml
+  ota: !include common/ota.yaml
 
 # Zaehlerstaende ins Flash schreiben. 1 min begrenzt den Verlust bei einem
 # Kaltstart; die NVS-Last bleibt dabei um Groessenordnungen unkritisch.
@@ -51,6 +52,7 @@ preferences:
 # Webserver aktivieren
 web_server:
   port: 80
+  ota: false
 
 # Globale Variablen für Logik und Zähler
 globals:
@@ -95,10 +97,6 @@ globals:
 api:
   encryption:
     key: !secret smartrelais_api_key
-
-ota:
-  platform: esphome
-  password: !secret smartrelais_ota_key
 
 wifi:
   ssid: !secret wifi_ssid
