@@ -1,6 +1,6 @@
 # ha-frontroom-info-display - Touch-Infodisplay für PV, Hausbatterie und Wallbox
 
-![Version](https://img.shields.io/badge/version-1.10.2-blue)
+![Version](https://img.shields.io/badge/version-1.10.3-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 

@@ -2,6 +2,16 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.10.3] - 2026-11-01
+
+### Behoben
+
+* **«1.0 Room Brightness» hat keine Geräteklasse mehr.** Der `adc`-Sensor
+  bekommt von ESPHome `device_class: voltage`, wegen der Rohwerte aber keine
+  Einheit. Die `copy`-Kopie erbte beides, und HA warnte bei jedem Start vor
+  einer Spannung ohne Einheit. `device_class: ""` an der Kopie unterbindet das
+  Erben, wie bei Sensor 2.2 in `common/diagnostics.yaml`.
+
 ## [1.10.2] - 2026-10-31
 
 ### OTA verschlüsselt mit dem API-Schlüssel

@@ -13,7 +13,7 @@ substitutions:
 # ---- Geraet ------------------------------------------------
   device_name: "ha-frontroom-info-display"
   project_name: "tsgwiro1.ha-frontroom-info-display"
-  fw_version: "1.10.2"
+  fw_version: "1.10.3"
   device_timezone: "Europe/Zurich"   # ohne diese Angabe nimmt ESPHome die
                                      # Zeitzone des bauenden Rechners
 
@@ -766,6 +766,7 @@ sensor:
   - platform: copy
     source_id: room_brightness
     name: "1.0 Room Brightness"
+    device_class: ""   # sonst erbt die Kopie "voltage" vom adc, ohne Einheit
     filters:
       # Gilt nur fuer Home Assistant. Hoechstens alle 30 s eine Meldung und nur
       # bei mindestens 20 Zaehlschritten Aenderung: bei delta 5 waren es 3000
