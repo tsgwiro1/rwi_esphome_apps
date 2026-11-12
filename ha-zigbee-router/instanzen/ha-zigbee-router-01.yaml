@@ -1,0 +1,17 @@
+# Zigbee-Router 01
+# Instanzdatei: Name, Antenne und API-Schlüssel dieses Routers. Alles Übrige
+# steht im Baustein common/ha-zigbee-router.yaml. Pfade relativ zu ~/esphome.
+# Den Standort führt Zigbee2MQTT als Gerätename, nicht diese Datei.
+
+substitutions:
+  name: ha-zigbee-router-01
+  # Antennenwahl: extern (U.FL-Anschluss) oder intern (Keramikantenne)
+  antenne: extern
+
+packages:
+  router: !include common/ha-zigbee-router.yaml
+  ota: !include common/ota.yaml
+
+api:
+  encryption:
+    key: !secret zigbee_router_01_api_key

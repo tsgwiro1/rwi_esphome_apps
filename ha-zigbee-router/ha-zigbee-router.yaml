@@ -1,0 +1,231 @@
+# Zigbee-Router, gemeinsamer Baustein für alle Router
+# Board: Seeed Studio XIAO ESP32-C6, Speisung über USB-C, keine weiteren Bauteile.
+#
+# Wird nicht direkt geflasht, sondern von einer Instanzdatei pro Router
+# eingebunden (ha-zigbee-router-01.yaml, -02, ...). Liegt im Add-on als
+# common/ha-zigbee-router.yaml. Die Instanzdatei liefert Name, Antennenwahl,
+# API-Schlüssel und bindet common/ota.yaml ein.
+#
+# Normalbetrieb ist reines Zigbee: Das WLAN ist aus, weil ein Zigbee-Router bei
+# aktivem WLAN Pakete verpasst (Funkteil geteilt, ESPHome warnt beim Prüfen
+# selbst). Alle nicht-internen Sensoren und der Schalter werden Zigbee-
+# Endpunkte und kommen über Zigbee2MQTT per MQTT-Discovery nach Home Assistant.
+#
+# WLAN gibt es nur in zwei Fenstern:
+# - Wartungsfenster: Schalter "1.0 WLAN Wartung" aus HA, für OTA.
+# - Notfenster: nach jedem Start, falls Zigbee nicht mehr erreichbar ist.
+# Ein WLAN-Hotspot ist neben Zigbee nicht zulässig, darum kein ap/captive_portal.
+#
+# Anmelden: In Zigbee2MQTT "Permit join" öffnen, dann den Router einstecken.
+# Ein neues Gerät sucht zehnmal im Sekundentakt, danach alle 10 Minuten.
+# Entfernen in Zigbee2MQTT setzt den Router zurück, er sucht danach neu.
+
+substitutions:
+  # Firmware-Version, gilt für alle Router (siehe CHANGELOG.md)
+  fw_version: "1.0.0"
+  # Vorgabe, falls die Instanzdatei nichts angibt: extern oder intern
+  antenne: extern
+  # Dauer des Wartungsfensters nach Einschalten des Schalters, in Minuten
+  wlan_fenster_min: "15"
+  # Dauer des Notfensters nach jedem Start, in Minuten
+  notfenster_min: "3"
+
+esphome:
+  name: ${name}
+  friendly_name: ${name}
+  project:
+    name: "tsgwiro1.ha-zigbee-router"
+    version: "${fw_version}"
+  on_boot:
+    # Notfenster: WLAN nach jedem Start kurz öffnen. Wenn eine Firmware Zigbee
+    # unbrauchbar macht, ist der Schalter nicht mehr erreichbar; dann holt nur
+    # dieses Fenster den Router per OTA zurück, ohne das Gehäuse zu öffnen.
+    - priority: -100
+      then:
+        - wifi.enable:
+        - switch.template.publish:
+            id: wlan_wartung
+            state: ON
+        - script.execute:
+            id: wlan_fenster
+            dauer_min: ${notfenster_min}
+
+esp32:
+  board: seeed_xiao_esp32c6
+  variant: esp32c6
+  framework:
+    type: esp-idf
+
+logger:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Normalbetrieb ohne WLAN, eingeschaltet wird nur in den Fenstern
+  enable_on_boot: false
+  # Ohne Verbindung startet ESPHome sonst nach 15 min neu
+  reboot_timeout: 0s
+
+api:
+  # Ohne Client startet ESPHome sonst nach 15 min neu; im Normalbetrieb ist
+  # nie ein Client verbunden
+  reboot_timeout: 0s
+
+zigbee:
+  id: zb
+  router: true
+  on_join:
+    - logger.log: "Zigbee-Netz beigetreten"
+
+debug:
+  update_interval: 5min
+
+# Die Namen landen als Beschreibung im Zigbee-Endpunkt. ESPHome verwirft dabei
+# Nicht-ASCII-Zeichen, darum keine Umlaute in den Namen.
+sensor:
+  - platform: uptime
+    name: "1.1 Laufzeit"
+    entity_category: diagnostic
+    icon: "mdi:timer-sand"
+    # Jeder neue Wert ist in HA eine Datenbankzeile
+    update_interval: 15min
+    unit_of_measurement: "h"
+    accuracy_decimals: 2
+    filters:
+      - lambda: return x / 3600.0;
+
+  - platform: internal_temperature
+    name: "1.2 Chiptemperatur"
+    entity_category: diagnostic
+    update_interval: 60s
+    accuracy_decimals: 1
+    filters:
+      # Nur bei spürbarer Änderung melden
+      - delta: 0.5
+
+  - platform: debug
+    free:
+      name: "1.3 Freier Speicher"
+      entity_category: diagnostic
+      icon: "mdi:memory"
+      unit_of_measurement: "kB"
+      accuracy_decimals: 0
+      filters:
+        - lambda: return x / 1024.0;
+
+  # Endgeräte, die diesen Router als Parent gewählt haben. ESPHome lässt
+  # höchstens 10 zu (MAX_CHILDREN in der Zigbee-Komponente).
+  - platform: template
+    name: "1.4 Zigbee Kinder"
+    entity_category: diagnostic
+    icon: "mdi:family-tree"
+    update_interval: 5min
+    accuracy_decimals: 0
+    lambda: |-
+      if (!id(zb).is_joined()) {
+        return 0;
+      }
+      // Die Nachbartabelle gehört dem Zigbee-Task: nur mit dessen Sperre
+      // lesen. Ist sie belegt, diesen Durchlauf auslassen.
+      if (!esp_zigbee_lock_acquire(10 / portTICK_PERIOD_MS)) {
+        return {};
+      }
+      int kinder = 0;
+      ezb_nwk_info_iterator_t it = EZB_NWK_INFO_ITERATOR_INIT;
+      ezb_nwk_neighbor_info_t nbr;
+      while (ezb_nwk_get_next_neighbor(&it, &nbr) == EZB_ERR_NONE) {
+        if (nbr.relationship == EZB_NWK_RELATIONSHIP_CHILD) {
+          kinder++;
+        }
+      }
+      esp_zigbee_lock_release();
+      return kinder;
+    filters:
+      # Nur bei Änderung melden statt alle 5 min denselben Wert
+      - lambda: |-
+          static float last = NAN;
+          if (x == last) return {};
+          last = x;
+          return x;
+
+switch:
+  # Antennenwahl des XIAO ESP32-C6. Welche Antenne gilt, legt die Instanzdatei
+  # mit der Substitution "antenne" fest: extern (U.FL) oder intern (Keramik).
+  # Die Pins werden beim Start gesetzt, noch bevor Zigbee und WLAN anlaufen.
+  - platform: gpio
+    id: rf_switch_enable
+    pin: GPIO3
+    restore_mode: ALWAYS_OFF  # LOW: HF-Schalter eingeschaltet
+    internal: true
+  - platform: gpio
+    id: antenna_select
+    pin: GPIO14
+    # HIGH: externe Antenne, LOW: eingebaute Antenne. Ein anderer Wert als
+    # extern/intern ergibt einen ungültigen restore_mode und fällt beim Prüfen auf.
+    restore_mode: "${ {'extern': 'ALWAYS_ON', 'intern': 'ALWAYS_OFF'}.get(antenne, 'antenne_muss_extern_oder_intern_sein') }"
+    internal: true
+
+  # Wartungsfenster: schaltet das WLAN für wlan_fenster_min ein, danach von
+  # selbst wieder aus. Ausschalten beendet das Fenster sofort.
+  - platform: template
+    name: "1.0 WLAN Wartung"
+    id: wlan_wartung
+    icon: "mdi:wifi-cog"
+    cluster: on_off
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action:
+      - wifi.enable:
+      - script.execute:
+          id: wlan_fenster
+          dauer_min: ${wlan_fenster_min}
+    turn_off_action:
+      - script.stop: wlan_fenster
+      - wifi.disable:
+
+script:
+  # Schliesst das WLAN-Fenster nach Ablauf. mode: restart, damit ein erneutes
+  # Einschalten die Zeit neu startet.
+  - id: wlan_fenster
+    mode: restart
+    parameters:
+      dauer_min: int
+    then:
+      - logger.log:
+          format: "WLAN-Fenster offen für %d min"
+          args: [dauer_min]
+      - delay: !lambda return dauer_min * 60 * 1000;
+      - switch.turn_off: wlan_wartung
+
+# Gelbe Benutzer-LED des XIAO ESP32-C6 an GPIO15, leuchtet bei LOW.
+# GPIO15 ist ein Strapping-Pin. Das ist hier unkritisch, weil die LED den Pegel
+# beim Start nicht verändert.
+output:
+  - platform: gpio
+    id: status_led
+    pin:
+      number: GPIO15
+      inverted: true
+      ignore_strapping_warning: true
+
+# Status-LED:
+# - WLAN-Fenster offen: dauernd an
+# - Zigbee nicht beigetreten: 0,5 s an, 0,5 s aus
+# - Zigbee beigetreten, WLAN aus: aus
+interval:
+  - interval: 500ms
+    then:
+      - lambda: |-
+          static bool an = false;
+          if (id(wlan_wartung).state) {
+            an = true;
+          } else if (!id(zb).is_joined()) {
+            an = !an;
+          } else {
+            an = false;
+          }
+          if (an) {
+            id(status_led).turn_on();
+          } else {
+            id(status_led).turn_off();
+          }
