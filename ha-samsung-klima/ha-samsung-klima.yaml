@@ -1,0 +1,229 @@
+# Samsung-Klimaanlage am F1/F2-Bus (NASA-Protokoll)
+# Hardware: M5Stack ATOM Lite (ESP32-PICO-D4) auf der Atomic RS485 Base.
+# Komponente: samsung_ac aus github.com/omerfaruk-aran/esphome_samsung_hvac_bus
+#
+# Stand: Erkennungsbetrieb. Die Liste "devices" ist leer, das Gerät liest nur
+# mit und meldet im Log nach etwa einer Minute die gefundenen Adressen
+# ("Discovered devices", NASA: Aussengerät 10.00.00, Innengeräte 20.00.xx).
+# Erst mit diesen Adressen werden Klima- und Sensor-Entitäten angelegt.
+
+substitutions:
+  # Firmware-Version (siehe CHANGELOG.md)
+  fw_version: "0.1.0"
+  # Stand der samsung_ac-Komponente: fester Commit statt @main, damit ein
+  # neuer Build nicht unbemerkt eine andere Komponente zieht
+  samsung_ac_ref: "53b0773ada2fa0d392003dd46d77a8d655deb4ad"
+  # Heap-Grenzen der Ampel "4.0 System Gesundheit" für den ESP32; die
+  # Vorgabe in common/diagnostics.yaml gilt dem ESP8266
+  diag_min_heap_ok: "80000"
+  diag_min_heap_critical: "40000"
+  # Helligkeit der Status-LED, 0.0 bis 1.0
+  led_helligkeit: "0.3"
+  # Kommt länger als diese Zeit nichts vom Bus, zeigt die LED blau
+  bus_timeout_ms: "10000"
+  # Taste: bis zu dieser Dauer ein Ereignis "press" an HA
+  taste_kurz_max_ms: "1000"
+  # Taste: ab dieser Dauer Neustart beim Loslassen, die LED zeigt dann weiss
+  taste_lang_ms: "3000"
+
+esphome:
+  name: ha-samsung-klima
+  friendly_name: ha-samsung-klima
+  project:
+    name: "tsgwiro1.ha-samsung-klima"
+    version: "${fw_version}"
+
+esp32:
+  board: m5stack-atom
+  framework:
+    type: esp-idf
+    advanced:
+      # SRAM1 zusätzlich als IRAM (+40 kB). Setzt einen aktuellen Bootloader
+      # voraus; den hat der Erstflash per USB geschrieben.
+      sram1_as_iram: true
+
+packages:
+  my_diagnostics: !include common/diagnostics.yaml
+  my_ota: !include common/ota.yaml
+
+external_components:
+  - source: github://omerfaruk-aran/esphome_samsung_hvac_bus@${samsung_ac_ref}
+    components: [samsung_ac]
+
+logger:
+  logs:
+    # samsung_ac braucht pro Durchlauf länger als ESPHome erwartet; die
+    # Warnung "took a long time" kommt sonst laufend
+    component: ERROR
+
+api:
+  encryption:
+    key: !secret samsungklima_api_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  min_auth_mode: WPA2
+
+  ap:
+    ssid: !secret samsungklima_fallback_ap_ssid
+    password: !secret samsungklima_fallback_ap_password
+
+captive_portal:
+
+web_server:
+  port: 80
+  ota: false
+  version: 3
+
+# RS485 Base: TX GPIO19, RX GPIO22. Der Treiber schaltet die Richtung selbst,
+# ein flow_control_pin entfällt. NASA läuft mit 9600 Baud, gerade Parität.
+uart:
+  tx_pin: GPIO19
+  rx_pin: GPIO22
+  baud_rate: 9600
+  parity: EVEN
+  # Empfangszeitpunkt für die Status-LED. samsung_ac gibt nicht nach aussen,
+  # ob Daten ankommen; der Debug-Haken sieht jedes gelesene Byte.
+  debug:
+    direction: RX
+    dummy_receiver: false
+    after:
+      timeout: 20ms
+    sequence:
+      - lambda: |-
+          id(letzter_busempfang) = millis();
+          id(busempfang_neu) = true;
+
+samsung_ac:
+  # Für die Inbetriebnahme: Buswerte bei Änderung ins Log schreiben
+  debug_log_messages_on_change: true
+  devices: []
+
+globals:
+  # millis() des letzten Empfangs vom Bus, 0 = noch nie
+  - id: letzter_busempfang
+    type: uint32_t
+    initial_value: "0"
+  # Seit dem letzten grünen Blitz ist etwas angekommen
+  - id: busempfang_neu
+    type: bool
+    initial_value: "false"
+  # millis() beim Drücken der Taste
+  - id: taste_seit
+    type: uint32_t
+    initial_value: "0"
+
+# RGB-LED SK6812 im ATOM Lite. Wird nur vom Intervall unten gesetzt.
+light:
+  - platform: esp32_rmt_led_strip
+    id: status_led_rgb
+    pin: GPIO27
+    num_leds: 1
+    chipset: SK6812
+    channel_colors: GRB
+    internal: true
+    restore_mode: ALWAYS_OFF
+    default_transition_length: 0s
+
+switch:
+  - platform: template
+    id: led_anzeige
+    name: "Status-LED"
+    icon: "mdi:led-on"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+event:
+  - platform: template
+    id: taste
+    name: "Taste"
+    device_class: button
+    event_types:
+      - "press"
+
+# Taste im ATOM Lite. GPIO39 ist nur Eingang und hat keinen internen
+# Pull-up, die Platine zieht ihn hoch; gedrückt ist LOW.
+binary_sensor:
+  - platform: gpio
+    id: taste_gpio
+    internal: true
+    pin:
+      number: GPIO39
+      inverted: true
+    on_press:
+      - lambda: id(taste_seit) = millis();
+    on_click:
+      - min_length: 50ms
+        max_length: ${taste_kurz_max_ms}ms
+        then:
+          - event.trigger:
+              id: taste
+              event_type: "press"
+      - min_length: ${taste_lang_ms}ms
+        max_length: 60s
+        then:
+          - lambda: App.safe_reboot();
+
+# Status-LED, Vorrang von oben nach unten:
+# - weiss:         Taste lang genug gehalten, Loslassen startet neu
+# - rot blinkend:  kein WLAN oder kein HA verbunden (0,5 s an, 0,5 s aus)
+# - blau blinkend: vom Bus kommt seit bus_timeout_ms nichts (1 s an, 1 s aus)
+# - grüner Blitz:  Daten vom Bus, höchstens einmal pro Sekunde
+# Die LED wird nur bei Farbwechsel gesetzt und nie gespeichert.
+interval:
+  - interval: 100ms
+    then:
+      - lambda: |-
+          static uint32_t zuletzt = 0xFFFFFFFF;
+          static uint32_t letzter_blitz = 0;
+          static const char *zustand_alt = "";
+          const uint32_t jetzt = millis();
+          const char *zustand;
+          uint32_t farbe = 0;  // 0xRRGGBB, 0 = aus
+
+          if (id(taste_gpio).state && jetzt - id(taste_seit) >= ${taste_lang_ms}) {
+            zustand = "Taste lang";
+            farbe = 0xFFFFFF;
+          } else if (!wifi::global_wifi_component->is_connected() ||
+                     !api::global_api_server->is_connected()) {
+            zustand = "keine Verbindung";
+            farbe = (jetzt / 500) % 2 ? 0xFF0000 : 0;
+          } else if (id(letzter_busempfang) == 0 ||
+                     jetzt - id(letzter_busempfang) > ${bus_timeout_ms}) {
+            zustand = "Bus still";
+            farbe = (jetzt / 1000) % 2 ? 0x0000FF : 0;
+          } else {
+            zustand = "Bus aktiv";
+            if (id(busempfang_neu) && jetzt - letzter_blitz >= 1000) {
+              farbe = 0x00FF00;
+              letzter_blitz = jetzt;
+              id(busempfang_neu) = false;
+            }
+          }
+          if (zustand != zustand_alt) {
+            ESP_LOGI("status_led", "%s", zustand);
+            zustand_alt = zustand;
+          }
+
+          if (!id(led_anzeige).state) {
+            farbe = 0;
+          }
+          if (farbe == zuletzt) {
+            return;
+          }
+          zuletzt = farbe;
+          auto call = id(status_led_rgb).make_call();
+          call.set_save(false);
+          call.set_transition_length(0);
+          if (farbe == 0) {
+            call.set_state(false);
+          } else {
+            call.set_state(true);
+            call.set_brightness(${led_helligkeit});
+            call.set_rgb(((farbe >> 16) & 0xFF) / 255.0f,
+                         ((farbe >> 8) & 0xFF) / 255.0f,
+                         (farbe & 0xFF) / 255.0f);
+          }
+          call.perform();
