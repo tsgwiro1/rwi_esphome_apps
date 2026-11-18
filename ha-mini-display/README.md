@@ -12,7 +12,7 @@ Blättern von Hand, Anhalten der Rotation und Dimmen der Beleuchtung.
 
 Wichtig zum Verständnis: **das Gerät steuert nichts und misst nichts.** Es ist
 ein Anzeigegerät ohne eigene Logik - alle Werte kommen aus Home Assistant, und
-ohne Home Assistant zeigt es nichts an (siehe [OFFENE-PUNKTE.md](OFFENE-PUNKTE.md)).
+ohne Home Assistant zeigt es nichts an (siehe [Kapitel 6](#6-offene-punkte)).
 
 ---
 
@@ -33,7 +33,7 @@ für:
 * Die Richtigkeit der **angezeigten Werte.** Sie werden unverändert aus Home
   Assistant übernommen und sind nur so gut wie ihre jeweilige Quelle. Eine
   eingefrorene Anzeige ist von einem stehenden Istwert nicht zu unterscheiden
-  (siehe [OFFENE-PUNKTE.md](OFFENE-PUNKTE.md)).
+  (siehe [Kapitel 6](#6-offene-punkte)).
 * **Fehlinterpretationen der Anzeige.**
 * Die Richtigkeit, Aktualität oder Vollständigkeit des bereitgestellten Codes
   oder der Dokumentation.
@@ -238,7 +238,7 @@ Uhrzeit auf Seite 1.
 
 Dazu die Diagnose-Entitäten aus `common/diagnostics.yaml` (Kategorien 2.x bis
 6.x: WLAN, Netzwerk, System, Versionen, Neustart-Buttons). Sie tragen wie die
-Ereignisse den Bereichspräfix `attic_` (siehe [OFFENE-PUNKTE.md](OFFENE-PUNKTE.md)).
+Ereignisse den Bereichspräfix `attic_`.
 
 ### Vom Gerät konsumiert
 
@@ -288,7 +288,7 @@ PLATFORMIO_CORE_DIR="$HOME/.platformio_esphome" ~/.local/bin/esphome compile ha-
 ```
 
 Geflasht wird über den mDNS-Namen statt über die Adresse, weil das Gerät keine
-DHCP-Reservierung hat und schon einmal gewandert ist (siehe [OFFENE-PUNKTE.md](OFFENE-PUNKTE.md)):
+DHCP-Reservierung hat und schon einmal gewandert ist:
 
 ```bash
 PLATFORMIO_CORE_DIR="$HOME/.platformio_esphome" ~/.local/bin/esphome upload ha-mini-display.yaml --device ha-mini-display.local
@@ -326,16 +326,9 @@ Entitäten.
 
 ## 6. Offene Punkte
 
-Was an diesem Gerät bekannt, aber nicht erledigt ist, steht in einem eigenen
-Dokument: **[OFFENE-PUNKTE.md](OFFENE-PUNKTE.md)**. Dort ist zu jedem Punkt
-festgehalten, worum es geht, was er praktisch bedeutet und was ihn schliessen
-würde.
-
-Die drei, die beim Lesen dieser README am ehesten stören:
-
 * **Wie die Glyphen tatsächlich sitzen, ist nicht nachgemessen** - die
-  Koordinaten stammen unverändert von den früheren Bildern (Punkt 1.1).
+  Koordinaten stammen unverändert von den früheren Bildern.
 * **Ohne Home Assistant zeigt das Gerät nichts** und friert auf dem letzten Stand
-  ein, ohne das kenntlich zu machen (Punkt 2.1).
+  ein, ohne das kenntlich zu machen.
 * **Das Gerät hat keine DHCP-Reservierung** und ist schon einmal gewandert;
-  deshalb wird über den mDNS-Namen geflasht (Punkt 3.1).
+  deshalb wird über den mDNS-Namen geflasht.

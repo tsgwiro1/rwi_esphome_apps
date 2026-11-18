@@ -264,7 +264,7 @@ RAM).
 
 **Die «Bekannten Punkte» sind aus der README ausgezogen.** Sie standen dort als
 Kapitel 6 und waren auf elf Einträge angewachsen. Neu liegen sie in
-[OFFENE-PUNKTE.md](OFFENE-PUNKTE.md), gegliedert in ungeprüfte Anzeige, bewusste
+`OFFENE-PUNKTE.md`, gegliedert in ungeprüfte Anzeige, bewusste
 Eigenschaften und Umgebung; jeder Punkt sagt ausdrücklich, **worum es geht**,
 **was er praktisch bedeutet** und **was ihn schliessen würde**. Die README
 verweist darauf und nennt nur noch die drei, die beim Lesen am ehesten stören.
