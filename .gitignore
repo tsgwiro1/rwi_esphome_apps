@@ -1,2 +1,5 @@
 .DS_Store
 .claude/settings.local.json
+
+# Aufgabenlisten zwischen den Chats, gehören nie ins Repo
+OFFENE-PUNKTE.md
