@@ -29,7 +29,7 @@ esp32:
 
 # HIER überschreiben wir die Grenzen für den starken ESP32
 substitutions:
-  fw_version: "1.1.0"
+  fw_version: "1.2.0"
   grid_timeout_s: "300"     # ohne neuen Netzwert seit so vielen s -> Ansteuerung 0
   noflow_power_w: "100"     # darunter gilt der Heizstab als ohne Leistungsaufnahme
   noflow_delay_s: "300"     # so lange muss angefordert und nichts gemessen sein
@@ -454,7 +454,31 @@ sensor:
     accuracy_decimals: 0
     lambda: |-
       return (int)(id(output_power)*100.0+0.5);
-    
+
+  # 1 solange Leistung angefordert wird, sonst 0 - Quelle der Betriebsstunden
+  - platform: copy
+    source_id: zwe2_output
+    id: zwe2_heating
+    internal: true
+    filters:
+      - lambda: |-
+          return x > 0 ? 1.0f : 0.0f;
+
+  - platform: integration
+    name: Betriebsstunden
+    id: zwe2_operating_hours
+    sensor: zwe2_heating
+    time_unit: h
+    integration_method: left
+    restore: true
+    unit_of_measurement: "h"
+    device_class: duration
+    state_class: total_increasing
+    accuracy_decimals: 2
+    icon: mdi:timer-outline
+    filters:
+      - delta: 0.05   # nur alle 3 min Heizbetrieb nach HA melden
+
 text_sensor:
   - platform: template
     name: "1.1 Speicherfuehler"

@@ -2,6 +2,17 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.2.0] - 2026-11-18
+
+* **Betriebsstundenzähler.** Neuer Sensor «Betriebsstunden» (h,
+  `total_increasing`, `device_class: duration`): zählt die Zeit, in der «Output
+  Power» über 0 % steht. Plattform `integration` über eine interne Kopie von
+  «Output Power», neustartfest per `restore`. Meldet nur bei 0.05 h Zuwachs,
+  also höchstens alle 3 min.
+* **Kein Energiezähler.** Aus der Ansteuerung liesse sich nur die angeforderte
+  Energie hochrechnen, nicht die aufgenommene. Der Punkt in README Abschnitt 6
+  beschreibt das jetzt als bewusste Entscheidung.
+
 ## [1.1.0] - 2026-11-18
 
 ### Sensor- und Temperaturmanagement

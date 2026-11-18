@@ -1,6 +1,6 @@
 # wp-zwe2-controller - PV-geführter Heizstab im Wärmespeicher
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![Version](https://img.shields.io/badge/version-1.2.0-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -224,6 +224,17 @@ Fehlanforderung nicht, und bei 0 % Ansteuerung könnte das Gerät nicht mehr
 sehen, wann der Thermostat wieder schliesst. Sie deckt zugleich einen defekten
 Heizstab oder ein ausgefallenes Modul ab.
 
+### Betriebsstunden
+
+«Betriebsstunden» zählt die Zeit, in der das Gerät Leistung anfordert
+(«Output Power» über 0 %), als `total_increasing` in Stunden. Der Zähler läuft
+im Gerät, übersteht Neustart und OTA und wird nie zurückgesetzt. Tages- und
+Monatswerte bildet Home Assistant aus der Langzeitstatistik.
+
+Gezählt wird die Anforderung, nicht der Stromfluss: Hat der Thermostat des
+Heizstabs geöffnet, läuft der Zähler weiter. Wie oft das vorkommt, zeigt «1.2
+Keine Leistungsaufnahme».
+
 ### Anzeige am LED-Board
 
 Ein PCF8574 auf der I²C-Adresse 0x38 treibt acht LEDs, alle Ausgänge
@@ -310,6 +321,7 @@ Rückmeldekontakt; es schaltet keine Last.
 | `binary_sensor.wp_zwe2_controller_1_0_over_temperature` | - | Verriegelung Übertemperatur (`problem`) |
 | `sensor.infrastructure_wp_zwe2_controller_1_1_speicherfuehler` | - | aktive Quelle der Speicherverriegelung: `S1`, `Backup WW`, `keiner` |
 | `binary_sensor.infrastructure_wp_zwe2_controller_1_2_keine_leistungsaufnahme` | - | angefordert, aber keine Leistung gemessen (`problem`) |
+| `sensor.infrastructure_wp_zwe2_controller_betriebsstunden` | h | Zeit mit Ansteuerung über 0 %, `total_increasing`, neustartfest |
 | `binary_sensor.wp_zwe2_controller_boiler_temperature` | - | Speicher geladen oder ohne gültige Temperatur gesperrt (`heat`) |
 | `binary_sensor.wp_zwe2_controller_fan` | - | Lüfter läuft (`running`) |
 | `binary_sensor.wp_zwe2_controller_module_power` | - | Modulspannung vorhanden (`power`) |
@@ -332,7 +344,7 @@ Einstellbare Parameter, alle neustartfest und in der Kategorie `config`:
 | `number.wp_zwe2_controller_hyst_charge` | 0 - 25 K | 0.1 | 2.0 |
 | `number.infrastructure_wp_zwe2_controller_offset_backup` | −10 - 10 K | 0.05 | 2.25 (seit 2026-11-18) |
 
-Die drei seit V1.1.0 neuen Entitäten tragen den Bereich `infrastructure` im
+Die seit V1.1.0 neuen Entitäten tragen den Bereich `infrastructure` im
 Namen, weil Home Assistant neuen Entitäten den Bereich des Geräts voranstellt.
 
 Die drei Temperaturen tragen `device_class: temperature` mit «°C», die beiden
@@ -412,7 +424,8 @@ Schalterzustände auch dann, wenn Home Assistant nicht erreichbar ist.
 Der Sensor «Output Power» meldet alle 2 s, das sind 1800 Meldungen pro Stunde
 und die mit Abstand grösste Melderate dieses Geräts. Der Kühlkörperfühler meldet
 alle 100 s, die fünf Binärsensoren und «1.1 Speicherfuehler» nur bei einem
-Wechsel.
+Wechsel. «Betriebsstunden» meldet während der Anforderung alle 3 min (Filter
+`delta: 0.05` h), sonst gar nicht.
 
 Für die Datenbank zählt aber nur, was sich ändert: Home Assistant verwirft
 unveränderte Wiederholungen im Recorder. Nachts, bei gesperrtem Heizstab oder
@@ -523,10 +536,10 @@ Was bleibt:
   nach Ablauf der `recorder`-Aufbewahrung weg. `measurement` wäre nachzutragen -
   die Statistik beginnt dann allerdings beim Flash bei null, Vergangenheit lässt
   sich nicht nachtragen.
-* **Es gibt keinen Energie- und keinen Betriebsstundenzähler.** Wie viele
-  Kilowattstunden der Heizstab über den Tag eingetragen hat, geht aus dem Gerät
-  nicht hervor; es liefert nur die momentane Ansteuerung in Prozent. Ein
-  `total_increasing`-Zähler fehlt und wäre die grösste funktionale Lücke.
+* **Kein Energiezähler, bewusst.** Aus der Ansteuerung liesse sich nur die
+  angeforderte Energie hochrechnen, nicht die aufgenommene - bei offenem
+  Thermostat liegen beide weit auseinander. Das Gerät zählt deshalb nur
+  Betriebsstunden.
 * **Kein Hysteresefenster an der Einschaltschwelle.** Pendelt der Überschuss um
   die Grenze von «Min Heater Output», springt die Ansteuerung im 5-s-Takt
   zwischen 0 und 20 %. Die Rückaddition der Eigenaufnahme dämpft das, solange
