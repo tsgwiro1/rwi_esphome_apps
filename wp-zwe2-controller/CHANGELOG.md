@@ -2,6 +2,49 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.1.0] - 2026-11-18
+
+### Sensor- und Temperaturmanagement
+
+Die vier schwersten Punkte aus README Abschnitt 6 behoben.
+
+* **Speicherverriegelung startet gesperrt.** Bisher stand der Binärsensor
+  «Boiler Temperature» nach dem Boot auf `false` («nicht geladen»), bis eine
+  Flanke kam. Jetzt gilt der Speicher als geladen, solange keine gültige
+  Temperatur vorliegt - auch dann, wenn nach dem Start nie eine eintrifft.
+* **Hysterese übersteht einen Neustart.** Im Totband zwischen «Tmax Boiler»
+  minus «Hyst Charge» und «Tmax Boiler» gilt der letzte Zustand, gehalten im
+  neustartfesten Global `boiler_charged_mem`. Bisher gab ein Neustart im Totband
+  den Heizstab frei (belegt 2026-07-30 und 2026-08-29).
+* **Ersatzfühler mit Rangfolge.** `sensor.s1` gilt nur, wenn sein Wert
+  numerisch ist und der Fühler-Watchdog von `wp-speicher-monitor` `off`
+  meldet. Sonst übernimmt `sensor.wp_temperatur_warmwasser` (luxtronik) minus
+  der neuen Zahl «Offset Backup» (Startwert 2.25 K). Fallen beide aus, bleibt
+  der Heizstab gesperrt. Die Bewertung liegt zentral im neuen Script
+  `eval_boiler`, das bei jedem Fühlerwert und in jeder Runde der Regelschleife
+  läuft. Neuer Textsensor «1.1 Speicherfuehler» zeigt die aktive Quelle.
+* **Frist auf den Netzwert.** Kommt 300 s (`grid_timeout_s`) kein neuer Wert
+  von `sensor.grid_active_power`, geht die Ansteuerung auf 0. Gemessen über 7
+  Tage: Mittel 32 s, grösste Lücke 150 s. Deckt auch einen Ausfall von Home
+  Assistant ab. Der Override ist ausgenommen.
+* **Rückmeldung der Leistungsaufnahme.** Neuer Binärsensor «1.2 Keine
+  Leistungsaufnahme» (`problem`): `on`, wenn 300 s (`noflow_delay_s`)
+  mindestens die Mindestansteuerung angefordert wird und `sensor.heizstab`
+  unter 100 W (`noflow_power_w`) bleibt. Nur Meldung, die Regelung bleibt
+  unverändert.
+
+Das Alter der Speichertemperaturen lässt sich am Gerät nicht über die
+Ankunftszeit prüfen: Home Assistant schickt nur Änderungen, und bei ruhendem
+Speicher kam über 7 Tage bis zu 63 min (S1) bzw. 55 min (Warmwasserfühler)
+nichts. Deshalb trägt der Watchdog des Speichermonitors die Alterung, und ein
+ausgefallenes Gerät wird über `unavailable` erkannt, das beim Gerät als `NAN`
+ankommt.
+
+Geflasht am 2026-11-18 um 09:27, RAM 27.4 %, Flash 50.6 %, Config-Hash
+`0x5f3fb4db`. Beim Anlauf ging die Verriegelung zuerst auf gesperrt (Quelle
+`keiner`) und 20 ms später mit Quelle `S1` bei 47 °C auf frei. Die drei neuen
+Entitäten tragen das Bereichspräfix `infrastructure_`.
+
 ## [1.0.2] - 2026-11-18
 
 ### Einheiten für die Parameter-Numbers

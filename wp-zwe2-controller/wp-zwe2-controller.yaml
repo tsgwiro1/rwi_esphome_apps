@@ -29,7 +29,10 @@ esp32:
 
 # HIER überschreiben wir die Grenzen für den starken ESP32
 substitutions:
-  fw_version: "1.0.2"
+  fw_version: "1.1.0"
+  grid_timeout_s: "300"     # ohne neuen Netzwert seit so vielen s -> Ansteuerung 0
+  noflow_power_w: "100"     # darunter gilt der Heizstab als ohne Leistungsaufnahme
+  noflow_delay_s: "300"     # so lange muss angefordert und nichts gemessen sein
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
   diag_min_heap_critical: "40000" # 40kb ist kritisch
 
@@ -285,6 +288,20 @@ number:
     max_value: 25
     step: 0.1
 
+  # Ersatzfuehler liest um diesen Betrag hoeher als S1 (Einbauhoehe)
+  - platform: template
+    name: "Offset Backup"
+    unit_of_measurement: "K"
+    optimistic: true
+    restore_value: true
+    initial_value: 2.25
+    id: zwe2_backup_offset
+    entity_category: "config"
+    mode: box
+    min_value: -10
+    max_value: 10
+    step: 0.05
+
 switch:
   - platform: template
     name: "Main Power On-Off"
@@ -317,6 +334,17 @@ binary_sensor:
     device_class: RUNNING
     id: zwe2_fan
 
+  - platform: template
+    name: "1.2 Keine Leistungsaufnahme"
+    device_class: PROBLEM
+    id: zwe2_no_flow
+    entity_category: "diagnostic"
+
+  - platform: homeassistant
+    internal: true
+    entity_id: binary_sensor.infrastructure_wp_speicher_monitor_1_0_fuehler_watchdog
+    id: s1_watchdog
+
   - platform: gpio
     pin: 
      number: GPIO33
@@ -335,6 +363,7 @@ sensor:
     on_value:
       lambda: !lambda |-
          id(solar_power) = x;
+         id(grid_last_ms) = millis();
          if (id(zwe2_override).state == false) {
            id(solar_power) += id(output_power) * id(zwe2_heater_power).state;
          }
@@ -346,14 +375,21 @@ sensor:
     entity_id: sensor.s1   #input_number.test_boiler_temp
     id: boiler_temperature
     on_value:
-      lambda: !lambda |-
-         if (x >= id(zwe2_max_temp_boiler).state) {
-           id(zwe2_boiler_charged).publish_state(true);
-         }
-         if (x < id(zwe2_max_temp_boiler).state - id(zwe2_hyst_charge).state) {
-           id(zwe2_boiler_charged).publish_state(false);
-         }
-         ESP_LOGD("Boiler", "Temperature: %.0f°C  Boiler charged: %s", x, id(zwe2_boiler_charged).state ? "Yes":"No");
+      - script.execute: eval_boiler
+
+  - platform: homeassistant
+    name: none
+    internal: True
+    entity_id: sensor.wp_temperatur_warmwasser
+    id: boiler_temperature_backup
+    on_value:
+      - script.execute: eval_boiler
+
+  - platform: homeassistant
+    name: none
+    internal: True
+    entity_id: sensor.heizstab
+    id: heater_measured
 
   - platform: homeassistant
     name: none
@@ -419,6 +455,13 @@ sensor:
     lambda: |-
       return (int)(id(output_power)*100.0+0.5);
     
+text_sensor:
+  - platform: template
+    name: "1.1 Speicherfuehler"
+    id: zwe2_boiler_source
+    entity_category: "diagnostic"
+    icon: mdi:thermometer-check
+
 time:
   - platform: homeassistant
     id: the_loop
@@ -440,19 +483,73 @@ globals:
     type: float
     restore_value: no
     initial_value: '0'
+  # Letzter Zustand der Speicherverriegelung, gilt nach einem Neustart im Totband
+  - id: boiler_charged_mem
+    type: bool
+    restore_value: yes
+    initial_value: 'true'
+  - id: grid_last_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: no_flow_since_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
 
 script:
+  # Speicherverriegelung: Quelle waehlen (S1, sonst Ersatzfuehler, sonst keine)
+  # und gegen Tmax Boiler mit Hysterese bewerten. Ohne gueltigen Wert gesperrt.
+  - id: eval_boiler
+    then:
+      - lambda: !lambda |-
+          float t = NAN;
+          std::string src = "keiner";
+          bool s1_ok = !std::isnan(id(boiler_temperature).state)
+                       && id(s1_watchdog).has_state() && !id(s1_watchdog).state;
+          if (s1_ok) {
+            t = id(boiler_temperature).state;
+            src = "S1";
+          } else if (!std::isnan(id(boiler_temperature_backup).state)) {
+            t = id(boiler_temperature_backup).state - id(zwe2_backup_offset).state;
+            src = "Backup WW";
+          }
+          bool charged;
+          if (std::isnan(t)) {
+            charged = true;
+          } else if (t >= id(zwe2_max_temp_boiler).state) {
+            charged = true;
+            id(boiler_charged_mem) = true;
+          } else if (t < id(zwe2_max_temp_boiler).state - id(zwe2_hyst_charge).state) {
+            charged = false;
+            id(boiler_charged_mem) = false;
+          } else {
+            charged = id(boiler_charged_mem);
+          }
+          if (!id(zwe2_boiler_source).has_state() || id(zwe2_boiler_source).state != src) {
+            id(zwe2_boiler_source).publish_state(src);
+          }
+          if (!id(zwe2_boiler_charged).has_state() || id(zwe2_boiler_charged).state != charged) {
+            id(zwe2_boiler_charged).publish_state(charged);
+            ESP_LOGI("Boiler", "Quelle: %s  Temperatur: %.2f°C  Speicher geladen: %s", src.c_str(), t, charged ? "Ja" : "Nein");
+          }
+
   - id: set_Power
     then:
       - lambda: !lambda |-
           float pwr = 0.0;
           float out = 0.0;
           float map_dac = 0.0;
+          id(eval_boiler).execute();
+          bool grid_ok = id(grid_last_ms) != 0 && (millis() - id(grid_last_ms)) < ${grid_timeout_s} * 1000UL;
           if (id(zwe2_over_temp).state || id(zwe2_main_on_off).state == false || id(zwe2_modul_power).state == false || id(zwe2_boiler_charged).state) {
             id(output_power) = 0.0;
           } else {
             if (id(zwe2_override).state) {
               id(output_power) = 1.0;
+            } else if (!grid_ok) {
+              id(output_power) = 0.0;
+              ESP_LOGW("Solar", "Kein neuer Netzwert seit über ${grid_timeout_s} s, Ansteuerung 0");
             } else {
               pwr = max((double)(id(solar_power) - id(zwe2_min_solar_power).state - id(battery_discharge)), 0.0);
               out = min(1.0 / id(zwe2_heater_power).state * pwr, 1.0);
@@ -462,6 +559,18 @@ script:
                 id(output_power) = 0.0;
               }
             }
+          }
+          // Rueckmeldung: angefordert, aber keine Leistungsaufnahme gemessen
+          float meas = id(heater_measured).state;
+          bool demand = id(output_power) > 0.0 && id(output_power) >= id(zwe2_min_output).state / 100.0;
+          if (demand && !std::isnan(meas) && meas < ${noflow_power_w}) {
+            if (id(no_flow_since_ms) == 0) id(no_flow_since_ms) = millis();
+            if (millis() - id(no_flow_since_ms) >= ${noflow_delay_s} * 1000UL) {
+              id(zwe2_no_flow).publish_state(true);
+            }
+          } else {
+            id(no_flow_since_ms) = 0;
+            id(zwe2_no_flow).publish_state(false);
           }
           if (id(output_power) > 0.0) {
             map_dac = ((id(zwe2_max_output_volt).state - id(zwe2_min_output_volt).state)*id(output_power)+id(zwe2_min_output_volt).state)/id(zwe2_max_output_volt).state;
