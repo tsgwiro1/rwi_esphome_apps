@@ -460,8 +460,7 @@ Was bleibt:
 * **Der Fühler-Watchdog ist kollektiv.** Er wird wahr, sobald *irgendeiner*
   der vier Fühler des Speichermonitors stale ist, und sagt nicht welcher. Hängt
   nur S3, wechselt diese Steuerung trotzdem auf den Ersatzfühler. Das ist
-  unschädlich, aber unscharf; genauer ginge es nur mit einer Aussage je Fühler
-  im Speichermonitor.
+  unschädlich, aber unscharf.
 * **Der Ersatzfühler hat keinen eigenen Watchdog.** Er fällt nur aus der
   Rangfolge, wenn Home Assistant ihn `unavailable` setzt. Hängt die
   `luxtronik`-Integration, ohne das zu tun, hält er seinen letzten Wert. Das
@@ -527,13 +526,13 @@ Was bleibt:
 * **Es gibt keinen Energie- und keinen Betriebsstundenzähler.** Wie viele
   Kilowattstunden der Heizstab über den Tag eingetragen hat, geht aus dem Gerät
   nicht hervor; es liefert nur die momentane Ansteuerung in Prozent. Ein
-  `total_increasing`-Zähler analog zu `wp-solar-monitor` fehlt und wäre die
-  grösste funktionale Lücke.
+  `total_increasing`-Zähler fehlt und wäre die grösste funktionale Lücke.
 * **Kein Hysteresefenster an der Einschaltschwelle.** Pendelt der Überschuss um
   die Grenze von «Min Heater Output», springt die Ansteuerung im 5-s-Takt
   zwischen 0 und 20 %. Die Rückaddition der Eigenaufnahme dämpft das, solange
   «Power Heater» stimmt **und** der Heizstab tatsächlich Leistung aufnimmt (siehe
-  vorigen Punkt) - sie ist der einzige Schutz dagegen.
+  «Die Rückaddition rechnet weiter mit dem Sollwert» oben) - sie ist der einzige
+  Schutz dagegen.
 * **Die fünf importierten Home-Assistant-Sensoren tragen `name: none`.** Zusammen mit
   `internal: True` entsteht ohnehin keine Entität, der Name ist also
   wirkungslos - er sieht in der YAML aber aus wie einer.
