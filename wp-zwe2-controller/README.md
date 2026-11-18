@@ -1,6 +1,6 @@
 # wp-zwe2-controller - PV-geführter Heizstab im Wärmespeicher
 
-![Version](https://img.shields.io/badge/version-1.0.1-blue)
+![Version](https://img.shields.io/badge/version-1.0.2-blue)
 [![ESPHome](https://img.shields.io/badge/ESPHome-Ready-03a9f4?logo=esphome&logoColor=white)](https://esphome.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -267,6 +267,12 @@ Einstellbare Parameter, alle neustartfest und in der Kategorie `config`:
 | `number.wp_zwe2_controller_100_power_2` | 0 - 10 V | 0.01 | 8.95 |
 | `number.wp_zwe2_controller_hyst_fan` | 0 - 25 K | 0.1 | 4.5 |
 | `number.wp_zwe2_controller_hyst_charge` | 0 - 25 K | 0.1 | 2.0 |
+
+Die drei Temperaturen tragen `device_class: temperature` mit «°C», die beiden
+Leistungen `power` mit «W». Die beiden Hysteresen sind Temperaturdifferenzen
+und haben **keine** Geräteklasse, nur die Einheit «K»: mit
+`device_class: temperature` würde Home Assistant «K» als absolute Temperatur
+lesen und 4.5 K als −268.65 °C anzeigen.
 
 Dazu die Diagnose-Entitäten aus `common/diagnostics.yaml` (Kategorien 2.x bis
 6.x: WLAN, Netzwerk, System, Versionen, Neustart-Buttons).

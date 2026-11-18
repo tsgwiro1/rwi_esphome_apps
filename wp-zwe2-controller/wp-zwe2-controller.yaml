@@ -29,7 +29,7 @@ esp32:
 
 # HIER überschreiben wir die Grenzen für den starken ESP32
 substitutions:
-  fw_version: "1.0.1"
+  fw_version: "1.0.2"
   diag_min_heap_ok: "80000"       # 80kb ist gut für ESP32
   diag_min_heap_critical: "40000" # 40kb ist kritisch
 
@@ -160,6 +160,7 @@ number:
   - platform: template
     name: "T Fan Start"
     device_class: TEMPERATURE
+    unit_of_measurement: "°C"
     optimistic: true
     restore_value: true
     id: zwe2_fan_start_temp
@@ -172,6 +173,7 @@ number:
   - platform: template
     name: "Tmax Module"
     device_class: TEMPERATURE
+    unit_of_measurement: "°C"
     optimistic: true
     restore_value: true
     id: zwe2_max_temp
@@ -184,6 +186,7 @@ number:
   - platform: template
     name: "Tmax Boiler"
     device_class: TEMPERATURE
+    unit_of_measurement: "°C"
     optimistic: true
     restore_value: true
     id: zwe2_max_temp_boiler
@@ -196,6 +199,7 @@ number:
   - platform: template
     name: "Power Solar Min"
     device_class: POWER
+    unit_of_measurement: "W"
     optimistic: true
     restore_value: true
     id: zwe2_min_solar_power
@@ -208,6 +212,7 @@ number:
   - platform: template
     name: "Power Heater"
     device_class: POWER
+    unit_of_measurement: "W"
     optimistic: true
     restore_value: true
     id: zwe2_heater_power
@@ -258,7 +263,7 @@ number:
 
   - platform: template
     name: "Hyst Fan"
-    device_class: TEMPERATURE
+    unit_of_measurement: "K"
     optimistic: true
     restore_value: true
     id: zwe2_hyst_fan
@@ -270,7 +275,7 @@ number:
 
   - platform: template
     name: "Hyst Charge"
-    device_class: TEMPERATURE
+    unit_of_measurement: "K"
     optimistic: true
     restore_value: true
     id: zwe2_hyst_charge

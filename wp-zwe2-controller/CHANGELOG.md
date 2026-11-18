@@ -2,6 +2,23 @@
 
 Alle nennenswerten Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.0.2] - 2026-11-18
+
+### Einheiten für die Parameter-Numbers
+
+* **Sieben `number`-Entitäten hatten eine Geräteklasse, aber keine Einheit.**
+  Home Assistant meldet das seit 2026.11.2 beim Start als «native unit of
+  measurement 'None' which is not a valid unit for the device class» und lehnt
+  es ab 2027.5 ab.
+* **«T Fan Start», «Tmax Module», «Tmax Boiler»** bekommen «°C», **«Power Solar
+  Min», «Power Heater»** bekommen «W».
+* **«Hyst Fan», «Hyst Charge»** verlieren `device_class: TEMPERATURE` und
+  bekommen «K». Sie sind Temperaturdifferenzen; mit der Geräteklasse würde HA
+  «K» als absolute Temperatur nach °C umrechnen.
+* Name, `id`, Bereich, Schritt und `restore_value` sind unverändert, die
+  Entity-IDs und die im NVS gespeicherten Werte bleiben erhalten. Die Lambdas
+  rechnen nur mit `.state` und sind nicht betroffen.
+
 ## [1.0.1] - 2026-10-31
 
 ### OTA verschlüsselt mit dem API-Schlüssel
