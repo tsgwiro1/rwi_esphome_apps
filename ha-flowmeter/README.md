@@ -193,10 +193,9 @@ relevant und ein Punkt für die spätere funktionale Durchsicht.
   `device_class: water` nimmt das Wasser-Dashboard von Home Assistant den
   Zähler nicht an.
 * **Kalibrier-Regler pollt.** «Konfig: Impulse pro Liter» wertet sein Lambda im
-  60-Sekunden-Takt aus und meldet dabei immer denselben Wert. Bei
-  `ha-irrigation` sind die Konfigurationsregler dafür auf
-  `update_interval: never` umgestellt und werden beim Boot einmal publiziert -
-  dasselbe Muster liesse sich hier anwenden.
+  60-Sekunden-Takt aus und meldet dabei immer denselben Wert. Abhilfe:
+  `update_interval: never` setzen und den Wert einmal im `on_boot` sowie im
+  `set_action` publizieren.
 * **Kein Schutz gegen Fehlimpulse.** Ein prellender oder dauerhaft
   geschlossener Kontakt zählt ungebremst hoch; es gibt keine Plausibilitäts-
   oder Maximalratenprüfung und keinen Weg, einen zu hohen Zählerstand zu
