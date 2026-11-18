@@ -176,8 +176,8 @@ Wird ein Fühler getauscht, muss die Adresse hier nachgezogen werden - sonst
 bleibt der betreffende Sensor ohne Wert.
 
 **Bildmaterial:** Die Icons (`pic/wlan.png`, `pic/hygrometer.png`,
-`pic/thermometer.png`, `pic/arrow.png`) liegen wie bei den übrigen
-Display-Projekten in `~/esphome/pic/` und sind nicht Teil dieses Repositories.
+`pic/thermometer.png`, `pic/arrow.png`) liegen in `~/esphome/pic/` und sind
+nicht Teil dieses Repositories.
 
 ---
 
@@ -260,11 +260,7 @@ Recorder-Historie, statt sie aus dem Melde-Intervall zu schätzen.
 * **Der Watchdog schützt die abgeleiteten Werte, nicht `sensor.s1` selbst.**
   Fällt ein Fühler aus, gehen «Layer Position» und «Highest Temp Difference»
   auf `unknown` und der Binärsensor auf `on` - `sensor.s1` behält aber seinen
-  letzten Wert. Das ist erheblich, weil `sensor.s1` dem
-  [`wp-zwe2-controller`](../wp-zwe2-controller) als Speicherverriegelung für
-  einen 4.5-kW-Heizstab dient und dort **kein Alterungscheck** stattfindet. Wer
-  die Lücke schliessen will, lässt den ZWE2 zusätzlich den Binärsensor prüfen -
-  das ist eine Änderung am ZWE2, nicht an diesem Gerät.
+  letzten Wert. Wer `sensor.s1` weiterverwendet, prüft den Binärsensor mit.
 * **Die Zeitanzeige hängt an Home Assistant.** Es gibt keine RTC und keinen
   SNTP-Fallback.
 * **Die Frist des Watchdogs ist fest verdrahtet.** 300 s stehen als
