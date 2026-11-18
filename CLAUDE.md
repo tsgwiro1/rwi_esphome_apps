@@ -97,6 +97,23 @@ EXIF mit Ort und Gerät, PDFs den Autornamen. Was die Doku an einem echten Wert
 zeigen müsste, wird anonymisiert — `192.0.2.0/24` für Adressen,
 `AA:BB:CC:DD:EE:FF` für MACs, ein erfundener Ort für Koordinaten.
 
+## Doku beschreibt nur das eigene Gerät
+
+**README, HARDWARE.md und CHANGELOG eines Projekts handeln ausschliesslich von
+diesem Projekt.** Keine Aussagen über andere Geräte: nicht über ihr Verhalten,
+ihre Lücken, Aufgaben dort oder wie sie etwas gelöst haben. Erlaubt ist nur,
+was zur gebauten Funktion gehört, also was das Gerät von einem anderen
+importiert oder für andere liefert.
+
+**Warum:** Eine Aussage über ein fremdes Gerät veraltet, sobald dort etwas
+geändert wird, und im eigenen Projekt merkt es niemand. Belegt am 2026-11-18.
+Die README des Speichermonitors meldete eine Lücke im ZWE2 als offen, obwohl
+sie dort mit V1.1.0 behoben war.
+
+**Wie umsetzen:** Was beim eigenen Gerät über ein anderes auffällt, geht als
+Auftrag in dessen `OFFENE-PUNKTE.md`, nicht in die eigene Doku. Gepushte
+CHANGELOG-Einträge bleiben, wie sie sind.
+
 ## Versionierung
 
 Jede inhaltliche Änderung an einem Projekt hebt dessen Version nach SemVer
